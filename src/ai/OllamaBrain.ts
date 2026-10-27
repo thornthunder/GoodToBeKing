@@ -311,6 +311,19 @@ export class OllamaBrain implements Brain {
     }
   }
 
+  async onStuck(target: string, ctx: BrainContext): Promise<string | null> {
+    const member = this.court.find(target)
+    const who = member ? `the ${member.title}` : target
+    return this.generate(ctx, {
+      eventPrompt:
+        `[event] You are walking after ${who} but cannot find a way to reach them from where ` +
+        'you are: they may be flying, up high, behind a closed door or across water. Tell them ' +
+        'kindly in one short sentence, and say you will wait here and follow again once you can ' +
+        'reach them.',
+      fallback: `I cannot find a way to you from here, ${member?.address ?? 'my friend'}. I shall wait and follow when I can.`,
+    })
+  }
+
   async onNotice(event: ChatEvent, ctx: BrainContext): Promise<string | null> {
     const notice = event.notice
     const subject = notice?.params[0]

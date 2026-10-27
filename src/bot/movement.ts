@@ -24,6 +24,9 @@ type PathfinderBot = MineflayerBot & { pathfinder: Pathfinder }
 export class Movement {
   private activity: Activity = null
   private readonly bot: PathfinderBot
+  private readonly stuck = new StuckDetector()
+  /** Called once when the bot cannot find a way to the player it is walking to. */
+  onStuck?: (target: string) => void
 
   constructor(
     bot: MineflayerBot,
@@ -40,9 +43,30 @@ export class Movement {
         this.activity = null
       }
     })
+    // Tread water: the pathfinder only holds jump in water while it is walking a path, so an
+    // idle or blocked bot would sink to the bottom. Hold jump whenever in water or lava (the
+    // physics engine lifts the bot a little each tick), and let go once out.
+    let floating = false
+    this.bot.on('physicsTick', () => {
+      const entity = this.bot.entity as unknown as { isInWater?: boolean; isInLava?: boolean }
+      const inLiquid = Boolean(entity?.isInWater || entity?.isInLava)
+      if (inLiquid) {
+        this.bot.setControlState('jump', true)
+        if (!floating) this.log.info('in water: swimming up')
+        floating = true
+      } else if (floating) {
+        floating = false
+        this.bot.setControlState('jump', false)
+      }
+    })
     events.on('path_update', (result: { status: string }) => {
-      if (result.status === 'noPath' || result.status === 'timeout') {
-        this.log.debug(`pathfinder: ${result.status} while ${this.describe() ?? 'idle'}`)
+      const change = this.stuck.update(result.status)
+      const target = this.activity?.target
+      if (change === 'stuck' && target) {
+        this.log.info(`cannot find a way to ${target}; waiting for them to come within reach`)
+        this.onStuck?.(target)
+      } else if (change === 'unstuck' && target) {
+        this.log.info(`found a way to ${target} again`)
       }
     })
   }
@@ -73,6 +97,7 @@ export class Movement {
   follow(player: string): MoveResult {
     const entity = this.bot.players[player]?.entity
     if (!entity) return 'not_visible'
+    this.stuck.reset()
     this.activity = { kind: 'following', target: player }
     this.bot.pathfinder.setGoal(new goals.GoalFollow(entity, FOLLOW_DISTANCE), true)
     this.log.info(`following ${player}`)
@@ -83,6 +108,7 @@ export class Movement {
   comeTo(player: string): MoveResult {
     const entity = this.bot.players[player]?.entity
     if (!entity) return 'not_visible'
+    this.stuck.reset()
     this.activity = { kind: 'coming', target: player }
     const { x, y, z } = entity.position
     this.bot.pathfinder.setGoal(new goals.GoalNear(x, y, z, COME_DISTANCE))
@@ -93,11 +119,46 @@ export class Movement {
   stop(): void {
     if (this.activity) this.log.info(`stopped ${this.describe()}`)
     this.activity = null
+    this.stuck.reset()
     this.bot.pathfinder.setGoal(null)
   }
 
   /** Stop if the given player was the one we were walking to or after. */
   forget(player: string): void {
     if (this.activity && this.activity.target.toLowerCase() === player.toLowerCase()) this.stop()
+  }
+}
+
+/** Path searches that must fail in a row before the bot counts as stuck. */
+export const STUCK_AFTER_FAILURES = 5
+
+/**
+ * Turns the pathfinder's stream of path results into two events: 'stuck' once after several
+ * failed searches in a row, and 'unstuck' once a path is found again.
+ */
+export class StuckDetector {
+  private failures = 0
+  private reported = false
+
+  update(status: string): 'stuck' | 'unstuck' | null {
+    if (status === 'noPath' || status === 'timeout') {
+      this.failures++
+      if (!this.reported && this.failures >= STUCK_AFTER_FAILURES) {
+        this.reported = true
+        return 'stuck'
+      }
+      return null
+    }
+    this.failures = 0
+    if (this.reported) {
+      this.reported = false
+      return 'unstuck'
+    }
+    return null
+  }
+
+  reset(): void {
+    this.failures = 0
+    this.reported = false
   }
 }

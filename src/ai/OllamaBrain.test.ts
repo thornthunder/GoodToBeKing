@@ -237,6 +237,13 @@ describe('OllamaBrain court behaviour', () => {
     expect(calls[0].at(-1)?.content).toContain('Only the royal family may ask you to walk')
   })
 
+  it('explains kindly when it cannot reach the royal it follows', async () => {
+    const { brain, calls } = makeBrain('Alas, I cannot reach you up there, Your Highness.')
+    const reply = await brain.onStuck('LittleOne42', seen('LittleOne42'))
+    expect(reply).toBe('Alas, I cannot reach you up there, Your Highness.')
+    expect(calls[0].at(-1)?.content).toContain('cannot find a way to reach them')
+  })
+
   it('tells the model what it is doing right now', () => {
     const { brain } = makeBrain('unused')
     const prompt = brain.systemPrompt({ ...seen('LittleOne42'), activity: 'following LittleOne42' })

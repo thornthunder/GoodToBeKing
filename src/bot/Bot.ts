@@ -149,6 +149,14 @@ export class Bot extends EventEmitter {
     this.body = body
     this.client = client
     this.movement = new Movement(body, this.log.child('move'))
+    this.movement.onStuck = (target) => {
+      this.brain
+        .onStuck(target, this.context())
+        .then((text) => {
+          if (text) this.chat(text)
+        })
+        .catch((err) => this.log.warn(`brain.onStuck failed: ${errMsg(err)}`))
+    }
     body.on('error', (err) => this.log.debug(`body error: ${errMsg(err)}`))
     body.once('spawn', () => this.movement?.configure())
     this.attachHandlers(client)

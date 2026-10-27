@@ -50,4 +50,6 @@ export interface Brain {
   onChat(event: ChatEvent, ctx: BrainContext): Promise<BrainReply | null>
   /** Called for translated server notices (deaths, sleeping, achievements, ...). */
   onNotice(event: ChatEvent, ctx: BrainContext): Promise<string | null>
+  /** Called once when the bot cannot find a way to the player it is following or walking to. */
+  onStuck(target: string, ctx: BrainContext): Promise<string | null>
 }

@@ -5,6 +5,7 @@ export interface Script {
   onPlayerJoin?: (player: string, ctx: BrainContext) => string | null
   onChat?: (event: ChatEvent, ctx: BrainContext) => string | BrainReply | null
   onNotice?: (event: ChatEvent, ctx: BrainContext) => string | null
+  onStuck?: (target: string, ctx: BrainContext) => string | null
 }
 
 /** Deterministic brain for tests and smoke runs: no model involved. */
@@ -26,5 +27,9 @@ export class ScriptedBrain implements Brain {
 
   async onNotice(event: ChatEvent, ctx: BrainContext): Promise<string | null> {
     return this.script.onNotice?.(event, ctx) ?? null
+  }
+
+  async onStuck(target: string, ctx: BrainContext): Promise<string | null> {
+    return this.script.onStuck?.(target, ctx) ?? null
   }
 }
