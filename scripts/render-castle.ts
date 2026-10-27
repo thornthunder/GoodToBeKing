@@ -84,5 +84,5 @@ for (let k = 0; k < storeys; k++) {
       put(1 + k * (W + gap) + x, 1 + z, colour(top.block))
     }
 }
-png.data.length && fs.writeFileSync(out, PNG.sync.write(png))
+fs.writeFileSync(out, PNG.sync.write(png))
 console.log(`${plan.title}: ${storeys} storeys drawn to ${out}`)
