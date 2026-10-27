@@ -63,4 +63,6 @@ async function main(): Promise<void> {
   log.info(
     `${result.design.name}: ${plan.sections.length} sections, ${plan.sections.reduce((n, s) => n + s.cells.length, 0)} blocks; summary: ${result.summary}`
   )
+  // The HTTP client keeps the process alive otherwise.
+  process.exit(0)
 }

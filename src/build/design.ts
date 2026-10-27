@@ -238,7 +238,9 @@ export function validateDesign(d: CastleDesign): string[] {
       const l = b.ladder
       if (!l || !isInt(l.x) || !isInt(l.z)) err(`${label}: needs a ladder (x, z) to join its storeys`)
       else if (l.x <= b.x || l.x >= b.x + b.width - 1 || l.z <= b.z || l.z >= b.z + b.depth - 1)
-        err(`${label}: the ladder must stand inside the building, not in its walls`)
+        err(
+          `${label}: the ladder must stand inside the building, not in its walls (x from ${b.x + 1} to ${b.x + b.width - 2}, z from ${b.z + 1} to ${b.z + b.depth - 2}, counted from the castle's corner)`
+        )
       else if (
         l.x !== b.x + 1 &&
         l.x !== b.x + b.width - 2 &&
@@ -255,7 +257,10 @@ export function validateDesign(d: CastleDesign): string[] {
         if (r.honour !== undefined && !SIDES.includes(r.honour)) err(`${rl}: honour must be north, south, east or west`)
         if (!ROOM_TYPES.includes(r.type)) err(`${rl}: unknown type "${r.type}"; use one of ${ROOM_TYPES.join(', ')}`)
         if (![r.x, r.z, r.width, r.depth].every(isInt)) err(`${rl}: x, z, width and depth must be whole numbers`)
-        else if (!inside(r, b)) err(`${rl}: must lie inside its building`)
+        else if (!inside(r, b))
+          err(
+            `${rl}: must lie inside its building (rooms use the same x and z as buildings, counted from the castle's corner, not from the building's own corner)`
+          )
         else if (r.width < 4 || r.depth < 4) err(`${rl}: must be at least 4 by 4 (walls included)`)
       }
       for (let i = 0; i < rooms.length; i++)
