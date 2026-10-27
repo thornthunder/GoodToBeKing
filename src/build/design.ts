@@ -74,6 +74,8 @@ export interface BuildingDesign extends Rect {
   doors?: Opening[]
   /** Column of the ladder that joins the storeys (needed with more than one storey). */
   ladder?: { x: number; z: number }
+  /** Who should build it (the overlord's assignment); others help once they run out of work. */
+  crew?: string[]
 }
 
 export interface TowerDesign {

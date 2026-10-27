@@ -115,7 +115,9 @@ export class Mason {
       this.log.warn(`${job.title}: ${errMsg(err)}`)
     } finally {
       result.cancelled = this.cancelled
-      result.missing = this.countMissing(job)
+      const left = this.countMissing(job)
+      result.missing = left.missing
+      result.blocked = left.blocked
       await this.land()
       this.current = null
     }
@@ -126,15 +128,21 @@ export class Mason {
     return result
   }
 
-  countMissing(job: Job): number {
+  /** Planned blocks not in place, and those where something a player made stands (left alone). */
+  countMissing(job: Job): { missing: number; blocked: number } {
     let missing = 0
+    let blocked = 0
     for (const c of job.cells) {
       const name = this.bot.blockAt(new Vec3(c.x, c.y, c.z))?.name
       if (c.block === 'air') {
         if (c.remove && name && !AIR.test(name)) missing++
-      } else if (name !== c.block) missing++
+      } else if (name !== c.block) {
+        const foreign = name !== undefined && !AIR.test(name) && !SOFT.test(name) && !LIQUID.test(name) && !NATURAL.test(name)
+        if (foreign) blocked++
+        else missing++
+      }
     }
-    return missing
+    return { missing, blocked }
   }
 
   /** Dig natural blocks off the site (top down so sand never falls), and cells that must be empty. */
@@ -451,9 +459,11 @@ export class Mason {
   private async hold(block: string, data?: number): Promise<void> {
     const want = `${block}:${data ?? 0}`
     if (this.held === want && this.bot.heldItem?.name === block) return
-    const id = this.bot.registry.itemsByName[block]?.id
-    if (id === undefined) throw new Error(`no item called ${block}`)
-    await this.bot.creative.setInventorySlot(36, new this.Item(id, 64, data ?? 0) as never)
+    const info = this.bot.registry.itemsByName[block] as { id: number; stackSize?: number } | undefined
+    if (info === undefined) throw new Error(`no item called ${block}`)
+    // Beds and cakes stack to one: the server refuses a creative stack bigger than the item allows.
+    const count = Math.max(1, Math.min(64, info.stackSize ?? 64))
+    await this.bot.creative.setInventorySlot(36, new this.Item(info.id, count, data ?? 0) as never)
     this.bot.setQuickBarSlot(0)
     this.held = want
   }

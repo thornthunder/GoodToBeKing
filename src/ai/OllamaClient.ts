@@ -14,6 +14,11 @@ export interface ChatOptions {
   temperature?: number
   /** Overrides the configured model for this request. */
   model?: string
+  /**
+   * Stream the answer and join it up. Needed for answers that take minutes: without streaming,
+   * Node's fetch gives up when no response headers arrive within five minutes.
+   */
+  stream?: boolean
 }
 
 export interface OllamaHealth {
@@ -67,13 +72,36 @@ export class OllamaClient implements ChatModel {
     if (think !== undefined) request.think = think
 
     const started = Date.now()
-    const response = await this.ollama.chat(request)
+    const response = opts.stream ? await this.streamed(request) : await this.ollama.chat(request)
     const ms = Date.now() - started
     this.log.debug(
       `chat(${model}) ${ms}ms, prompt=${response.prompt_eval_count ?? '?'} tokens, ` +
         `output=${response.eval_count ?? '?'} tokens, done=${response.done_reason}`
     )
     return response
+  }
+
+  /** Free the server's memory of a model now (the overlord's big model, so the court's comes back). */
+  async unload(model: string): Promise<void> {
+    try {
+      await this.ollama.generate({ model, prompt: '', keep_alive: 0, stream: false })
+    } catch (err) {
+      this.log.debug(`could not unload ${model}: ${errMsg(err)}`)
+    }
+  }
+
+  private async streamed(request: ChatRequest): Promise<ChatResponse> {
+    const parts = await this.ollama.chat({ ...request, stream: true })
+    let content = ''
+    let thinking = ''
+    let last: ChatResponse | undefined
+    for await (const part of parts) {
+      content += part.message?.content ?? ''
+      thinking += part.message?.thinking ?? ''
+      last = part
+    }
+    if (!last) throw new Error('empty answer')
+    return { ...last, message: { ...last.message, role: 'assistant', content, ...(thinking ? { thinking } : {}) } }
   }
 
   /**

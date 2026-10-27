@@ -27,6 +27,8 @@ interface SectionState {
   by?: string
   attempts: number
   missing?: number
+  /** Given one more try after a restart (new code may place what the old could not). */
+  touchedUp?: boolean
 }
 
 interface WorksFile {
@@ -49,6 +51,8 @@ export class Works {
   /** Worker name -> section id. */
   private readonly running = new Map<string, string>()
   private readonly centres = new Map<string, { x: number; z: number }>()
+  /** 'finished' was reported (or the works were already finished when loaded). */
+  private announced = false
   paused = false
 
   constructor(
@@ -61,6 +65,11 @@ export class Works {
     for (const s of plan.sections) {
       const st = (this.state.sections[s.id] ??= { status: 'todo', attempts: 0 })
       if (st.status === 'doing') st.status = 'todo' // interrupted by a restart
+      if (st.status === 'done' && (st.missing ?? 0) > 0 && !st.touchedUp) {
+        st.status = 'todo'
+        st.attempts = MAX_ATTEMPTS - 1
+        st.touchedUp = true
+      }
       const xs = [...s.cells.map((c) => c.x), ...s.columns.map((c) => c.x)]
       const zs = [...s.cells.map((c) => c.z), ...s.columns.map((c) => c.z)]
       this.centres.set(s.id, {
@@ -68,6 +77,7 @@ export class Works {
         z: zs.reduce((a, b) => a + b, 0) / Math.max(1, zs.length),
       })
     }
+    this.announced = this.finished
     this.save()
   }
 
@@ -115,9 +125,12 @@ export class Works {
         s.after.every((id) => this.state.sections[id]?.status === 'done')
     )
     if (!ready.length) return undefined
+    // Sections meant for this worker first, then unassigned ones, then other crews' (rather than idle).
+    const fit = (s: Section) => (!s.crew?.length ? 1 : s.crew.some((n) => n.toLowerCase() === w.name.toLowerCase()) ? 0 : 2)
+    const best = Math.min(...ready.map(fit))
     // Among the first few in plan order, the closest to the worker.
     const pos = w.position()
-    const options = ready.slice(0, 4)
+    const options = ready.filter((s) => fit(s) === best).slice(0, 4)
     if (!pos) return options[0]
     const d = (s: Section) => {
       const c = this.centres.get(s.id)!
@@ -165,8 +178,9 @@ export class Works {
     }
     this.save()
     if (!result.cancelled) this.emit({ kind: 'done', section: s, worker, result, complete })
-    if (this.finished && this.state.finishedAt === undefined) {
-      this.state.finishedAt = Date.now()
+    if (this.finished && !this.announced) {
+      this.announced = true
+      this.state.finishedAt ??= Date.now()
       this.save()
       this.log.info(`${this.plan.title} is finished`)
       this.emit({ kind: 'finished', plan: this.plan })

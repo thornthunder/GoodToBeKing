@@ -4,11 +4,15 @@ import { CourtMemory } from '../ai/CourtMemory'
 import { HailLog } from '../ai/HailLog'
 import { OllamaBrain } from '../ai/OllamaBrain'
 import { OllamaClient } from '../ai/OllamaClient'
+import { slug } from '../build/compile'
 import { BuildLog } from '../build/BuildLog'
 import { BLUEPRINT_IDS, DEFAULT_PALETTE, type BlueprintId } from '../build/blueprints'
 import { compileDesign } from '../build/compile'
 import { validateDesign, type CastleDesign } from '../build/design'
 import { Works, type Worker, type WorksEvent } from '../build/Works'
+import { findCastleSites } from '../build/sites'
+import { Overlord } from '../ai/Overlord'
+import type { Rect } from '../build/design'
 import type { AppConfig } from '../config'
 import { CourtRoster } from '../court'
 import type { Logger } from '../logger'
@@ -34,11 +38,14 @@ export class BotManager {
   private milestone = 0
   /** All bots have had their first go at connecting; the works may begin. */
   private ready = false
+  private planning = false
+  private readonly cfg: AppConfig
 
   constructor(
     cfg: AppConfig,
     private readonly log: Logger
   ) {
+    this.cfg = cfg
     const court = new CourtRoster(cfg.court)
     const botNames = cfg.bots.map((b) => b.name)
     // Who speaks: bots in configured order for the royals; the Castellan first for guests.
@@ -63,7 +70,8 @@ export class BotManager {
         staff,
       })
       const bot = new Bot(botCfg, brain, botLog, {
-        fellowBots: botNames,
+        // Our own helper scripts' players (the surveyor) are ignored like fellow bots.
+        fellowBots: [...botNames, ...(process.env.IGNORE_PLAYERS ?? 'Surveyor').split(',').filter(Boolean)],
         buildLog: builds,
         floor,
         court,
@@ -74,7 +82,98 @@ export class BotManager {
       })
       this.bots.push(bot)
     }
-    if (cfg.worksDesign) this.startWorks(cfg.worksDesign)
+    // Carry on with whatever the court was last building (the overlord's design, once there is one).
+    const current = this.courtWorks().current ?? cfg.worksDesign
+    if (current) this.startWorks(current)
+  }
+
+  /** Which designs the court has built and is building, kept in .state/court-works.json. */
+  private courtWorks(): { current?: string; built: string[] } {
+    try {
+      return JSON.parse(fs.readFileSync(path.resolve(STATE_DIR, 'court-works.json'), 'utf8')) as { current?: string; built: string[] }
+    } catch {
+      return { built: [] }
+    }
+  }
+
+  private saveCourtWorks(state: { current?: string; built: string[] }): void {
+    fs.mkdirSync(path.resolve(STATE_DIR), { recursive: true })
+    fs.writeFileSync(path.resolve(STATE_DIR, 'court-works.json'), JSON.stringify(state, null, 2))
+  }
+
+  /**
+   * The court plans its next castle on its own: the bots survey the land they can see, the
+   * overlord (a larger model) chooses a site and designs the castle, and the works begin.
+   */
+  async planNextCastle(): Promise<void> {
+    if (this.planning) return
+    this.planning = true
+    const foreman = this.foreman()
+    try {
+      const scout = this.bots.find((b) => b.state.status === 'spawned')
+      const zone = this.bots.find((b) => b.cfg.buildZone)?.cfg.buildZone
+      if (!scout || !zone) return this.log.warn('cannot plan a castle: no bot in the world or no build zone')
+      await foreman?.speak(
+        'Tell everyone that the master builder and you are now drawing up the plans for a second castle, ' +
+          'which the court will choose and design all by itself. Ask them to rest a moment.',
+        'The master builder and I are drawing up plans for a second castle. Rest a moment, friends!'
+      )
+      const built = this.courtWorks().built
+      const avoid: Rect[] = []
+      for (const file of [...built, this.cfg.worksDesign].filter(Boolean) as string[]) {
+        try {
+          avoid.push((JSON.parse(fs.readFileSync(path.resolve(file), 'utf8')) as CastleDesign).area)
+        } catch {
+          // a design that is gone takes no room
+        }
+      }
+      if (this.works) avoid.push(this.works.plan.area)
+      const sites = findCastleSites((x, z) => scout.topAt(x, z), zone, { avoid })
+      for (const [i, s] of sites.entries()) this.log.info(`site ${i + 1}: ${JSON.stringify(s)}`)
+      const model = process.env.OVERLORD_MODEL ?? 'gemma4:26b'
+      const ai = new OllamaClient(
+        { ...this.bots[0].cfg.ai, timeoutMs: 30 * 60_000, numCtx: 32_768, keepAlive: '2m' },
+        this.log.child('overlord')
+      )
+      const overlord = new Overlord(ai, model, this.log.child('overlord'))
+      let example: CastleDesign | undefined
+      try {
+        example = this.cfg.worksDesign ? (JSON.parse(fs.readFileSync(path.resolve(this.cfg.worksDesign), 'utf8')) as CastleDesign) : undefined
+      } catch {
+        example = undefined
+      }
+      const result = await overlord.planCastle({
+        sites,
+        crew: this.bots.filter((b) => b.cfg.works).map((b) => ({ name: b.cfg.name, role: b.cfg.role })),
+        example,
+        takenNames: [example?.name, this.works?.plan.title].filter(Boolean) as string[],
+      })
+      if (!result) {
+        await foreman?.speak(
+          'Tell everyone kindly that the plans for the second castle are not ready yet and that the court will try again later.',
+          'The plans are not ready yet, friends. We shall try again later.'
+        )
+        return
+      }
+      const file = path.join(STATE_DIR, 'designs', `${slug(result.design.name)}.json`)
+      fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true })
+      fs.writeFileSync(path.resolve(file), JSON.stringify(result.design, null, 2))
+      this.log.info(`overlord designed ${result.design.name} (${file}) on site ${JSON.stringify(result.site.area)}: ${result.summary}`)
+      const state = this.courtWorks()
+      const finished = state.current ?? this.cfg.worksDesign
+      if (finished && !state.built.includes(finished)) state.built.push(finished)
+      state.current = file
+      this.saveCourtWorks(state)
+      await foreman?.speak(
+        `Announce the plan for the second castle, ${result.design.name}, which the master builder drew ${result.site.direction} of the castle grounds: ${result.summary} Call the crew back to work.`,
+        `Behold the plan for ${result.design.name}! Back to work, all!`
+      )
+      this.startWorks(file)
+    } catch (err) {
+      this.log.warn(`planning the next castle failed: ${errMsg(err)}`)
+    } finally {
+      this.planning = false
+    }
   }
 
   /** Begin (or carry on with) building a castle design with every bot that works. */
@@ -191,8 +290,11 @@ export class BotManager {
           return
         }
         this.chatter(async () => {
+          const own = !foreman || worker === foreman
           await worker?.speak(
-            `Tell ${boss ?? 'the court'} in one short sentence that you have finished ${e.section.title}.`,
+            own
+              ? `Tell the court in one short sentence that you have just finished ${e.section.title}.`
+              : `Tell ${boss} in one short sentence that you have finished ${e.section.title}.`,
             `${e.section.title} is finished!`
           )
           if (foreman && worker && foreman !== worker && Math.random() < 0.5) {
@@ -211,6 +313,11 @@ export class BotManager {
             `Announce proudly to everyone that ${e.plan.title} is finished, and invite the King and the Princess to come and see it.`,
             `${e.plan.title} is finished! Your Majesty, Your Highness, come and see!`
           )
+          // The first castle was planned for the court; the next one the court plans itself.
+          if (process.env.WORKS_NEXT === 'overlord' && this.courtWorks().built.length === 0) {
+            await sleep(20_000)
+            await this.planNextCastle()
+          }
         }, true)
         return
     }
@@ -269,6 +376,10 @@ export class BotManager {
       this.startWorks(file)
       return
     }
+    if (verb === 'plan') {
+      void this.planNextCastle()
+      return
+    }
     const works = this.works
     if (!works) return this.log.warn('no works in progress')
     if (verb === 'pause') works.paused = true
@@ -292,6 +403,9 @@ export class BotManager {
     }
     this.ready = true
     if (this.works) this.runWorks()
+    // Finished before this start and nothing planned since: the court plans its next castle now.
+    if (this.works?.finished && process.env.WORKS_NEXT === 'overlord' && this.courtWorks().built.length === 0)
+      setTimeout(() => void this.planNextCastle(), 30_000)
   }
 
   async stopAll(): Promise<void> {

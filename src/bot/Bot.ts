@@ -24,6 +24,8 @@ import {
 } from '../build/blueprints'
 import { Mason, type Job, type JobResult } from '../build/Mason'
 import { findSite, type Point, type Site } from '../build/site'
+import { SEE_THROUGH } from '../build/sites'
+import { Vec3 as WorldVec } from 'vec3'
 import type { ChatFloor } from './ChatFloor'
 import { Movement } from './movement'
 import { loadSkin } from './skin'
@@ -198,6 +200,19 @@ export class Bot extends EventEmitter {
     if (this.dutyFollowing) this.dutyFollowing = false
     this.movement?.stop()
     return mason.work(job)
+  }
+
+  /** The top block of a column as this bot sees the world (null where nothing is loaded). */
+  topAt(x: number, z: number): { y: number; name: string } | null {
+    const body = this.body
+    if (!body) return null
+    for (let y = 130; y >= 30; y--) {
+      const block = body.blockAt(new WorldVec(x, y, z))
+      if (!block) return null
+      if (SEE_THROUGH.test(block.name)) continue
+      return { y, name: block.name }
+    }
+    return null
   }
 
   position(): Point | undefined {

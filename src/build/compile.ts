@@ -58,6 +58,8 @@ export interface Section {
   columns: FillColumn[]
   /** Ids of sections that must be finished first. */
   after: string[]
+  /** Workers this section is meant for, if the design says. */
+  crew?: string[]
 }
 
 export interface Plan {
@@ -90,6 +92,7 @@ interface Owner {
   after: string[]
   /** Storey sections of one building, so the next storey can wait for every part of this one. */
   group?: string
+  crew?: string[]
   order: number
 }
 
@@ -151,8 +154,8 @@ class Canvas {
   readonly owners = new Map<string, Owner>()
   private order = 0
 
-  owner(id: string, title: string, kind: SectionKind, after: string[] = [], group?: string): string {
-    if (!this.owners.has(id)) this.owners.set(id, { id, title, kind, after, group, order: this.order++ })
+  owner(id: string, title: string, kind: SectionKind, after: string[] = [], group?: string, crew?: string[]): string {
+    if (!this.owners.has(id)) this.owners.set(id, { id, title, kind, after, group, crew, order: this.order++ })
     return id
   }
 
@@ -366,7 +369,7 @@ function drawBuilding(
     const sameName = names.length === 1 && slug(names[0]) === base
     const what = sameName ? titled(b.name) : `${listWords(names)} of ${titled(b.name)}`
     const title = k === 0 ? what : `${what} (storey ${k + 1})`
-    const owner = c.owner(`${group}-s${k + 1}`, title, 'storey', k > 0 ? [`${group}-s${k}`] : [], group)
+    const owner = c.owner(`${group}-s${k + 1}`, title, 'storey', k > 0 ? [`${group}-s${k}`] : [], group, b.crew)
 
     // Floor layer, outer walls, interior air.
     for (let x = x0; x <= x1; x++)
@@ -635,7 +638,7 @@ const SPLIT_NAMES_Z = ['north', 'middle', 'south']
 function split(o: Owner, cells: PlanCell[], columns: FillColumn[]): Section[] {
   const total = cells.length + columns.length
   const parts = Math.min(3, Math.ceil(total / MAX_SECTION_CELLS))
-  const whole: Section = { id: o.id, title: o.title, kind: o.kind, cells, columns, after: o.after }
+  const whole: Section = { id: o.id, title: o.title, kind: o.kind, cells, columns, after: o.after, ...(o.crew ? { crew: o.crew } : {}) }
   if (parts <= 1 || o.kind === 'repair') return [whole]
   const xs = [...cells.map((cell) => cell.x), ...columns.map((col) => col.x)]
   const zs = [...cells.map((cell) => cell.z), ...columns.map((col) => col.z)]
@@ -659,6 +662,7 @@ function split(o: Owner, cells: PlanCell[], columns: FillColumn[]): Section[] {
       cells: [],
       columns: columns.filter((col) => partOf(col[axis]) === p),
       after: o.after,
+      ...(o.crew ? { crew: o.crew } : {}),
     })
   }
   for (const cell of cells) {

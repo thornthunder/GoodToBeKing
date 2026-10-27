@@ -30,6 +30,24 @@ The loopback smoke test covers connect, spawn and chat. Walking needs a real wor
 covered by `live:follow`, which joins the real server from `.env`. vitest only runs `src/`
 tests (bedboo has its own mocha suite).
 
+Building tools (each joins the real server as a temporary player, `Surveyor` or the bot named;
+the court ignores the name `Surveyor`, see `IGNORE_PLAYERS`):
+
+```bash
+corepack pnpm exec tsx scripts/plan-castle.ts config/castles/great-castle.json 73 74   # compile a design, list sections, print storey maps
+corepack pnpm exec tsx scripts/works-one.ts <design> <section id> [bot]                 # build one section with one bot
+corepack pnpm exec tsx scripts/check-section.ts <design> [section id prefix ...]         # what is not as planned, and what stands there instead
+corepack pnpm exec tsx scripts/survey-terrain.ts x1 z1 x2 z2 [baseY] [types] [json=f]    # height or block-type map of an area
+corepack pnpm exec tsx scripts/overlord-plan.ts <terrain.json> <out.json> [model]        # let the overlord design a castle offline
+```
+
+### Commands to a running app
+
+Write a line to a file named `.command` in the project root (checked every second):
+`<bot> build <blueprint> x y z [for <player>]`, `<bot> resume <blueprint> x y z [turns N]`,
+`<bot> undo`, and for the court's building works `works status|pause|resume`,
+`works start <design.json>` and `works plan` (the overlord designs the next castle now).
+
 ### Stopping a running app
 
 Create a file named `.stop` in the project root. The app checks for it every second, sends
@@ -81,6 +99,42 @@ Windows, killing a background `npx` shell does not kill its node children at all
 - `ai/riddles.ts`: the riddle book. Small models invent riddles whose hints and answers do
   not fit, so bots only tell riddles from this list; the open riddle and its answer sit in the
   system prompt until it is guessed, given up or 15 minutes pass.
+- `bot/ChatFloor.ts`: one bot answers each line (the one named, the one already talking with that
+  player, or the herald: the first bot online, the Castellan first for guests). Only the herald
+  hails and reacts to notices. Guards with `duty: escort` follow their royal when one is in sight.
+
+### The court's building works
+
+- The court is `config/bots.json` (Merlin, Festaris the Castellan, guards Bruce and Dyke,
+  apprentices Henry and George); `works: true` puts a bot in the building crew.
+- `build/design.ts`: the castle design language (area, curtain wall, gates, towers, buildings with
+  storeys of typed rooms, features). Coordinates are relative to the area's north-west corner;
+  rooms include their walls and share wall lines. `validateDesign` explains problems in plain
+  sentences (they are fed back to the overlord). `config/castles/great-castle.json` is the first.
+- `build/compile.ts`: design -> Plan of sections (work orders). Draws into one block map where
+  later drawings win (courtyard, curtain wall, towers, buildings, features), splits sections over
+  `MAX_SECTION_CELLS` along their long axis, and gives each ground section its columns: natural
+  blocks above the floor are cleared, gaps below are filled down to the ground. `existing` builds
+  (Merlin's first castle) are kept and only repaired (foundations, a back gate).
+- `build/rooms.ts`: furniture per room type, from plain blocks. Directional blocks carry `from`,
+  the side the builder stands on (beds: head away from it; chests and furnaces face it); ladders
+  carry `against`.
+- `build/Mason.ts`: builds one section by creative flight: clears natural blocks top down
+  (`NATURAL`; never anything players made, except `remove` cells), fills, then places bottom
+  layer first, hovering above the layer so it is never shut in under a ceiling. Cells where a
+  player-made block stands (the village path) are counted as `blocked`, not missing.
+- `build/Works.ts`: hands free workers the next ready section (prerequisites done, own crew
+  first, nearest of the first few), retries incomplete sections (3 tries), keeps state in
+  `.state/works-<plan>.json`, and gives incomplete sections one more try after a restart.
+  `BotManager` runs it every 5 s and turns its events into work talk: the Castellan assigns, the
+  worker answers (at most one exchange per 40 s, none within 90 s of a royal speaking).
+- `build/sites.ts` + `ai/Overlord.ts`: when the castle is finished and `WORKS_NEXT=overlord`, the
+  bots survey what they can see for open natural ground (8 blocks clear of anything players
+  made), the overlord model (`OVERLORD_MODEL`, gemma4:26b) picks a site and writes a design,
+  which is validated and sent back with every problem until sound (6 rounds). The design is
+  saved in `.state/designs/` and `.state/court-works.json` records what was built and what is
+  current. The overlord streams its answers and unloads its model afterwards.
+
 - Silence guard: when a royal names the bot (even misspelled, `mentionsNameLoosely`) or answers
   the bot's last line and the model replies `[silent]`, `generate` asks once more with a note.
 - `CourtMemory` re-reads its file when the mtime changes, so hand edits are safe while running.
@@ -90,6 +144,12 @@ Windows, killing a background `npx` shell does not kill its node children at all
 
 - The bots must work **without operator rights**: no `/tp`, `/fill`, `/setblock`, `/give`.
   Movement and building have to be done through player-level packets.
+- Building happens within `BUILD_RADIUS` (100) of `BUILD_CENTER` (105, 75, 122). The princess's
+  house and the village paths lie south of the castle; never dig player-made blocks.
+- The court and the overlord share one Ollama server with a small GPU: the court's gemma4:e4b
+  must stay loaded (`keep_alive` 24h). A big model evicts it and the court's replies time out
+  (they fall back to fixed lines), so the overlord only runs between castles and unloads itself.
+  gemma4:31b runs half on the CPU there (5 tokens/s); gemma4:26b manages about 27.
 
 ## Protocol notes (bedrock-protocol 3.60, Bedrock 1.26.x)
 
@@ -122,6 +182,15 @@ platform_chat_id, has_filtered_message, filtered_message`.
   start" on every port) while the native _client_ works. `jsp-raknet` only speaks RakNet
   protocol 10 and the native backend speaks 11 for 1.19.30+, so the smoke test runs
   jsp-raknet on both sides. Real servers need the native client (`MC_RAKNET_BACKEND` empty).
+
+## Building notes
+
+- Creative stacks must not exceed the item's stack size: a stack of 64 beds or cakes is refused
+  with "item stack request rejected (status 51)". The mason asks for `stackSize`.
+- A creative entry is matched by item and metadata: bed colours are the bed item's data value.
+- Node's fetch gives up after five minutes without response headers; long model answers must be
+  streamed (`ChatOptions.stream`).
+- With bash in this environment, `a && b && c &` backgrounds the whole chain.
 
 ## Conventions
 
