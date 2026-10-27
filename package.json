@@ -35,11 +35,13 @@
     "mineflayer-bedrock": "workspace:*",
     "mineflayer-pathfinder": "2.4.5",
     "ollama": "^0.6.4",
+    "pngjs": "^7.0.0",
     "vec3": "0.1.10"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.5",
+    "@types/pngjs": "^6.0.5",
     "eslint": "^10.13.0",
     "prettier": "^3.9.10",
     "tsx": "^4.23.15",

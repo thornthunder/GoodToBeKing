@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import fs from 'node:fs'
 import path from 'node:path'
+import type { SkinConfig } from './bot/skin'
 import { loadCourt, type CourtConfig } from './court'
 import { isLogLevel, type LogLevel } from './logger'
 
@@ -65,6 +66,8 @@ export interface BotConfig {
   ai: OllamaConfig
   chat: ChatConfig
   autoReconnect: boolean
+  /** The bot's look; undefined = the default skin. */
+  skin?: SkinConfig
 }
 
 export interface AppConfig {
@@ -142,6 +145,13 @@ export function defaultBotConfig(): BotConfig {
       historySize: envNum('BOT_HISTORY_SIZE', 20),
     },
     autoReconnect: envBool('BOT_AUTO_RECONNECT', true),
+    skin: env('BOT_SKIN')
+      ? {
+          texture: envStr('BOT_SKIN', ''),
+          geometry: env('BOT_SKIN_GEOMETRY'),
+          cape: env('BOT_CAPE'),
+        }
+      : undefined,
   }
 }
 
@@ -149,7 +159,10 @@ type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]>
 
 export type BotOverride = DeepPartial<BotConfig>
 
-/** Layer per-bot overrides on top of the environment defaults, one section at a time. */
+/**
+ * Layer per-bot overrides on top of the environment defaults, one section at a time. The skin is
+ * never inherited: every bot in a bots file names its own look (or wears the default skin).
+ */
 export function mergeBotConfig(base: BotConfig, override: BotOverride): BotConfig {
   return {
     ...base,
@@ -158,6 +171,7 @@ export function mergeBotConfig(base: BotConfig, override: BotOverride): BotConfi
     auth: { ...base.auth, ...override.auth },
     ai: { ...base.ai, ...override.ai },
     chat: { ...base.chat, ...override.chat },
+    skin: override.skin?.texture ? (override.skin as SkinConfig) : undefined,
   } as BotConfig
 }
 

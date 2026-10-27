@@ -9,6 +9,7 @@ import type { Logger } from '../logger'
 import { errMsg } from '../util'
 import { useLanguage } from './language'
 import { Movement } from './movement'
+import { loadSkin } from './skin'
 import {
   buildTextPacket,
   normalisePlayerList,
@@ -129,6 +130,16 @@ export class Bot extends EventEmitter {
           `Microsoft sign-in needed: open ${data.verification_uri} and enter code ${data.user_code}`
         ),
       hideErrors: true,
+    }
+    if (this.cfg.skin) {
+      try {
+        // bedrock-protocol merges `skinData` into the login's client data.
+        Object.assign(options, { skinData: loadSkin(this.cfg.skin, this.cfg.name) })
+      } catch (err) {
+        this.log.warn(
+          `could not load skin ${this.cfg.skin.texture}: ${errMsg(err)}; using the default`
+        )
+      }
     }
 
     // mineflayer-bedrock gives the bot a body (physics, world, pathfinding). Our own packet
