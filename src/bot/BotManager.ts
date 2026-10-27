@@ -68,6 +68,17 @@ export class BotManager {
       }
       this.log.info(`command: ${bot.cfg.name} builds ${id} at ${x},${y},${z} for ${requestedBy}`)
       void bot.startBuild(id, DEFAULT_PALETTE, requestedBy, { x, y, z })
+    } else if (verb === 'resume') {
+      // <bot> resume <blueprint> <origin x> <y> <z> [turns <0-3>] [for <player>]
+      const id = words[2] as BlueprintId
+      const [x, y, z] = words.slice(3, 6).map(Number)
+      const turnsIndex = words.indexOf('turns')
+      const turns = turnsIndex > 0 ? Number(words[turnsIndex + 1]) : 0
+      if (!BLUEPRINT_IDS.includes(id) || [x, y, z, turns].some((n) => !Number.isFinite(n))) {
+        return this.log.warn(`usage: <bot> resume <blueprint> <x> <y> <z> [turns N] [for <player>]`)
+      }
+      this.log.info(`command: ${bot.cfg.name} resumes ${id} at ${x},${y},${z} (turns ${turns})`)
+      void bot.resumeBuildAt(id, { x, y, z }, turns, requestedBy)
     } else if (verb === 'undo') {
       this.log.info(`command: ${bot.cfg.name} takes down its last build`)
       void bot.undoLastBuild(requestedBy)

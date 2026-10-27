@@ -9,9 +9,15 @@ import type { Logger } from '../logger'
 import { errMsg } from '../util'
 import { useLanguage } from './language'
 import { Builder } from '../build/Builder'
-import { BuildLog } from '../build/BuildLog'
-import { makeBlueprint, type BlueprintId, type Palette } from '../build/blueprints'
-import { findSite, type Point } from '../build/site'
+import { BuildLog, type BuildRecord } from '../build/BuildLog'
+import {
+  DEFAULT_PALETTE,
+  makeBlueprint,
+  rotate,
+  type BlueprintId,
+  type Palette,
+} from '../build/blueprints'
+import { findSite, type Point, type Site } from '../build/site'
 import { Movement } from './movement'
 import { loadSkin } from './skin'
 import {
@@ -271,13 +277,17 @@ export class Bot extends EventEmitter {
       .map((p) => p.entity?.position)
       .filter((p): p is NonNullable<typeof p> => Boolean(p))
       .map((p) => ({ x: p.x, y: p.y, z: p.z }))
-    const site = findSite(bp, builder.world(), {
-      near,
-      faceToward: requester ? near : undefined,
-      avoid,
-      zone,
-      minDistance: at ? -1 : 2,
-    })
+    // An unfinished build of the same thing is resumed where it stands, not started again.
+    const unfinished = this.buildLog.unfinished(this.cfg.name, blueprintId)
+    const site = unfinished
+      ? resumeSite(unfinished)
+      : findSite(bp, builder.world(), {
+          near,
+          faceToward: requester ? near : undefined,
+          avoid,
+          zone,
+          minDistance: at ? -1 : 2,
+        })
     if (!site) return void fail('no_site')
 
     this.movement?.stop()
@@ -285,9 +295,41 @@ export class Bot extends EventEmitter {
       title: bp.title,
       blueprint: bp.id,
       requestedBy,
-      foundation: palette.primary,
+      palette: unfinished?.palette ?? palette,
+      resume: unfinished,
     })
     await report(result)
+  }
+
+  /**
+   * Adopt a build that stands at a known spot but is not in the build log (or not complete), and
+   * finish it there. Blocks of the blueprint already standing are counted as this bot's.
+   */
+  async resumeBuildAt(
+    blueprintId: BlueprintId,
+    origin: Point,
+    quarterTurns: number,
+    requestedBy: string
+  ): Promise<void> {
+    if (!this.builder || this.builder.busy) return
+    const known = this.buildLog.unfinished(this.cfg.name, blueprintId)
+    const record: BuildRecord = known ?? {
+      id: `${this.cfg.name}-${Date.now()}`,
+      bot: this.cfg.name,
+      blueprint: blueprintId,
+      title: makeBlueprint(blueprintId).title,
+      requestedBy,
+      origin,
+      quarterTurns,
+      palette: DEFAULT_PALETTE,
+      fill: [],
+      total: 0,
+      complete: false,
+      finishedAt: Date.now(),
+      placed: [],
+    }
+    this.buildLog.upsert(record)
+    await this.startBuild(blueprintId, record.palette, requestedBy, origin)
   }
 
   /** Take down the last thing this bot built (only its own blocks). */
@@ -583,4 +625,13 @@ function distance(a: Vec3, b: Vec3): number {
 
 function fmtVec(v: Vec3): string {
   return `(${v.x.toFixed(1)}, ${v.y.toFixed(1)}, ${v.z.toFixed(1)})`
+}
+
+/** The site of an unfinished build, rebuilt from its record. */
+function resumeSite(record: BuildRecord): Site {
+  const blueprint = rotate(
+    makeBlueprint(record.blueprint as BlueprintId, record.palette),
+    record.quarterTurns
+  )
+  return { origin: record.origin, blueprint, quarterTurns: record.quarterTurns, fill: record.fill }
 }

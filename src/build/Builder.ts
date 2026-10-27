@@ -4,7 +4,8 @@ import { goals, type Pathfinder } from 'mineflayer-pathfinder'
 import { Vec3 } from 'vec3'
 import type { Logger } from '../logger'
 import { errMsg, sleep } from '../util'
-import type { BuildLog, PlacedBlock } from './BuildLog'
+import type { Palette } from './blueprints'
+import type { BuildLog, BuildRecord, PlacedBlock } from './BuildLog'
 import type { BlockKind, Point, Site, WorldView } from './site'
 
 const AIR = new Set(['air', 'cave_air', 'void_air'])
@@ -68,6 +69,15 @@ export class Builder {
   private cancelled = false
   private current: { title: string; requestedBy: string } | null = null
   private held: string | null = null
+  /** Footprint and height of the build in progress (for flying around it). */
+  private area: {
+    minX: number
+    maxX: number
+    minZ: number
+    maxZ: number
+    floor: number
+    top: number
+  } | null = null
 
   constructor(
     bot: MineflayerBot,
@@ -113,13 +123,29 @@ export class Builder {
 
   async build(
     site: Site,
-    opts: { title: string; blueprint: string; requestedBy: string; foundation: string }
+    opts: {
+      title: string
+      blueprint: string
+      requestedBy: string
+      palette: Palette
+      /** Continue this unfinished build: its blocks stay ours, matching blocks are adopted. */
+      resume?: BuildRecord
+    }
   ): Promise<BuildResult> {
     this.cancelled = false
     this.current = { title: opts.title, requestedBy: opts.requestedBy }
     const { origin } = site
+    const size = site.blueprint.size
+    this.area = {
+      minX: origin.x,
+      maxX: origin.x + size.x - 1,
+      minZ: origin.z,
+      maxZ: origin.z + size.z - 1,
+      floor: origin.y,
+      top: origin.y + size.y - 1,
+    }
     const todo: PlacedBlock[] = [
-      ...site.fill.map((p) => ({ ...p, block: opts.foundation })),
+      ...site.fill.map((p) => ({ ...p, block: opts.palette.primary })),
       ...site.blueprint.cells.map((c) => ({
         x: origin.x + c.x,
         y: origin.y + c.y,
@@ -128,10 +154,37 @@ export class Builder {
       })),
     ]
     const total = todo.length
-    const placed: PlacedBlock[] = []
+    const key = (p: Point) => `${p.x},${p.y},${p.z}`
+    const placed: PlacedBlock[] = [...(opts.resume?.placed ?? [])]
+    if (opts.resume) {
+      // Blocks of this build already standing are ours too (e.g. placed before a restart).
+      const known = new Set(placed.map(key))
+      for (const t of todo) {
+        if (!known.has(key(t)) && this.bot.blockAt(vec(t))?.name === t.block) placed.push(t)
+      }
+    }
+    const record: BuildRecord = {
+      id: opts.resume?.id ?? `${this.botName}-${Date.now()}`,
+      bot: this.botName,
+      blueprint: opts.blueprint,
+      title: opts.title,
+      requestedBy: opts.requestedBy,
+      origin,
+      quarterTurns: site.quarterTurns,
+      palette: opts.palette,
+      fill: site.fill,
+      total,
+      complete: false,
+      finishedAt: Date.now(),
+      placed,
+    }
+    this.record.upsert(record)
     let skipped = 0
     let reason: BuildResult['reason']
-    this.log.info(`building ${opts.title} at ${origin.x},${origin.y},${origin.z}: ${total} blocks`)
+    this.log.info(
+      `${opts.resume ? 'resuming' : 'building'} ${opts.title} at ${origin.x},${origin.y},${origin.z}: ` +
+        `${total} blocks${placed.length ? `, ${placed.length} already standing` : ''}`
+    )
 
     try {
       while (todo.length > 0) {
@@ -162,6 +215,7 @@ export class Builder {
         }
         if (await this.place(target)) {
           placed.push(target)
+          if (placed.length % 10 === 0) this.record.upsert({ ...record, finishedAt: Date.now() })
           if (placed.length % 25 === 0)
             this.log.info(`${opts.title}: ${placed.length}/${total} blocks`)
         } else {
@@ -174,16 +228,13 @@ export class Builder {
       }
     } finally {
       await this.land()
-      this.record.add({
-        bot: this.botName,
-        blueprint: opts.blueprint,
-        title: opts.title,
-        requestedBy: opts.requestedBy,
-        origin,
+      this.record.upsert({
+        ...record,
+        complete: !reason && skipped === 0,
         finishedAt: Date.now(),
-        placed,
       })
       this.current = null
+      this.area = null
     }
     const ok = !reason && skipped <= total * 0.1
     this.log.info(
@@ -206,6 +257,17 @@ export class Builder {
     const last = this.record.last(this.botName)
     if (!last) return null
     this.current = { title: `taking down ${last.title}`, requestedBy: last.requestedBy }
+    const xs = last.placed.map((p) => p.x)
+    const ys = last.placed.map((p) => p.y)
+    const zs = last.placed.map((p) => p.z)
+    this.area = {
+      minX: Math.min(...xs),
+      maxX: Math.max(...xs),
+      minZ: Math.min(...zs),
+      maxZ: Math.max(...zs),
+      floor: last.origin.y,
+      top: Math.max(...ys),
+    }
     let removed = 0
     try {
       for (const p of [...last.placed].reverse()) {
@@ -223,6 +285,7 @@ export class Builder {
       await this.land()
       this.record.remove(last)
       this.current = null
+      this.area = null
     }
     this.log.info(`took down ${last.title}: removed ${removed}/${last.placed.length}`)
     return { title: last.title, removed }
@@ -258,22 +321,25 @@ export class Builder {
     return false
   }
 
-  /** Get within reach of a block without standing in it. Walk first; fly when walking fails. */
+  /**
+   * Get within reach of a block without standing in it. Low blocks: walk. Blocks two or more
+   * above the floor: fly to a hover spot just outside the build, going over the top so the
+   * build's own walls are never in the way.
+   */
   private async reach(t: Point, attempt = 0): Promise<boolean> {
     const center = new Vec3(t.x + 0.5, t.y + 0.5, t.z + 0.5)
     const eyes = this.bot.entity.position.offset(0, 1.62, 0)
     const feet = this.bot.entity.position.floored()
     const inTheWay = feet.x === t.x && feet.z === t.z && (feet.y === t.y || feet.y + 1 === t.y)
     if (!inTheWay && eyes.distanceTo(center) <= REACH && attempt === 0) return true
+    const high = this.area !== null && t.y >= this.area.floor + 2
     try {
-      if (attempt < 2) {
+      if (high || attempt >= 2) {
+        await this.flyBeside(t)
+      } else {
+        await this.land()
         const goal = new goals.GoalNear(t.x, t.y, t.z, attempt === 0 ? 3 : 2)
         await withTimeout(this.bot.pathfinder.goto(goal), 12_000)
-      } else {
-        // Last resort for high blocks: creative flight to a free spot beside the target.
-        const spot = this.besideInAir(t)
-        if (!spot) return false
-        await withTimeout(this.bot.creative.flyTo(spot), 12_000)
       }
     } catch (err) {
       this.log.debug(`could not get near ${t.x},${t.y},${t.z}: ${errMsg(err)}`)
@@ -282,22 +348,47 @@ export class Builder {
     return here.distanceTo(center) <= REACH + 1
   }
 
-  /** A free cell two blocks out from the target, at the target's height. */
-  private besideInAir(t: Point): Vec3 | null {
-    for (const [dx, dz] of [
-      [2, 0],
-      [-2, 0],
-      [0, 2],
-      [0, -2],
-    ]) {
-      const spot = new Vec3(t.x + dx + 0.5, t.y, t.z + dz + 0.5)
-      if (
-        this.kindAt(spot.floored()) === 'air' &&
-        this.kindAt(spot.floored().offset(0, 1, 0)) === 'air'
-      )
-        return spot
+  /** Fly up above the build, across, and down to a hover spot beside the target. */
+  private async flyBeside(t: Point): Promise<void> {
+    const hover = this.hoverSpot(t)
+    if (!hover) throw new Error('no free spot to hover beside it')
+    const pos = this.bot.entity.position
+    const safeY = (this.area?.top ?? t.y) + 3
+    if (Math.hypot(hover.x - pos.x, hover.z - pos.z) > 1.5) {
+      if (pos.y < safeY - 0.5)
+        await withTimeout(this.bot.creative.flyTo(new Vec3(pos.x, safeY, pos.z)), 8_000)
+      await withTimeout(this.bot.creative.flyTo(new Vec3(hover.x, safeY, hover.z)), 8_000)
     }
-    return null
+    await withTimeout(this.bot.creative.flyTo(hover), 8_000)
+  }
+
+  /**
+   * Where to hover (feet position) to place `t`: two or three blocks out, one below it so the
+   * eyes are level with it, in free air, preferably outside the build's footprint, nearest first.
+   */
+  private hoverSpot(t: Point): Vec3 | null {
+    const area = this.area
+    const outside = (x: number, z: number) =>
+      !area || x < area.minX || x > area.maxX || z < area.minZ || z > area.maxZ
+    const pos = this.bot.entity.position
+    const candidates: Array<{ spot: Vec3; outside: boolean }> = []
+    for (const d of [2, 3]) {
+      for (const [dx, dz] of [
+        [d, 0],
+        [-d, 0],
+        [0, d],
+        [0, -d],
+      ]) {
+        const cell = new Vec3(t.x + dx, t.y - 1, t.z + dz)
+        if (this.kindAt(cell) !== 'air' || this.kindAt(cell.offset(0, 1, 0)) !== 'air') continue
+        candidates.push({ spot: cell.offset(0.5, 0, 0.5), outside: outside(cell.x, cell.z) })
+      }
+    }
+    candidates.sort(
+      (a, b) =>
+        Number(b.outside) - Number(a.outside) || a.spot.distanceTo(pos) - b.spot.distanceTo(pos)
+    )
+    return candidates[0]?.spot ?? null
   }
 
   /** Put the block in hotbar slot 1 from the creative inventory and select it. */
