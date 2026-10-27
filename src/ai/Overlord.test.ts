@@ -5,8 +5,18 @@ import { findCastleSites, type SiteOption } from '../build/sites'
 import { courtProblems, Overlord, placeOnSite } from './Overlord'
 import type { ChatMessage, ChatModel } from './OllamaClient'
 
-const great = JSON.parse(fs.readFileSync('config/castles/great-castle.json', 'utf8')) as CastleDesign
-const silent = { debug() {}, info() {}, warn() {}, error() {}, child() { return silent } } as never
+const great = JSON.parse(
+  fs.readFileSync('config/castles/great-castle.json', 'utf8')
+) as CastleDesign
+const silent = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+  child() {
+    return silent
+  },
+} as never
 
 /** The great castle without its gatehouse, with a gate of its own: a design the court accepts. */
 function standalone(): CastleDesign {
@@ -53,13 +63,26 @@ describe('the overlord', () => {
   it('notices a door that opens into another building', () => {
     const d = standalone()
     d.buildings[0].doors = [{ side: 'south', at: 3 }] // the kitchen's south wall backs onto the west range
-    expect(courtProblems(d).some((p) => p.includes('opens straight into the west range'))).toBe(true)
+    expect(courtProblems(d).some((p) => p.includes('opens straight into the west range'))).toBe(
+      true
+    )
   })
 
   it('places a design on its site, centred and never bigger', () => {
     const d = placeOnSite(standalone(), site)
     expect(d.area).toEqual({ x: 201, z: 301, width: 34, depth: 28 })
     expect(d.floorY).toBe(70)
+  })
+
+  it('reads rooms counted from their own building corner the way they were meant', () => {
+    const d = standalone()
+    const range = d.buildings[1] // the west range at x 0, z 11
+    for (const s of range.storeys) for (const r of s.rooms) r.z -= range.z
+    range.ladder = { x: 1, z: 10 }
+    const fixed = placeOnSite(d, site)
+    expect(fixed.buildings[1].storeys[0].rooms[0].z).toBe(11)
+    expect(fixed.buildings[1].ladder).toEqual({ x: 1, z: 21 })
+    expect(fixed.buildings[0]).toEqual(d.buildings[0])
   })
 
   it('keeps asking until the design is sound', async () => {
@@ -70,7 +93,10 @@ describe('the overlord', () => {
       JSON.stringify({ site: 1, summary: 'A castle.', design: bad }),
       JSON.stringify({ site: 1, summary: 'A summer castle by the forest.', design: good }),
     ])
-    const result = await new Overlord(model, 'big', silent).planCastle({ sites: [site], crew: [{ name: 'Henry', role: 'apprentice' }] })
+    const result = await new Overlord(model, 'big', silent).planCastle({
+      sites: [site],
+      crew: [{ name: 'Henry', role: 'apprentice' }],
+    })
     expect(result?.rounds).toBe(3)
     expect(result?.design.name).toBe('the Summer Castle')
     expect(result?.summary).toContain('summer castle')
@@ -88,13 +114,21 @@ describe('finding castle sites', () => {
   }
 
   it('prefers flat open ground away from paths, water and what stands already', () => {
-    const sites = findCastleSites(world, { center: { x: 100, y: 64, z: 100 }, radius: 90 }, { avoid: [{ x: 90, z: 90, width: 30, depth: 30 }] })
+    const sites = findCastleSites(
+      world,
+      { center: { x: 100, y: 64, z: 100 }, radius: 90 },
+      { avoid: [{ x: 90, z: 90, width: 30, depth: 30 }] }
+    )
     expect(sites.length).toBe(3)
     for (const s of sites) {
       expect(s.cut + s.fill).toBe(0)
       expect(s.area.x).toBeGreaterThanOrEqual(60)
       // Not on top of the existing castle (plus its margin) and away from the path.
-      const clear = s.area.x + s.area.width <= 86 || s.area.x >= 124 || s.area.z + s.area.depth <= 86 || s.area.z >= 124
+      const clear =
+        s.area.x + s.area.width <= 86 ||
+        s.area.x >= 124 ||
+        s.area.z + s.area.depth <= 86 ||
+        s.area.z >= 124
       expect(clear).toBe(true)
       expect(s.area.z + s.area.depth + 8).toBeLessThanOrEqual(161)
     }

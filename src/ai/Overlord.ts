@@ -49,9 +49,12 @@ const NEEDED: Array<[string[], string]> = [
   [['throne_room'], 'a throne room'],
   [['royal_bedchamber'], "the King's bedchamber (royal_bedchamber)"],
   [['princess_bedchamber'], "the Princess's bedchamber (princess_bedchamber)"],
-  [['barracks', 'guardroom'], 'quarters for the royal guards Bruce and Dyke (barracks or guardroom)'],
+  [
+    ['barracks', 'guardroom'],
+    'quarters for the royal guards Bruce and Dyke (barracks or guardroom)',
+  ],
   [['bedchamber'], "the Castellan Festaris's chamber (bedchamber)"],
-  [['apprentices_chamber'], "a chamber for the apprentices Henry and George (apprentices_chamber)"],
+  [['apprentices_chamber'], 'a chamber for the apprentices Henry and George (apprentices_chamber)'],
   [['wizard_study'], "Merlin's study (wizard_study)"],
   [['pantry', 'storeroom'], 'a pantry or storeroom'],
 ]
@@ -136,25 +139,46 @@ function stripExample(d: CastleDesign): unknown {
 /** Problems beyond the language rules: what the court needs, and doors that open into walls. */
 export function courtProblems(d: CastleDesign): string[] {
   const problems: string[] = []
-  const types = new Set(d.buildings.flatMap((b) => b.storeys.flatMap((s) => s.rooms.map((r) => r.type))))
+  const types = new Set(
+    d.buildings.flatMap((b) => b.storeys.flatMap((s) => s.rooms.map((r) => r.type)))
+  )
   for (const [options, why] of NEEDED)
     if (!options.some((t) => types.has(t as never))) problems.push(`the castle still needs ${why}`)
   if (!d.gates?.length) problems.push('the curtain wall needs a gate so people can come in')
   const solids: Array<{ name: string; rect: Rect }> = [
-    ...(d.towers ?? []).map((t) => ({ name: t.name, rect: { x: t.x, z: t.z, width: t.size, depth: t.size } })),
+    ...(d.towers ?? []).map((t) => ({
+      name: t.name,
+      rect: { x: t.x, z: t.z, width: t.size, depth: t.size },
+    })),
     ...d.buildings.map((b) => ({ name: b.name, rect: b as Rect })),
   ]
   const blockedBy = (x: number, z: number, self: string) =>
-    solids.find((s) => s.name !== self && x >= s.rect.x && x < s.rect.x + s.rect.width && z >= s.rect.z && z < s.rect.z + s.rect.depth)
+    solids.find(
+      (s) =>
+        s.name !== self &&
+        x >= s.rect.x &&
+        x < s.rect.x + s.rect.width &&
+        z >= s.rect.z &&
+        z < s.rect.z + s.rect.depth
+    )
   const outside = (x: number, z: number) => x < 0 || z < 0 || x >= d.area.width || z >= d.area.depth
   const step = { north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0] } as const
   const doorCell = (r: Rect, side: keyof typeof step, at: number): [number, number] =>
-    side === 'north' ? [r.x + at, r.z] : side === 'south' ? [r.x + at, r.z + r.depth - 1] : side === 'west' ? [r.x, r.z + at] : [r.x + r.width - 1, r.z + at]
+    side === 'north'
+      ? [r.x + at, r.z]
+      : side === 'south'
+        ? [r.x + at, r.z + r.depth - 1]
+        : side === 'west'
+          ? [r.x, r.z + at]
+          : [r.x + r.width - 1, r.z + at]
   // Every door cell of every building and tower: a door may open onto another's door.
   const doorCells = new Set<string>()
   const allDoors: Array<{ rect: Rect; doors: BuildingDesign['doors'] }> = [
     ...d.buildings.map((b) => ({ rect: b as Rect, doors: b.doors })),
-    ...(d.towers ?? []).map((t) => ({ rect: { x: t.x, z: t.z, width: t.size, depth: t.size }, doors: t.doors })),
+    ...(d.towers ?? []).map((t) => ({
+      rect: { x: t.x, z: t.z, width: t.size, depth: t.size },
+      doors: t.doors,
+    })),
   ]
   for (const { rect, doors } of allDoors)
     for (const o of doors ?? [])
@@ -169,12 +193,17 @@ export function courtProblems(d: CastleDesign): string[] {
       const ox = x + dx
       const oz = z + dz
       if (outside(ox, oz)) {
-        if (kind !== 'gate') problems.push(`the ${o.side} door of ${name} opens outside the castle walls; put it on a side facing the courtyard`)
+        if (kind !== 'gate')
+          problems.push(
+            `the ${o.side} door of ${name} opens outside the castle walls; put it on a side facing the courtyard`
+          )
         continue
       }
       const other = blockedBy(ox, oz, name)
       if (other && !doorCells.has(`${ox},${oz}`))
-        problems.push(`the ${o.side} ${kind} of ${name} at ${o.at} opens straight into ${other.name} (give ${other.name} a door right there, or move this one)`)
+        problems.push(
+          `the ${o.side} ${kind} of ${name} at ${o.at} opens straight into ${other.name} (give ${other.name} a door right there, or move this one)`
+        )
     }
   }
   // A builder's review: rooms that fill their storeys, halls big enough to feast in, horses below.
@@ -186,26 +215,73 @@ export function courtProblems(d: CastleDesign): string[] {
         for (let x = r.x + 1; x < r.x + r.width - 1; x++)
           for (let z = r.z + 1; z < r.z + r.depth - 1; z++) covered.add(`${x},${z}`)
       if (covered.size < interior * 0.75)
-        problems.push(`storey ${k + 1} of ${b.name} leaves much of the building empty: let its rooms fill the whole building, sharing walls`)
+        problems.push(
+          `storey ${k + 1} of ${b.name} leaves much of the building empty: let its rooms fill the whole building, sharing walls`
+        )
       for (const r of storey.rooms) {
         const big = r.type === 'great_hall' || r.type === 'throne_room' || r.type === 'dining_hall'
         if (big && (Math.min(r.width, r.depth) < 7 || r.width * r.depth < 80))
-          problems.push(`the ${r.name} in ${b.name} is too small for its purpose: make it at least 7 blocks on its short side and about 80 blocks in area`)
-        if (r.type === 'stables' && k > 0) problems.push(`the ${r.name} in ${b.name} must be on the ground storey: horses cannot climb ladders`)
+          problems.push(
+            `the ${r.name} in ${b.name} is too small for its purpose: make it at least 7 blocks on its short side and about 80 blocks in area`
+          )
+        if (r.type === 'stables' && k > 0)
+          problems.push(
+            `the ${r.name} in ${b.name} must be on the ground storey: horses cannot climb ladders`
+          )
       }
     }
   }
   for (const b of d.buildings) checkDoors(b.name, b, b.doors, 'door')
-  for (const t of d.towers ?? []) checkDoors(t.name, { x: t.x, z: t.z, width: t.size, depth: t.size }, t.doors, 'door')
+  for (const t of d.towers ?? [])
+    checkDoors(t.name, { x: t.x, z: t.z, width: t.size, depth: t.size }, t.doors, 'door')
   const area = { x: 0, z: 0, width: d.area.width, depth: d.area.depth }
   for (const g of d.gates ?? []) {
     const r = area
-    const [x, z] = g.side === 'north' ? [g.at, 0] : g.side === 'south' ? [g.at, r.depth - 1] : g.side === 'west' ? [0, g.at] : [r.width - 1, g.at]
+    const [x, z] =
+      g.side === 'north'
+        ? [g.at, 0]
+        : g.side === 'south'
+          ? [g.at, r.depth - 1]
+          : g.side === 'west'
+            ? [0, g.at]
+            : [r.width - 1, g.at]
     const [dx, dz] = step[g.side] ?? [0, 0]
     const inner = blockedBy(x - dx, z - dz, '')
-    if (inner) problems.push(`the ${g.side} gate at ${g.at} opens into ${inner.name}; move it to where the courtyard meets the wall`)
+    if (inner)
+      problems.push(
+        `the ${g.side} gate at ${g.at} opens into ${inner.name}; move it to where the courtyard meets the wall`
+      )
   }
   return problems
+}
+
+/**
+ * A common slip: rooms and ladders counted from their building's own corner instead of the
+ * castle's. When everything of a building only fits that way, read it that way.
+ */
+export function normaliseRooms(d: CastleDesign): CastleDesign {
+  const within = (r: Rect, b: Rect) =>
+    r.x >= b.x && r.z >= b.z && r.x + r.width <= b.x + b.width && r.z + r.depth <= b.z + b.depth
+  const buildings = (d.buildings ?? []).map((b) => {
+    const rooms = (b.storeys ?? []).flatMap((s) => s.rooms ?? [])
+    if (!rooms.length || rooms.every((r) => within(r, b))) return b
+    const shifted = (r: Rect) => ({ ...r, x: r.x + b.x, z: r.z + b.z })
+    if (!rooms.every((r) => within(shifted(r), b))) return b
+    const ladder = b.ladder
+    const inner = (l: { x: number; z: number }) =>
+      l.x > b.x && l.x < b.x + b.width - 1 && l.z > b.z && l.z < b.z + b.depth - 1
+    return {
+      ...b,
+      storeys: b.storeys.map((s) => ({
+        ...s,
+        rooms: s.rooms.map((r) => ({ ...r, x: r.x + b.x, z: r.z + b.z })),
+      })),
+      ...(ladder && !inner(ladder) && inner({ x: ladder.x + b.x, z: ladder.z + b.z })
+        ? { ladder: { x: ladder.x + b.x, z: ladder.z + b.z } }
+        : {}),
+    }
+  })
+  return { ...d, buildings }
 }
 
 /** Put a design on a chosen site: world corner, floor height, and an area no bigger than the site. */
@@ -213,7 +289,7 @@ export function placeOnSite(raw: CastleDesign, site: SiteOption): CastleDesign {
   const width = Math.min(raw.area?.width ?? site.area.width, site.area.width)
   const depth = Math.min(raw.area?.depth ?? site.area.depth, site.area.depth)
   return {
-    ...raw,
+    ...normaliseRooms(raw),
     floorY: site.floorY,
     area: {
       x: site.area.x + Math.floor((site.area.width - width) / 2),
@@ -255,19 +331,30 @@ export class Overlord {
       const started = Date.now()
       let content: string
       try {
-        const response = await this.ai.chat(messages, { model: this.model, format: 'json', think: true, temperature: 0.5, stream: true })
+        const response = await this.ai.chat(messages, {
+          model: this.model,
+          format: 'json',
+          think: true,
+          temperature: 0.5,
+          stream: true,
+        })
         content = response.message.content
       } catch (err) {
         this.log.warn(`overlord round ${round} failed: ${errMsg(err)}`)
         continue
       }
-      this.log.info(`overlord round ${round}: ${content.length} characters in ${Math.round((Date.now() - started) / 1000)}s`)
+      this.log.info(
+        `overlord round ${round}: ${content.length} characters in ${Math.round((Date.now() - started) / 1000)}s`
+      )
       messages.push({ role: 'assistant', content })
       let parsed: { site?: number; summary?: string; design?: CastleDesign }
       try {
         parsed = JSON.parse(content) as typeof parsed
       } catch {
-        messages.push({ role: 'user', content: 'That was not valid JSON. Answer with the JSON object only.' })
+        messages.push({
+          role: 'user',
+          content: 'That was not valid JSON. Answer with the JSON object only.',
+        })
         continue
       }
       const index = (parsed.site ?? 1) - 1
@@ -289,10 +376,14 @@ export class Overlord {
         }
       }
       if (!problems.length) {
-        this.log.info(`overlord: ${design.name} on site ${index + 1}, accepted after ${round} round(s)`)
+        this.log.info(
+          `overlord: ${design.name} on site ${index + 1}, accepted after ${round} round(s)`
+        )
         return { design, site, rounds: round, summary: parsed.summary ?? '' }
       }
-      this.log.info(`overlord round ${round}: ${problems.length} problems: ${problems.slice(0, 6).join('; ')}`)
+      this.log.info(
+        `overlord round ${round}: ${problems.length} problems: ${problems.slice(0, 6).join('; ')}`
+      )
       messages.push({
         role: 'user',
         content:
