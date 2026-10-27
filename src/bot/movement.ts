@@ -25,6 +25,8 @@ export class Movement {
   private activity: Activity = null
   private readonly bot: PathfinderBot
   private readonly stuck = new StuckDetector()
+  /** Following on duty rather than on request: do not announce being stuck. */
+  private quiet = false
   /** Called once when the bot cannot find a way to the player it is walking to. */
   onStuck?: (target: string) => void
 
@@ -64,7 +66,7 @@ export class Movement {
       const target = this.activity?.target
       if (change === 'stuck' && target) {
         this.log.info(`cannot find a way to ${target}; waiting for them to come within reach`)
-        this.onStuck?.(target)
+        if (!this.quiet) this.onStuck?.(target)
       } else if (change === 'unstuck' && target) {
         this.log.info(`found a way to ${target} again`)
       }
@@ -94,12 +96,16 @@ export class Movement {
   }
 
   /** Keep walking after a player until told to stop. */
-  follow(player: string): MoveResult {
+  follow(player: string, opts: { distance?: number; quiet?: boolean } = {}): MoveResult {
     const entity = this.bot.players[player]?.entity
     if (!entity) return 'not_visible'
     this.stuck.reset()
+    this.quiet = opts.quiet ?? false
     this.activity = { kind: 'following', target: player }
-    this.bot.pathfinder.setGoal(new goals.GoalFollow(entity, FOLLOW_DISTANCE), true)
+    this.bot.pathfinder.setGoal(
+      new goals.GoalFollow(entity, opts.distance ?? FOLLOW_DISTANCE),
+      true
+    )
     this.log.info(`following ${player}`)
     return 'ok'
   }

@@ -71,12 +71,29 @@ export interface BotConfig {
   skin?: SkinConfig
   /** Where the bot may build; undefined = it does not build at all. */
   buildZone?: Zone
+  /** The bot's place at court, e.g. "court wizard" or "royal guard". */
+  role: string
+  /** Whether this bot builds from the spellbook (others suggest asking a builder). */
+  canBuild: boolean
+  /** A standing duty, e.g. escorting a royal (see Bot.performDuty). */
+  duty?: Duty
+  /** Takes part in the court's building works (the great castle). */
+  works: boolean
+}
+
+/** "escort" = follow the first of `royals` who is online and in sight, unless told otherwise. */
+export interface Duty {
+  kind: 'escort'
+  /** Court titles in order of preference, e.g. ["Princess", "King"]. */
+  royals: string[]
 }
 
 export interface AppConfig {
   logLevel: LogLevel
   bots: BotConfig[]
   court: CourtConfig
+  /** Castle design the court builds together (WORKS_DESIGN), e.g. config/castles/great-castle.json. */
+  worksDesign?: string
 }
 
 export const DEFAULT_PERSONA =
@@ -168,6 +185,9 @@ export function defaultBotConfig(): BotConfig {
         }
       : undefined,
     buildZone: envZone('BUILD_CENTER', 'BUILD_RADIUS'),
+    role: envStr('BOT_ROLE', 'court wizard'),
+    canBuild: envBool('BOT_CAN_BUILD', true),
+    works: envBool('BOT_WORKS', false),
   }
 }
 
@@ -217,6 +237,7 @@ export function loadConfig(): AppConfig {
     throw new Error(`LOG_LEVEL must be debug|info|warn|error, got "${logLevel}"`)
 
   const court = loadCourt(envStr('COURT_FILE', 'config/court.json'))
+  const worksDesign = env('WORKS_DESIGN')
 
-  return { logLevel, bots, court }
+  return { logLevel, bots, court, ...(worksDesign ? { worksDesign } : {}) }
 }

@@ -1,0 +1,93 @@
+{
+  "name": "the Great Castle",
+  "floorY": 73,
+  "area": { "x": 84, "z": 101, "width": 34, "depth": 28 },
+  "wallHeight": 6,
+  "existing": [
+    { "name": "Merlin's first castle", "blueprint": "castle", "x": 16, "z": 17, "width": 11, "depth": 11, "y": 75, "openBack": true }
+  ],
+  "buildings": [
+    {
+      "name": "the Keep",
+      "x": 0, "z": 0, "width": 34, "depth": 12,
+      "doors": [{ "side": "south", "at": 17, "width": 2, "height": 3 }],
+      "ladder": { "x": 20, "z": 10 },
+      "storeys": [
+        { "rooms": [
+          { "name": "kitchen", "type": "kitchen", "x": 0, "z": 0, "width": 10, "depth": 12 },
+          { "name": "great hall", "type": "great_hall", "x": 9, "z": 0, "width": 18, "depth": 12, "honour": "north" },
+          { "name": "buttery", "type": "pantry", "x": 26, "z": 0, "width": 8, "depth": 12 }
+        ] },
+        { "rooms": [
+          { "name": "royal library", "type": "library", "x": 0, "z": 0, "width": 10, "depth": 12 },
+          { "name": "throne room", "type": "throne_room", "x": 9, "z": 0, "width": 18, "depth": 12, "honour": "north" },
+          { "name": "chapel", "type": "chapel", "x": 26, "z": 0, "width": 8, "depth": 12 }
+        ] },
+        { "rooms": [
+          { "name": "the King's bedchamber", "type": "royal_bedchamber", "x": 0, "z": 0, "width": 12, "depth": 12 },
+          { "name": "royal solar", "type": "solar", "x": 11, "z": 0, "width": 12, "depth": 12, "honour": "north" },
+          { "name": "the Princess's bedchamber", "type": "princess_bedchamber", "x": 22, "z": 0, "width": 12, "depth": 12 }
+        ] }
+      ]
+    },
+    {
+      "name": "the west range",
+      "x": 0, "z": 11, "width": 9, "depth": 12,
+      "doors": [
+        { "side": "east", "at": 2 },
+        { "side": "east", "at": 8 },
+        { "side": "south", "at": 2 }
+      ],
+      "ladder": { "x": 1, "z": 21 },
+      "storeys": [
+        { "rooms": [
+          { "name": "guardroom", "type": "guardroom", "x": 0, "z": 11, "width": 9, "depth": 6 },
+          { "name": "armoury", "type": "armoury", "x": 0, "z": 16, "width": 9, "depth": 7 }
+        ] },
+        { "rooms": [
+          { "name": "guards' barracks", "type": "barracks", "x": 0, "z": 11, "width": 9, "depth": 6 },
+          { "name": "the Castellan's chamber", "type": "bedchamber", "x": 0, "z": 16, "width": 9, "depth": 7 }
+        ] }
+      ]
+    },
+    {
+      "name": "the east range",
+      "x": 27, "z": 11, "width": 7, "depth": 12,
+      "doors": [
+        { "side": "west", "at": 2 },
+        { "side": "south", "at": 4 }
+      ],
+      "ladder": { "x": 32, "z": 12 },
+      "storeys": [
+        { "rooms": [
+          { "name": "workshop", "type": "workshop", "x": 27, "z": 11, "width": 7, "depth": 6 },
+          { "name": "storeroom", "type": "storeroom", "x": 27, "z": 16, "width": 7, "depth": 7 }
+        ] },
+        { "rooms": [
+          { "name": "apprentices' chamber", "type": "apprentices_chamber", "x": 27, "z": 11, "width": 7, "depth": 6 },
+          { "name": "wizard's study", "type": "wizard_study", "x": 27, "z": 16, "width": 7, "depth": 7 }
+        ] }
+      ]
+    },
+    {
+      "name": "the stables",
+      "x": 5, "z": 22, "width": 11, "depth": 6,
+      "doors": [{ "side": "north", "at": 6, "width": 3, "height": 3 }],
+      "storeys": [
+        { "rooms": [{ "name": "stables", "type": "stables", "x": 5, "z": 22, "width": 11, "depth": 6, "honour": "south" }] }
+      ]
+    }
+  ],
+  "towers": [
+    { "name": "the south-west tower", "x": 0, "z": 23, "size": 5, "height": 10, "doors": [{ "side": "north", "at": 2 }] },
+    { "name": "the south-east tower", "x": 29, "z": 23, "size": 5, "height": 10, "doors": [{ "side": "north", "at": 2 }] }
+  ],
+  "features": [
+    { "type": "lamp", "x": 15, "z": 13 },
+    { "type": "lamp", "x": 20, "z": 13 },
+    { "type": "lamp", "x": 19, "z": 15 },
+    { "type": "lamp", "x": 24, "z": 15 },
+    { "type": "garden", "x": 10, "z": 13, "width": 3, "depth": 3 },
+    { "type": "well", "x": 13, "z": 18 }
+  ]
+}

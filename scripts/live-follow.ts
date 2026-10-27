@@ -35,7 +35,7 @@ async function main(): Promise<void> {
     members: [{ player: 'Apprentice', role: 'prince', title: 'Prince', address: 'Your Highness' }],
   })
   const brain = new OllamaBrain(cfg, new OllamaClient(cfg.ai, log.child('ollama')), court, log)
-  const merlin = new Bot(cfg, brain, log.child('TestMerlin'), ['TestMerlin'])
+  const merlin = new Bot(cfg, brain, log.child('TestMerlin'), { fellowBots: ['TestMerlin'] })
   await merlin.connect()
   log.info('TestMerlin is in the world')
 

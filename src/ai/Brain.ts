@@ -27,6 +27,10 @@ export interface BrainContext {
   position?: { x: number; y: number; z: number }
   /** What the bot is doing, e.g. "following LittleOne42"; undefined when standing still. */
   activity?: string
+  /** False when another bot of the court answers this line: listen, but stay quiet. */
+  mayReply?: boolean
+  /** The court's building works in progress, e.g. "the Great Castle (7 of 21 parts done)". */
+  works?: string
 }
 
 /** Something the brain asks the bot's body to do. */
@@ -69,4 +73,6 @@ export interface Brain {
   onStuck(target: string, ctx: BrainContext): Promise<string | null>
   /** Called when a build (or taking one down) finishes or cannot start. */
   onBuildDone(outcome: BuildOutcome, ctx: BrainContext): Promise<string | null>
+  /** Say something to the court about its own work, e.g. the Castellan handing out a task. */
+  speak(instruction: string, ctx: BrainContext, fallback?: string): Promise<string | null>
 }

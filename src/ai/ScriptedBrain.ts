@@ -7,6 +7,7 @@ export interface Script {
   onNotice?: (event: ChatEvent, ctx: BrainContext) => string | null
   onStuck?: (target: string, ctx: BrainContext) => string | null
   onBuildDone?: (outcome: BuildOutcome, ctx: BrainContext) => string | null
+  speak?: (instruction: string, ctx: BrainContext) => string | null
 }
 
 /** Deterministic brain for tests and smoke runs: no model involved. */
@@ -36,5 +37,9 @@ export class ScriptedBrain implements Brain {
 
   async onBuildDone(outcome: BuildOutcome, ctx: BrainContext): Promise<string | null> {
     return this.script.onBuildDone?.(outcome, ctx) ?? null
+  }
+
+  async speak(instruction: string, ctx: BrainContext, fallback?: string): Promise<string | null> {
+    return this.script.speak?.(instruction, ctx) ?? fallback ?? null
   }
 }

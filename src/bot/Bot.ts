@@ -1,10 +1,15 @@
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import type { Client } from 'bedrock-protocol'
-import { createBot, type Bot as MineflayerBot, type BotOptions } from 'mineflayer-bedrock'
+import {
+  createBot,
+  type Bot as MineflayerBot,
+  type BotOptions as MineflayerBotOptions,
+} from 'mineflayer-bedrock'
 import type { BotAction, Brain, BrainContext, BuildOutcome } from '../ai/Brain'
 import { splitChatMessage } from '../ai/text'
 import type { BotConfig } from '../config'
+import type { CourtRoster } from '../court'
 import type { Logger } from '../logger'
 import { errMsg } from '../util'
 import { useLanguage } from './language'
@@ -17,7 +22,9 @@ import {
   type BlueprintId,
   type Palette,
 } from '../build/blueprints'
+import { Mason, type Job, type JobResult } from '../build/Mason'
 import { findSite, type Point, type Site } from '../build/site'
+import type { ChatFloor } from './ChatFloor'
 import { Movement } from './movement'
 import { loadSkin } from './skin'
 import {
@@ -52,6 +59,22 @@ export interface PlayerInfo {
 /** Wait this long after a join before hailing, so the newcomer has loaded in and sees chat. */
 const JOIN_GREET_DELAY_MS = 4_000
 
+/** After a royal tells a bot on duty to stop, it leaves the duty alone this long. */
+const DUTY_PAUSE_MS = 10 * 60_000
+
+export interface BotOptions {
+  /** Names of all bots run by this app: they never greet or answer each other. */
+  fellowBots?: string[]
+  /** Shared record of what each bot built. */
+  buildLog?: BuildLog
+  /** Shared: decides which bot answers a line. */
+  floor?: ChatFloor
+  /** The royal court, for duties (who to escort) and who counts as a guest. */
+  court?: CourtRoster
+  /** One line about the court's building works, for the brain's prompt. */
+  works?: () => string | undefined
+}
+
 export interface BotState {
   status: BotStatus
   runtimeId?: bigint
@@ -81,21 +104,118 @@ export class Bot extends EventEmitter {
   private body?: MineflayerBot
   private movement?: Movement
   private builder?: Builder
+  /** Works on sections of the court's great builds. */
+  private mason?: Mason
+  /** A royal asked for something else: no work orders until then. */
+  private worksPausedUntil = 0
+  private readonly worksSummary?: () => string | undefined
   private stopping = false
   private reconnectAttempts = 0
   private reconnectTimer?: NodeJS.Timeout
   /** Lower-cased names of all bots run by this app; they never greet or count each other. */
   private readonly botNames: Set<string>
 
+  private readonly buildLog: BuildLog
+  private readonly floor?: ChatFloor
+  private readonly court?: CourtRoster
+  private dutyTimer?: NodeJS.Timeout
+  /** The current follow comes from the bot's duty, not from someone asking. */
+  private dutyFollowing = false
+  /** A royal told the bot to stop: leave the duty alone until then. */
+  private dutyPausedUntil = 0
+
   constructor(
     readonly cfg: BotConfig,
     private readonly brain: Brain,
     private readonly log: Logger,
-    fellowBots: string[] = [],
-    private readonly buildLog: BuildLog = new BuildLog()
+    opts: BotOptions = {}
   ) {
     super()
-    this.botNames = new Set([cfg.name, ...fellowBots].map((n) => n.toLowerCase()))
+    this.botNames = new Set([cfg.name, ...(opts.fellowBots ?? [])].map((n) => n.toLowerCase()))
+    this.buildLog = opts.buildLog ?? new BuildLog()
+    this.floor = opts.floor
+    this.court = opts.court
+    this.worksSummary = opts.works
+  }
+
+  /** May this bot speak for the court right now (hails, notices)? Always, without a floor. */
+  private isHerald(forGuest = false): boolean {
+    return !this.floor || this.floor.isHerald(this.cfg.name, forGuest)
+  }
+
+  /** The royal this bot should be escorting now (online and in sight), if it has that duty. */
+  private dutyTarget(): string | undefined {
+    const duty = this.cfg.duty
+    const body = this.body
+    if (duty?.kind !== 'escort' || !body) return undefined
+    return duty.royals
+      .map((title) =>
+        this.court?.members.find((m) => m.title.toLowerCase() === title.toLowerCase())
+      )
+      .map((m) => m?.player)
+      .find((player) => player && body.players[player]?.entity)
+  }
+
+  /**
+   * Escort duty: follow the first royal (by title, in the duty's order) who is online and in
+   * sight, unless the bot is busy with something it was asked to do or was told to stop. Duty
+   * comes before the building works: a guard drops his work order when a royal appears.
+   */
+  private performDuty(): void {
+    const movement = this.movement
+    if (this.cfg.duty?.kind !== 'escort' || !movement || this.state.status !== 'spawned') return
+    if (this.builder?.busy || Date.now() < this.dutyPausedUntil) return
+    const target = this.dutyTarget()
+    const current = movement.current()
+    if (current && !this.dutyFollowing) return // doing what someone asked
+    if (!target) return
+    if (this.mason?.busy) {
+      this.log.info(`leaving the works to escort ${target}`)
+      this.mason.cancel()
+      return // follow on the next round, once the mason has let go
+    }
+    if (current?.kind === 'following' && current.target === target) return
+    if (movement.follow(target, { distance: 3, quiet: true }) === 'ok') {
+      this.dutyFollowing = true
+      this.log.info(`on duty: escorting ${target}`)
+    }
+  }
+
+  /** Free to take a work order from the court's building works. */
+  canWork(): boolean {
+    if (!this.cfg.works || this.state.status !== 'spawned' || !this.body || !this.mason) return false
+    if (this.builder?.busy || this.mason.busy) return false
+    if (Date.now() < this.worksPausedUntil) return false
+    if (this.movement?.current() && !this.dutyFollowing) return false
+    if (this.dutyTarget() && Date.now() >= this.dutyPausedUntil) return false
+    return true
+  }
+
+  /** Build one section of the court's works. */
+  async work(job: Job): Promise<JobResult> {
+    const mason = this.mason
+    if (!mason) return { placed: 0, dug: 0, missing: job.cells.length, blocked: 0, cancelled: true }
+    if (this.dutyFollowing) this.dutyFollowing = false
+    this.movement?.stop()
+    return mason.work(job)
+  }
+
+  position(): Point | undefined {
+    const p = this.body?.entity?.position
+    return p ? { x: p.x, y: p.y, z: p.z } : undefined
+  }
+
+  /** Say something about the court's work, in character (the brain words it). */
+  async speak(instruction: string, fallback?: string): Promise<string | null> {
+    if (this.state.status !== 'spawned') return null
+    try {
+      const text = await this.brain.speak(instruction, this.context(), fallback)
+      if (text) this.chat(text)
+      return text
+    } catch (err) {
+      this.log.warn(`brain.speak failed: ${errMsg(err)}`)
+      return null
+    }
   }
 
   /** True for this bot itself and any other bot run by this app. */
@@ -127,7 +247,7 @@ export class Bot extends EventEmitter {
         `${server.version ? `, version ${server.version}` : ''})`
     )
 
-    const options: BotOptions = {
+    const options: MineflayerBotOptions = {
       host: server.host,
       port: server.port,
       username: this.cfg.name,
@@ -170,6 +290,7 @@ export class Bot extends EventEmitter {
         .catch((err) => this.log.warn(`brain.onStuck failed: ${errMsg(err)}`))
     }
     this.builder = new Builder(body, this.log.child('build'), this.buildLog, this.cfg.name)
+    this.mason = new Mason(body, this.log.child('mason'))
     body.on('error', (err) => this.log.debug(`body error: ${errMsg(err)}`))
     body.once('spawn', () => this.movement?.configure())
     this.attachHandlers(client)
@@ -222,22 +343,37 @@ export class Bot extends EventEmitter {
     if (!movement || this.state.status !== 'spawned') return
     switch (action.type) {
       case 'build':
+        this.pauseWorks()
         void this.startBuild(action.blueprint, action.palette, action.requestedBy)
         return
       case 'undo':
+        this.pauseWorks()
         void this.undoLastBuild(action.requestedBy)
         return
       case 'stop':
         this.builder?.cancel()
+        this.pauseWorks()
         movement.stop()
+        // A royal said stop: the escort duty waits too, for a while.
+        this.dutyFollowing = false
+        this.dutyPausedUntil = Date.now() + DUTY_PAUSE_MS
         return
       default: {
         this.builder?.cancel()
+        this.pauseWorks()
+        this.dutyFollowing = false
+        this.dutyPausedUntil = 0
         const result =
           action.type === 'follow' ? movement.follow(action.target) : movement.comeTo(action.target)
         if (result !== 'ok') this.log.warn(`cannot ${action.type} ${action.target}: ${result}`)
       }
     }
+  }
+
+  /** A royal wants something else: put down the work order for a while. */
+  private pauseWorks(): void {
+    this.mason?.cancel()
+    this.worksPausedUntil = Date.now() + DUTY_PAUSE_MS
   }
 
   /**
@@ -264,6 +400,8 @@ export class Bot extends EventEmitter {
       report({ title: bp.title, requestedBy, ok: false, placed: 0, total: bp.cells.length, reason })
     if (!builder || !body) return
     if (builder.busy) return void fail('busy')
+    // Let go of any work order first (the mason stops at its next block).
+    for (let i = 0; i < 50 && this.mason?.busy; i++) await new Promise((r) => setTimeout(r, 200))
     const zone = this.cfg.buildZone
     if (!zone) return void fail('no_zone')
 
@@ -407,7 +545,9 @@ export class Bot extends EventEmitter {
           return { name: p.name, distance: me && pos ? distance(me, pos) : undefined }
         }),
       position: me,
-      activity: this.builder?.activity() ?? this.movement?.describe() ?? undefined,
+      activity:
+        this.builder?.activity() ?? this.mason?.activity() ?? this.movement?.describe() ?? undefined,
+      works: this.cfg.works ? this.worksSummary?.() : undefined,
     }
   }
 
@@ -422,7 +562,14 @@ export class Bot extends EventEmitter {
       this.state.status = 'spawned'
       this.reconnectAttempts = 0
       this.log.info(`spawned${this.state.position ? ` at ${fmtVec(this.state.position)}` : ''}`)
+      this.floor?.setOnline(this.cfg.name, true)
       this.emit('spawn')
+      if (this.cfg.duty) {
+        clearInterval(this.dutyTimer)
+        this.dutyTimer = setInterval(() => this.performDuty(), 3_000)
+      }
+      // Only the herald greets on arrival; the rest of the court just takes its place.
+      if (!this.isHerald()) return
       this.brain
         .onSpawn(this.context())
         .then((text) => {
@@ -532,6 +679,11 @@ export class Bot extends EventEmitter {
       this.movement = undefined
       this.builder?.cancel()
       this.builder = undefined
+      this.mason?.cancel()
+      this.mason = undefined
+      clearInterval(this.dutyTimer)
+      this.dutyFollowing = false
+      this.floor?.setOnline(this.cfg.name, false)
       this.state.status = 'closed'
       this.state.players.clear()
       this.state.runtimeId = undefined
@@ -550,7 +702,7 @@ export class Bot extends EventEmitter {
     if (event.kind === 'system') {
       this.log.info(`[server] ${event.message}`)
       this.emit('chat', event)
-      if (event.notice && this.state.status === 'spawned') {
+      if (event.notice && this.state.status === 'spawned' && this.isHerald()) {
         this.brain
           .onNotice(event, this.context())
           .then((reply) => {
@@ -563,11 +715,23 @@ export class Bot extends EventEmitter {
     this.log.info(`<${event.from}> ${event.message}`)
     this.emit('chat', event)
     if (event.from === this.username) return
+    // Never talk to the rest of the court: bots answering bots would never stop.
+    if (this.isBot(event.from)) return
 
+    // One bot answers a line: the one named, the one already talking with them, or the herald.
+    const fromGuest = !this.court?.find(event.from)
+    const responder =
+      event.kind === 'whisper' || !this.floor
+        ? this.cfg.name
+        : this.floor.responder(event, fromGuest)
+    const ctx = { ...this.context(), mayReply: responder === this.cfg.name }
     this.brain
-      .onChat(event, this.context())
+      .onChat(event, ctx)
       .then((reply) => {
-        if (reply?.say) this.chat(reply.say)
+        if (reply?.say) {
+          this.chat(reply.say)
+          this.floor?.replied(this.cfg.name, event.from)
+        }
         if (reply?.action) this.act(reply.action)
       })
       .catch((err) => this.log.warn(`brain.onChat failed: ${errMsg(err)}`))
@@ -579,6 +743,8 @@ export class Bot extends EventEmitter {
     this.emit('playerJoin', name)
     setTimeout(() => {
       if (!this.connected) return
+      // The herald (the Castellan for guests) does the welcoming for the whole court.
+      if (!this.isHerald(!this.court?.find(name))) return
       const stillHere = [...this.state.players.values()].some((p) => p.name === name)
       if (!stillHere) {
         this.log.debug(`not greeting ${name}: already gone`)

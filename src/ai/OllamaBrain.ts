@@ -75,6 +75,7 @@ export class OllamaBrain implements Brain {
   private readonly hails: HailLog
   private readonly memory: CourtMemory
   private readonly learns: boolean
+  private readonly staff: StaffMember[]
   private learning: Promise<void> = Promise.resolve()
   /** The riddle the bot asked and is waiting for an answer to. */
   private activeRiddle?: { riddle: Riddle; askedAt: number }
@@ -92,6 +93,7 @@ export class OllamaBrain implements Brain {
     this.hails = opts.hails ?? new HailLog()
     this.memory = opts.memory ?? new CourtMemory()
     this.learns = opts.learns ?? false
+    this.staff = (opts.staff ?? []).filter((s) => s.name !== cfg.name)
   }
 
   /** Resolves once every memory extraction started so far has finished (for tests). */
@@ -156,6 +158,11 @@ export class OllamaBrain implements Brain {
     const member = this.court.find(event.from)
     this.remember({ role: 'user', content: `${this.court.label(event.from)}: ${event.message}` })
 
+    // Another bot of the court has the floor: listen (and, as scribe, still learn), but stay quiet.
+    if (ctx.mayReply === false) {
+      this.learnFrom(event, member, ctx.botName, null)
+      return null
+    }
     if (!this.shouldReply(event, member)) return null
     // Royals always get an answer (queued); for everyone else a busy brain just skips.
     if (!member && this.pending > 0) {
@@ -191,18 +198,26 @@ export class OllamaBrain implements Brain {
       this.activeRiddle = undefined
       this.riddleDone = false
     }
-    if (member && this.learns) {
-      // Capture the exchange now: more chat may arrive before the extraction runs.
-      const said = `${this.court.label(event.from)}: ${event.message}`
-      const exchange = say ? `${said}\n${ctx.botName}: ${say}` : said
-      const earlier = this.transcript(ctx.botName, say ? -6 : -5, say ? -2 : -1)
-      // In the background: the reply is already on its way to chat.
-      this.learning = this.learning
-        .then(() => this.learn(member, ctx.botName, exchange, earlier))
-        .catch((err) => this.log.warn(`memory extraction failed: ${errMsg(err)}`))
-    }
+    this.learnFrom(event, member, ctx.botName, say)
     if (!say && !move.action) return null
     return move.action ? { say, action: move.action } : { say }
+  }
+
+  /** If this bot is the court's scribe, extract lasting facts from a royal's line (in the background). */
+  private learnFrom(
+    event: ChatEvent,
+    member: CourtMember | undefined,
+    botName: string,
+    say: string | null
+  ): void {
+    if (!member || !this.learns) return
+    // Capture the exchange now: more chat may arrive before the extraction runs.
+    const said = `${this.court.label(event.from)}: ${event.message}`
+    const exchange = say ? `${said}\n${botName}: ${say}` : said
+    const earlier = this.transcript(botName, say ? -6 : -5, say ? -2 : -1)
+    this.learning = this.learning
+      .then(() => this.learn(member, botName, exchange, earlier))
+      .catch((err) => this.log.warn(`memory extraction failed: ${errMsg(err)}`))
   }
 
   /**
@@ -226,6 +241,15 @@ export class OllamaBrain implements Brain {
     if (!member) {
       return {
         note: `(Only the royal family may ask you to build. Decline ${who} kindly; do not promise to build.)`,
+      }
+    }
+    if (!this.cfg.canBuild) {
+      const builders = this.staff.filter((s) => s.canBuild).map((s) => s.name)
+      return {
+        note:
+          `(You do not build yourself${builders.length ? `; ${listWords(builders)} build for the court` : ''}. ` +
+          'Say so kindly and suggest asking them; do not promise to build.)',
+        ability: 'build',
       }
     }
     if (!request.blueprint) {
@@ -413,6 +437,10 @@ export class OllamaBrain implements Brain {
     return this.generate(ctx, { eventPrompt: `[event] ${prompt.event}`, fallback: prompt.fallback })
   }
 
+  async speak(instruction: string, ctx: BrainContext, fallback?: string): Promise<string | null> {
+    return this.generate(ctx, { eventPrompt: `[court] ${instruction}`, fallback })
+  }
+
   async onStuck(target: string, ctx: BrainContext): Promise<string | null> {
     const member = this.court.find(target)
     const who = member ? `the ${member.title}` : target
@@ -525,7 +553,7 @@ export class OllamaBrain implements Brain {
       this.court.label(name).replace(/^(\S+) \((the .+)\)$/, '$2 ($1)')
     )
     const identity = [
-      `You are ${ctx.botName}, a character on a family Minecraft Bedrock server, talking in the in-game chat.`,
+      `You are ${ctx.botName}, the ${this.cfg.role} of the royal court, a character on a family Minecraft Bedrock server, talking in the in-game chat.`,
       this.cfg.persona,
     ].join('\n')
     const rules = [
@@ -534,6 +562,8 @@ export class OllamaBrain implements Brain {
       '- One or two short sentences, under 200 characters in total.',
       '- Chat lines arrive as "<name>: <message>"; royal family members are marked with their title.',
       '- Lines starting with [event] describe something that happened; respond to it in character.',
+      "- Lines starting with [court] are about the court's own work among its members: say what " +
+        'they ask, in character, to the one they name. Keep it short and friendly.',
       `- Players online now (a distance means you can see them): ${players}.`,
       pos
         ? `- Your exact position is x ${pos.x.toFixed(0)}, y ${pos.y.toFixed(0)}, z ${pos.z.toFixed(0)}. ` +
@@ -546,8 +576,15 @@ export class OllamaBrain implements Brain {
       '- You can walk now: when the royal family asks, you follow them, walk over to them, or stop. ' +
         'The walking happens by itself; just talk about it naturally. Only walk for the royal family.',
       activity && `- Right now you are ${activity}.`,
-      `- You can build from your spellbook when the royal family asks: ${spellbookList()}. ` +
-        'The building happens by itself; just talk about it. Only build for the royal family.',
+      ctx.works &&
+        `- The court is building ${ctx.works}. You are part of the crew; talk about it naturally when asked.`,
+      this.cfg.canBuild
+        ? `- You can build from your spellbook when the royal family asks: ${spellbookList()}. ` +
+          'The building happens by itself; just talk about it. Only build for the royal family.'
+        : `- You do not build yourself; ${listWords(this.staff.filter((s) => s.canBuild).map((s) => s.name)) || 'others'} build for the court.`,
+      this.staff.length > 0 &&
+        `- Your fellow members of the court (other characters like you): ${this.staff.map((s) => `${s.name} (${s.role})`).join(', ')}. ` +
+          'When someone talks to one of them by name, let that one answer.',
       '- You still cannot build anything outside your spellbook, fetch or carry items, or find ' +
         'places by name. If asked to, never agree or promise to do it. Kindly explain in ' +
         'character that this magic is not ready yet and offer something else.',
@@ -600,6 +637,14 @@ export interface BrainOptions {
   memory?: CourtMemory
   /** This bot extracts new memories from conversations (one scribe per court avoids duplicates). */
   learns?: boolean
+  /** The other bots of the court, so each knows who the others are and what they do. */
+  staff?: StaffMember[]
+}
+
+export interface StaffMember {
+  name: string
+  role: string
+  canBuild: boolean
 }
 
 /** What a chat line asks of the body, plus a one-off note so the reply matches. */
@@ -677,4 +722,10 @@ function fallbackHail(members: CourtMember[]): string {
   const titles = members.map((m) => `the ${m.title}`).join(' and ')
   const addresses = members.map((m) => m.address).join(' and ')
   return `All hail ${titles}! Welcome, ${addresses}.`
+}
+
+/** "Henry", "Henry and George", "Merlin, Henry and George" */
+function listWords(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? ''
+  return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
 }
