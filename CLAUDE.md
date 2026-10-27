@@ -39,6 +39,8 @@ corepack pnpm exec tsx scripts/works-one.ts <design> <section id> [bot]         
 corepack pnpm exec tsx scripts/check-section.ts <design> [section id prefix ...]         # what is not as planned, and what stands there instead
 corepack pnpm exec tsx scripts/survey-terrain.ts x1 z1 x2 z2 [baseY] [types] [json=f]    # height or block-type map of an area
 corepack pnpm exec tsx scripts/overlord-plan.ts <terrain.json> <out.json> [model]        # let the overlord design a castle offline
+corepack pnpm exec tsx scripts/render-castle.ts <design.json> <out.png> [scale]          # picture of each storey from above
+corepack pnpm exec tsx scripts/make-court-skins.ts [preview-dir]                         # repaint the court's skins (config/skins)
 ```
 
 ### Commands to a running app
@@ -133,7 +135,9 @@ Windows, killing a background `npx` shell does not kill its node children at all
   made), the overlord model (`OVERLORD_MODEL`, gemma4:26b) picks a site and writes a design,
   which is validated and sent back with every problem until sound (6 rounds). The design is
   saved in `.state/designs/` and `.state/court-works.json` records what was built and what is
-  current. The overlord streams its answers and unloads its model afterwards.
+  current. The overlord streams its answers and unloads its model afterwards. Rooms it counts
+  from their building's own corner are read as meant (`normaliseRooms`); `courtProblems` adds
+  a builder's review (rooms that fill their storeys, halls big enough, stables on the ground).
 
 - Silence guard: when a royal names the bot (even misspelled, `mentionsNameLoosely`) or answers
   the bot's last line and the model replies `[silent]`, `generate` asks once more with a note.
