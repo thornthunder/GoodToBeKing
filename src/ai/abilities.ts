@@ -6,6 +6,8 @@
  *
  * Remove an ability from MissingAbility once the bots can really do it.
  */
+import { matchBlueprint, spellbookList, type BlueprintId } from '../build/blueprints'
+
 export type MissingAbility = 'build' | 'fetch' | 'travel'
 
 export type MoveCommand = 'follow' | 'come' | 'stop'
@@ -35,9 +37,31 @@ const REQUEST_PATTERNS: Array<[MissingAbility, RegExp]> = [
 ]
 
 const VERBS: Record<MissingAbility, string> = {
-  build: 'build or craft anything',
+  build: `build anything outside your spellbook (${spellbookList()})`,
   fetch: 'fetch, carry or hand over items',
   travel: 'find places by name or teleport',
+}
+
+const BUILD_VERB = /\b(build|construct|make|create|raise|put up)\b/i
+const ANYTHING = /\b(something|anything|whatever)\b/i
+
+/**
+ * A request to build. `blueprint` is the spellbook entry it names (or 'tower' for "build me
+ * something"); null when it names something the spellbook does not hold.
+ */
+export function detectBuildRequest(message: string): { blueprint: BlueprintId | null } | null {
+  if (!BUILD_VERB.test(message)) return null
+  const named = matchBlueprint(message)
+  if (named) return { blueprint: named }
+  return { blueprint: ANYTHING.test(message) ? 'tower' : null }
+}
+
+const UNDO =
+  /\b(take (it|that|this) down|tear (it|that|this) down|knock (it|that|this) down|remove (it|that|this|the \w+)|get rid of (it|that|this)|undo)\b/i
+
+/** A request to take down the last thing the bot built. */
+export function detectUndoRequest(message: string): boolean {
+  return UNDO.test(message)
 }
 
 /** Which missing ability, if any, a chat line asks for. */
@@ -71,7 +95,7 @@ export function abilityNote(ability: MissingAbility, botName: string): string {
 export function declineLine(ability: MissingAbility, address: string): string {
   switch (ability) {
     case 'build':
-      return `Alas, ${address}, my building magic is still slumbering. Until it wakes, shall we dream up the design together?`
+      return `Alas, ${address}, my spellbook does not hold that yet. It holds ${spellbookList()}: which would please you?`
     case 'fetch':
       return `Alas, ${address}, my satchel cannot carry things yet. Tell me what you seek and I will help you think where to find it.`
     case 'travel':

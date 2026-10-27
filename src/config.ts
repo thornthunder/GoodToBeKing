@@ -2,6 +2,7 @@ import 'dotenv/config'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { SkinConfig } from './bot/skin'
+import type { Zone } from './build/site'
 import { loadCourt, type CourtConfig } from './court'
 import { isLogLevel, type LogLevel } from './logger'
 
@@ -68,6 +69,8 @@ export interface BotConfig {
   autoReconnect: boolean
   /** The bot's look; undefined = the default skin. */
   skin?: SkinConfig
+  /** Where the bot may build; undefined = it does not build at all. */
+  buildZone?: Zone
 }
 
 export interface AppConfig {
@@ -111,6 +114,18 @@ function envOptionalBool(key: string): boolean | undefined {
   return env(key) === undefined ? undefined : envBool(key, false)
 }
 
+/** "105,75,122" + radius -> a build zone; undefined when the centre is not set. */
+function envZone(centerKey: string, radiusKey: string): Zone | undefined {
+  const value = env(centerKey)
+  if (value === undefined) return undefined
+  const parts = value.split(/[\s,]+/).map(Number)
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) {
+    throw new Error(`${centerKey} must be "x,y,z", got "${value}"`)
+  }
+  const [x, y, z] = parts
+  return { center: { x, y, z }, radius: envNum(radiusKey, 100) }
+}
+
 /** One bot built purely from environment variables (and .env). */
 export function defaultBotConfig(): BotConfig {
   return {
@@ -152,6 +167,7 @@ export function defaultBotConfig(): BotConfig {
           cape: env('BOT_CAPE'),
         }
       : undefined,
+    buildZone: envZone('BUILD_CENTER', 'BUILD_RADIUS'),
   }
 }
 

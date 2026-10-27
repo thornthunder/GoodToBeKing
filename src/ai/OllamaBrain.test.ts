@@ -250,33 +250,77 @@ describe('OllamaBrain court behaviour', () => {
     expect(prompt).toContain('Right now you are following the Princess (LittleOne42).')
   })
 
-  it('replaces a reply that promises to build with an in-character decline', async () => {
-    const { brain } = makeBrain('I will build you the finest castle, little Princess.')
+  it('builds from the spellbook for a royal, in the colours they love', async () => {
+    const memory = new CourtMemory()
+    memory.add('LittleOne42', ['The Princess loves magenta.', 'The Princess loves periwinkle.'])
+    const { brain, calls } = makeBrain('At once, Your Highness!', {}, new HailLog(), { memory })
     const reply = await brain.onChat(
-      chat('LittleOne42', 'Merlin build me a castle'),
+      chat('LittleOne42', 'Merlin build me a tower'),
       seen('LittleOne42')
     )
-    expect(reply?.say).toContain('my building magic is still slumbering')
-    expect(reply?.say).toContain('Your Highness')
+    expect(reply?.action).toMatchObject({
+      type: 'build',
+      blueprint: 'tower',
+      requestedBy: 'LittleOne42',
+      palette: { primary: 'magenta_concrete', accent: 'light_blue_concrete' },
+    })
+    expect(calls[0].at(-1)?.content).toContain(
+      'You now begin building a little tower in magenta and light blue near the Princess'
+    )
   })
 
-  it('keeps a reply that already declines, and notes the limit next to the request', async () => {
-    const decline = 'Alas, Your Highness, my building magic is not ready. Shall we talk instead?'
-    const { brain, calls } = makeBrain(decline)
-    const reply = await brain.onChat(chat('LittleOne42', 'build me a tower'), ctx('LittleOne42'))
-    expect(reply?.say).toBe(decline)
-    const last = calls[0].at(-1)?.content ?? ''
-    expect(last).toContain('build me a tower')
-    expect(last).toContain('you cannot build or craft anything yet')
+  it('builds a castle when asked, and something from the book for "anything"', async () => {
+    const { brain } = makeBrain('Gladly!')
+    const castle = await brain.onChat(chat('BigDad', 'Merlin build a castle'), seen('BigDad'))
+    expect(castle?.action).toMatchObject({ type: 'build', blueprint: 'castle' })
+    const anything = await brain.onChat(
+      chat('BigDad', 'can you build something for me, anything'),
+      seen('BigDad')
+    )
+    expect(anything?.action).toMatchObject({ type: 'build', blueprint: 'tower' })
+  })
+
+  it('takes down its last build when a royal asks', async () => {
+    const { brain } = makeBrain('As you wish.')
+    const reply = await brain.onChat(chat('BigDad', 'Merlin take it down please'), seen('BigDad'))
+    expect(reply?.action).toEqual({ type: 'undo', requestedBy: 'BigDad' })
+  })
+
+  it('never builds for a guest', async () => {
+    const { brain, calls } = makeBrain('I build only for the royal family.')
+    const reply = await brain.onChat(chat('Stranger', 'Merlin build a tower'), seen('Stranger'))
+    expect(reply?.action).toBeUndefined()
+    expect(calls[0].at(-1)?.content).toContain('Only the royal family may ask you to build')
+  })
+
+  it('offers the spellbook, and replaces a promise, for something it cannot build', async () => {
+    const { brain, calls } = makeBrain('I will build you the finest house, little Princess.')
+    const reply = await brain.onChat(
+      chat('LittleOne42', 'Merlin build me a house'),
+      seen('LittleOne42')
+    )
+    expect(reply?.action).toBeUndefined()
+    expect(reply?.say).toContain('my spellbook does not hold that yet')
+    expect(reply?.say).toContain('a simple castle')
+    expect(calls[0].at(-1)?.content).toContain('Your spellbook only holds')
   })
 
   it('does not keep the note in the stored history', async () => {
-    const { brain, calls } = makeBrain('Alas, I cannot build yet.')
-    await brain.onChat(chat('LittleOne42', 'build me a castle'), ctx('LittleOne42'))
+    const { brain, calls } = makeBrain('Alas, my spellbook does not hold that.')
+    await brain.onChat(chat('LittleOne42', 'build me a house'), ctx('LittleOne42'))
     await brain.onChat(chat('LittleOne42', 'ok'), ctx('LittleOne42'))
     const history = calls[1].map((m) => m.content).join('\n')
-    expect(history).toContain('build me a castle')
+    expect(history).toContain('build me a house')
     expect(history).not.toContain('Note for Merlin')
+  })
+
+  it('reports a finished build proudly, and a missing site kindly', async () => {
+    const { brain, calls } = makeBrain('Behold!')
+    const done = { title: 'a simple castle', requestedBy: 'BigDad', placed: 300, total: 300 }
+    expect(await brain.onBuildDone({ ...done, ok: true }, seen('BigDad'))).toBe('Behold!')
+    expect(calls[0].at(-1)?.content).toContain('You finished building a simple castle for the King')
+    await brain.onBuildDone({ ...done, ok: false, placed: 0, reason: 'no_site' }, seen('BigDad'))
+    expect(calls[1].at(-1)?.content).toContain('found none')
   })
 
   it('comforts a royal who died, naming the title instead of the player name', async () => {

@@ -60,10 +60,24 @@ async function main(): Promise<void> {
     void shutdown(`${STOP_FILE} found`)
   }, 1_000).unref()
 
+  // Developer commands for the running bots, one per line, e.g. "Merlin build castle 105 75 122".
+  const commandFile = path.resolve(COMMAND_FILE)
+  if (fs.existsSync(commandFile)) fs.unlinkSync(commandFile)
+  setInterval(() => {
+    if (!fs.existsSync(commandFile)) return
+    const lines = fs
+      .readFileSync(commandFile, 'utf8')
+      .split(/\r?\n/)
+      .filter((l) => l.trim())
+    fs.unlinkSync(commandFile)
+    for (const line of lines) manager.runCommand(line)
+  }, 1_000).unref()
+
   await manager.startAll()
 }
 
 const STOP_FILE = '.stop'
+const COMMAND_FILE = '.command'
 
 main().catch((err) => {
   console.error('fatal:', err)

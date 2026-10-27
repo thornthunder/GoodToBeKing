@@ -2,12 +2,16 @@ import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import type { Client } from 'bedrock-protocol'
 import { createBot, type Bot as MineflayerBot, type BotOptions } from 'mineflayer-bedrock'
-import type { BotAction, Brain, BrainContext } from '../ai/Brain'
+import type { BotAction, Brain, BrainContext, BuildOutcome } from '../ai/Brain'
 import { splitChatMessage } from '../ai/text'
 import type { BotConfig } from '../config'
 import type { Logger } from '../logger'
 import { errMsg } from '../util'
 import { useLanguage } from './language'
+import { Builder } from '../build/Builder'
+import { BuildLog } from '../build/BuildLog'
+import { makeBlueprint, type BlueprintId, type Palette } from '../build/blueprints'
+import { findSite, type Point } from '../build/site'
 import { Movement } from './movement'
 import { loadSkin } from './skin'
 import {
@@ -70,6 +74,7 @@ export class Bot extends EventEmitter {
   /** mineflayer-bedrock bot: physics, world, pathfinding. Its `_client` is `client`. */
   private body?: MineflayerBot
   private movement?: Movement
+  private builder?: Builder
   private stopping = false
   private reconnectAttempts = 0
   private reconnectTimer?: NodeJS.Timeout
@@ -80,7 +85,8 @@ export class Bot extends EventEmitter {
     readonly cfg: BotConfig,
     private readonly brain: Brain,
     private readonly log: Logger,
-    fellowBots: string[] = []
+    fellowBots: string[] = [],
+    private readonly buildLog: BuildLog = new BuildLog()
   ) {
     super()
     this.botNames = new Set([cfg.name, ...fellowBots].map((n) => n.toLowerCase()))
@@ -157,6 +163,7 @@ export class Bot extends EventEmitter {
         })
         .catch((err) => this.log.warn(`brain.onStuck failed: ${errMsg(err)}`))
     }
+    this.builder = new Builder(body, this.log.child('build'), this.buildLog, this.cfg.name)
     body.on('error', (err) => this.log.debug(`body error: ${errMsg(err)}`))
     body.once('spawn', () => this.movement?.configure())
     this.attachHandlers(client)
@@ -207,13 +214,107 @@ export class Bot extends EventEmitter {
   act(action: BotAction): void {
     const movement = this.movement
     if (!movement || this.state.status !== 'spawned') return
-    if (action.type === 'stop') {
-      movement.stop()
+    switch (action.type) {
+      case 'build':
+        void this.startBuild(action.blueprint, action.palette, action.requestedBy)
+        return
+      case 'undo':
+        void this.undoLastBuild(action.requestedBy)
+        return
+      case 'stop':
+        this.builder?.cancel()
+        movement.stop()
+        return
+      default: {
+        this.builder?.cancel()
+        const result =
+          action.type === 'follow' ? movement.follow(action.target) : movement.comeTo(action.target)
+        if (result !== 'ok') this.log.warn(`cannot ${action.type} ${action.target}: ${result}`)
+      }
+    }
+  }
+
+  /**
+   * Build a blueprint near a player (or near `at`), inside the build zone, then tell the brain
+   * how it went. Runs in the background; the bot keeps chatting while it builds.
+   */
+  async startBuild(
+    blueprintId: BlueprintId,
+    palette: Palette,
+    requestedBy: string,
+    at?: Point
+  ): Promise<void> {
+    const builder = this.builder
+    const body = this.body
+    const bp = makeBlueprint(blueprintId, palette)
+    const report = (outcome: BuildOutcome) =>
+      this.brain
+        .onBuildDone(outcome, this.context())
+        .then((text) => {
+          if (text) this.chat(text)
+        })
+        .catch((err) => this.log.warn(`brain.onBuildDone failed: ${errMsg(err)}`))
+    const fail = (reason: BuildOutcome['reason']) =>
+      report({ title: bp.title, requestedBy, ok: false, placed: 0, total: bp.cells.length, reason })
+    if (!builder || !body) return
+    if (builder.busy) return void fail('busy')
+    const zone = this.cfg.buildZone
+    if (!zone) return void fail('no_zone')
+
+    const requester = body.players[requestedBy]?.entity?.position
+    const near = at ?? (requester ? { x: requester.x, y: requester.y, z: requester.z } : undefined)
+    if (!near) return void fail('not_visible')
+    if (Math.hypot(near.x - zone.center.x, near.z - zone.center.z) > zone.radius) {
+      return void fail('outside_zone')
+    }
+    const avoid = Object.values(body.players)
+      .map((p) => p.entity?.position)
+      .filter((p): p is NonNullable<typeof p> => Boolean(p))
+      .map((p) => ({ x: p.x, y: p.y, z: p.z }))
+    const site = findSite(bp, builder.world(), {
+      near,
+      faceToward: requester ? near : undefined,
+      avoid,
+      zone,
+      minDistance: at ? -1 : 2,
+    })
+    if (!site) return void fail('no_site')
+
+    this.movement?.stop()
+    const result = await builder.build(site, {
+      title: bp.title,
+      blueprint: bp.id,
+      requestedBy,
+      foundation: palette.primary,
+    })
+    await report(result)
+  }
+
+  /** Take down the last thing this bot built (only its own blocks). */
+  async undoLastBuild(requestedBy: string): Promise<void> {
+    const builder = this.builder
+    if (!builder || builder.busy) return
+    this.movement?.stop()
+    const result = await builder.undoLast()
+    if (!result) {
+      this.log.info('nothing to take down')
       return
     }
-    const result =
-      action.type === 'follow' ? movement.follow(action.target) : movement.comeTo(action.target)
-    if (result !== 'ok') this.log.warn(`cannot ${action.type} ${action.target}: ${result}`)
+    await this.brain
+      .onBuildDone(
+        {
+          title: `taking down ${result.title}`,
+          requestedBy,
+          ok: true,
+          placed: result.removed,
+          total: result.removed,
+        },
+        this.context()
+      )
+      .then((text) => {
+        if (text) this.chat(text)
+      })
+      .catch((err) => this.log.warn(`brain.onBuildDone failed: ${errMsg(err)}`))
   }
 
   /** Say something in public chat. Long text is split into chat-sized parts. */
@@ -264,7 +365,7 @@ export class Bot extends EventEmitter {
           return { name: p.name, distance: me && pos ? distance(me, pos) : undefined }
         }),
       position: me,
-      activity: this.movement?.describe() ?? undefined,
+      activity: this.builder?.activity() ?? this.movement?.describe() ?? undefined,
     }
   }
 
@@ -387,6 +488,8 @@ export class Bot extends EventEmitter {
       this.client = undefined
       this.body = undefined
       this.movement = undefined
+      this.builder?.cancel()
+      this.builder = undefined
       this.state.status = 'closed'
       this.state.players.clear()
       this.state.runtimeId = undefined

@@ -15,3 +15,5 @@ config/court.json
 .stop
 # Runtime state kept across restarts (hail times)
 .state/
+# Developer commands for a running app (see CLAUDE.md)
+.command

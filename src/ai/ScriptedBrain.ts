@@ -1,4 +1,4 @@
-import type { Brain, BrainContext, BrainReply, ChatEvent } from './Brain'
+import type { Brain, BrainContext, BrainReply, BuildOutcome, ChatEvent } from './Brain'
 
 export interface Script {
   onSpawn?: (ctx: BrainContext) => string | null
@@ -6,6 +6,7 @@ export interface Script {
   onChat?: (event: ChatEvent, ctx: BrainContext) => string | BrainReply | null
   onNotice?: (event: ChatEvent, ctx: BrainContext) => string | null
   onStuck?: (target: string, ctx: BrainContext) => string | null
+  onBuildDone?: (outcome: BuildOutcome, ctx: BrainContext) => string | null
 }
 
 /** Deterministic brain for tests and smoke runs: no model involved. */
@@ -31,5 +32,9 @@ export class ScriptedBrain implements Brain {
 
   async onStuck(target: string, ctx: BrainContext): Promise<string | null> {
     return this.script.onStuck?.(target, ctx) ?? null
+  }
+
+  async onBuildDone(outcome: BuildOutcome, ctx: BrainContext): Promise<string | null> {
+    return this.script.onBuildDone?.(outcome, ctx) ?? null
   }
 }

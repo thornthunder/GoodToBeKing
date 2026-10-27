@@ -2,12 +2,24 @@ import type { BotConfig } from '../config'
 import type { CourtMember, CourtRoster } from '../court'
 import type { Logger } from '../logger'
 import { errMsg } from '../util'
-import type { BotAction, Brain, BrainContext, BrainReply, ChatEvent, SeenPlayer } from './Brain'
+import { makeBlueprint, spellbookList, type Palette } from '../build/blueprints'
+import { choosePalette } from '../build/palette'
+import type {
+  BotAction,
+  Brain,
+  BrainContext,
+  BrainReply,
+  BuildOutcome,
+  ChatEvent,
+  SeenPlayer,
+} from './Brain'
 import {
   abilityNote,
   declineLine,
+  detectBuildRequest,
   detectMissingAbility,
   detectMoveCommand,
+  detectUndoRequest,
   promisesAction,
   type MissingAbility,
 } from './abilities'
@@ -155,20 +167,20 @@ export class OllamaBrain implements Brain {
       this.log.debug(`skipping reply: cooldown (${this.cfg.chat.cooldownMs - sinceLast}ms left)`)
       return null
     }
-    const ability = detectMissingAbility(event.message)
     const speaker = member ? `The ${member.title}` : event.from
     // The line just before this one (already in history) was ours: they are answering us.
     const answeringUs = this.history.at(-2)?.role === 'assistant'
-    const move = this.moveTurn(event, member, ctx)
+    // Building takes precedence over walking ("come and build a tower"); the rest is guarded.
+    const turn = this.buildTurn(event, member) ?? this.moveTurn(event, member, ctx)
+    const ability = turn.action ? undefined : (turn.ability ?? detectMissingAbility(event.message))
     const riddleNote = this.riddleTurn(event.message)
-    const notes = [
-      move.note,
-      ability && !move.action ? abilityNote(ability, ctx.botName) : '',
-      riddleNote,
-    ].filter(Boolean)
+    const notes = [turn.note, ability ? abilityNote(ability, ctx.botName) : '', riddleNote].filter(
+      Boolean
+    )
+    const move = turn
     const say = await this.generate(ctx, {
       note: notes.join('\n') || undefined,
-      ...(ability && !move.action ? { ability, address: member?.address ?? 'my friend' } : {}),
+      ...(ability ? { ability, address: member?.address ?? 'my friend' } : {}),
       // A royal who names the bot (even misspelled) or answers it gets a reply, not silence.
       insist:
         member && (answeringUs || mentionsNameLoosely(event.message, ctx.botName))
@@ -194,14 +206,54 @@ export class OllamaBrain implements Brain {
   }
 
   /**
+   * Build and undo requests (royals only). Null when the line is neither, so movement can have a
+   * go. A request for something not in the spellbook gets the spellbook offered instead.
+   */
+  private buildTurn(event: ChatEvent, member: CourtMember | undefined): Turn | null {
+    const who = member ? `the ${member.title}` : event.from
+    if (detectUndoRequest(event.message)) {
+      if (!member)
+        return {
+          note: `(Only the royal family may ask you to take builds down. Decline ${who} kindly.)`,
+        }
+      return {
+        action: { type: 'undo', requestedBy: event.from },
+        note: '(You now take down the last thing you built, as asked. Say so in one short sentence.)',
+      }
+    }
+    const request = detectBuildRequest(event.message)
+    if (!request) return null
+    if (!member) {
+      return {
+        note: `(Only the royal family may ask you to build. Decline ${who} kindly; do not promise to build.)`,
+      }
+    }
+    if (!request.blueprint) {
+      return {
+        note: `(Your spellbook only holds ${spellbookList()}. Kindly offer one of those instead; do not promise anything else.)`,
+        ability: 'build',
+      }
+    }
+    const palette = choosePalette(
+      request.blueprint,
+      event.message,
+      this.memory.facts(member.player)
+    )
+    const title = makeBlueprint(request.blueprint, palette).title
+    const colours = paletteWords(palette)
+    return {
+      action: { type: 'build', blueprint: request.blueprint, palette, requestedBy: event.from },
+      note:
+        `(You now begin building ${title}${colours ? ` in ${colours}` : ''} near ${who}. ` +
+        'Say so gladly in one short sentence; building takes a little while.)',
+    }
+  }
+
+  /**
    * Movement requests: royals can ask the bot to follow, come or stop. Returns the action to
    * take (if any) and a one-off note telling the model what is happening, so the reply matches.
    */
-  private moveTurn(
-    event: ChatEvent,
-    member: CourtMember | undefined,
-    ctx: BrainContext
-  ): { action?: BotAction; note: string } {
+  private moveTurn(event: ChatEvent, member: CourtMember | undefined, ctx: BrainContext): Turn {
     const command = detectMoveCommand(event.message, Boolean(ctx.activity))
     if (!command) return { note: '' }
     const who = member ? `the ${member.title}` : event.from
@@ -309,6 +361,56 @@ export class OllamaBrain implements Brain {
         this.log.info(`remembered about ${subject.label}: ${fact}`)
       }
     }
+  }
+
+  async onBuildDone(outcome: BuildOutcome, ctx: BrainContext): Promise<string | null> {
+    const member = this.court.find(outcome.requestedBy)
+    const who = member ? `the ${member.title}` : outcome.requestedBy
+    const address = member?.address ?? 'my friend'
+    const { title } = outcome
+    const prompts: Record<string, { event: string; fallback: string }> = {
+      ok: {
+        event: `You finished building ${title} for ${who}. Tell them proudly in one short sentence and invite them to look.`,
+        fallback: `There it stands, ${address}: ${title}, raised by magic for you!`,
+      },
+      partial: {
+        event: `You built most of ${title} for ${who}, but a few blocks would not fit. Tell them cheerfully in one short sentence.`,
+        fallback: `Behold ${title}, ${address}! A few stones would not settle, but it stands.`,
+      },
+      no_site: {
+        event: `You looked for a clear, flat spot near ${who} to build ${title} but found none: trees, water or steep ground are in the way, and you never break anything. Say so kindly and suggest an open, flat place.`,
+        fallback: `Alas, ${address}, there is no clear, flat ground here for ${title}. Shall we find a more open spot?`,
+      },
+      outside_zone: {
+        event: `${who} asked for ${title}, but you may only build on the royal grounds and they are too far from them. Say so kindly in one short sentence.`,
+        fallback: `Alas, ${address}, I may only build on the royal grounds. Let us go there and I shall build it!`,
+      },
+      no_zone: {
+        event: `${who} asked for ${title}, but you have not been granted any royal grounds to build on. Say so kindly in one short sentence.`,
+        fallback: `Alas, ${address}, I have not been granted any grounds to build on yet.`,
+      },
+      not_visible: {
+        event: `${who} asked for ${title}, but you cannot see them from here to know where to build. Ask them to come closer.`,
+        fallback: `I cannot see you from here, ${address}. Come closer and I shall build it beside you!`,
+      },
+      busy: {
+        event: `${who} asked for ${title}, but you are still busy building something else. Ask them kindly to wait a little.`,
+        fallback: `Patience, ${address}, I am still building. One wonder at a time!`,
+      },
+      stuck: {
+        event: `You had to stop building ${title} for ${who}: too many blocks would not go where they belong. Say so kindly in one short sentence.`,
+        fallback: `Alas, ${address}, the stones would not obey me this time. ${title} is only half done.`,
+      },
+      cancelled: { event: '', fallback: '' },
+    }
+    const key = outcome.ok
+      ? outcome.placed < outcome.total
+        ? 'partial'
+        : 'ok'
+      : (outcome.reason ?? 'stuck')
+    const prompt = prompts[key]
+    if (!prompt?.event) return null
+    return this.generate(ctx, { eventPrompt: `[event] ${prompt.event}`, fallback: prompt.fallback })
   }
 
   async onStuck(target: string, ctx: BrainContext): Promise<string | null> {
@@ -444,9 +546,11 @@ export class OllamaBrain implements Brain {
       '- You can walk now: when the royal family asks, you follow them, walk over to them, or stop. ' +
         'The walking happens by itself; just talk about it naturally. Only walk for the royal family.',
       activity && `- Right now you are ${activity}.`,
-      '- You still cannot build, fetch or carry items, or find places by name. If asked to, never ' +
-        'agree or promise to do it. Kindly explain in character that this magic is not ready yet ' +
-        'and offer something else (for example, to follow them there).',
+      `- You can build from your spellbook when the royal family asks: ${spellbookList()}. ` +
+        'The building happens by itself; just talk about it. Only build for the royal family.',
+      '- You still cannot build anything outside your spellbook, fetch or carry items, or find ' +
+        'places by name. If asked to, never agree or promise to do it. Kindly explain in ' +
+        'character that this magic is not ready yet and offer something else.',
       '- Always answer the royal family unless they are clearly talking to someone else.',
       `- If a guest's line needs no answer, reply with exactly ${SILENT_TOKEN}.`,
       '- Riddles you tell come only from your riddle book (you will be told which one). Never make up your own.',
@@ -496,6 +600,22 @@ export interface BrainOptions {
   memory?: CourtMemory
   /** This bot extracts new memories from conversations (one scribe per court avoids duplicates). */
   learns?: boolean
+}
+
+/** What a chat line asks of the body, plus a one-off note so the reply matches. */
+interface Turn {
+  action?: BotAction
+  note: string
+  /** A request the bot cannot fulfil: guard the reply against promises. */
+  ability?: MissingAbility
+}
+
+/** "magenta and light blue" for a coloured palette; '' for the default stone look. */
+function paletteWords(p: Palette): string {
+  const colour = (block: string) =>
+    block.endsWith('_concrete') ? block.replace('_concrete', '').replace('_', ' ') : null
+  const words = [colour(p.primary), colour(p.accent)].filter((w): w is string => Boolean(w))
+  return [...new Set(words)].join(' and ')
 }
 
 interface GenerateOptions {

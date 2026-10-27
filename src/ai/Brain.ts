@@ -1,3 +1,4 @@
+import type { BlueprintId, Palette } from '../build/blueprints'
 export type ChatKind = 'chat' | 'whisper' | 'announcement' | 'system'
 
 /** One line of in-game chat, already normalised from the wire format. */
@@ -29,7 +30,21 @@ export interface BrainContext {
 }
 
 /** Something the brain asks the bot's body to do. */
-export type BotAction = { type: 'follow' | 'come'; target: string } | { type: 'stop' }
+export type BotAction =
+  | { type: 'follow' | 'come'; target: string }
+  | { type: 'stop' }
+  | { type: 'build'; blueprint: BlueprintId; palette: Palette; requestedBy: string }
+  | { type: 'undo'; requestedBy: string }
+
+/** How a build went, for the brain to talk about. */
+export interface BuildOutcome {
+  title: string
+  requestedBy: string
+  ok: boolean
+  placed: number
+  total: number
+  reason?: 'cancelled' | 'stuck' | 'no_site' | 'outside_zone' | 'no_zone' | 'not_visible' | 'busy'
+}
 
 /** A reply to chat: words to say and/or an action to take. */
 export interface BrainReply {
@@ -52,4 +67,6 @@ export interface Brain {
   onNotice(event: ChatEvent, ctx: BrainContext): Promise<string | null>
   /** Called once when the bot cannot find a way to the player it is following or walking to. */
   onStuck(target: string, ctx: BrainContext): Promise<string | null>
+  /** Called when a build (or taking one down) finishes or cannot start. */
+  onBuildDone(outcome: BuildOutcome, ctx: BrainContext): Promise<string | null>
 }
