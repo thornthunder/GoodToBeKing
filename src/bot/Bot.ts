@@ -426,6 +426,11 @@ export class Bot extends EventEmitter {
     this.emit('playerJoin', name)
     setTimeout(() => {
       if (!this.connected) return
+      const stillHere = [...this.state.players.values()].some((p) => p.name === name)
+      if (!stillHere) {
+        this.log.debug(`not greeting ${name}: already gone`)
+        return
+      }
       this.brain
         .onPlayerJoin(name, this.context())
         .then((text) => {
