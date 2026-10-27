@@ -128,7 +128,34 @@ export class BotManager {
         }
       }
       if (this.works) avoid.push(this.works.plan.area)
-      const sites = findCastleSites((x, z) => scout.topAt(x, z), zone, { avoid })
+      // What every bot in the world can see, remembered column by column.
+      const known = new Map<string, { y: number; name: string }>()
+      const look = () => {
+        const r = zone.radius
+        for (const b of this.bots.filter((bot) => bot.state.status === 'spawned'))
+          for (let x = zone.center.x - r; x <= zone.center.x + r; x++)
+            for (let z = zone.center.z - r; z <= zone.center.z + r; z++) {
+              const k = `${x},${z}`
+              if (known.has(k)) continue
+              const t = b.topAt(x, z)
+              if (t) known.set(k, t)
+            }
+      }
+      look()
+      const topAt = (x: number, z: number) => known.get(`${x},${z}`) ?? null
+      let sites = findCastleSites(topAt, zone, { avoid })
+      if (sites.length < 3) {
+        // Not enough open ground in sight: one of the guards flies a survey over the zone first.
+        const flyer = this.bots.find((b) => b.cfg.duty && b.state.status === 'spawned') ?? scout
+        const r = Math.round(zone.radius * 0.6)
+        const points = [0, 45, 90, 135, 180, 225, 270, 315].map((deg) => ({
+          x: Math.round(zone.center.x + r * Math.cos((deg * Math.PI) / 180)),
+          z: Math.round(zone.center.z + r * Math.sin((deg * Math.PI) / 180)),
+        }))
+        this.log.info(`only ${sites.length} sites in sight; ${flyer.cfg.name} flies a survey`)
+        await flyer.survey(points, zone.center.y + 40, look)
+        sites = findCastleSites(topAt, zone, { avoid })
+      }
       for (const [i, s] of sites.entries()) this.log.info(`site ${i + 1}: ${JSON.stringify(s)}`)
       const model = process.env.OVERLORD_MODEL ?? 'gemma4:26b'
       const ai = new OllamaClient(

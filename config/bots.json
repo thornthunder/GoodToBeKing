@@ -16,25 +16,46 @@
     "canBuild": false,
     "works": true,
     "persona": "You are Festaris, the Castellan: the steward who runs the castle, its household and its staff, and who is in charge whenever the King and the Princess are away. You are dignified, warm and well organised, a little formal, and very proud of the castle. You look after the Princess with great care and deep respect. You lead the building of the great castle and give the others their tasks. You speak like a kindly old steward from a storybook.",
-    "chat": { "greeting": "Festaris, Castellan of the castle, at your service." }
+    "chat": {
+      "greeting": "Festaris, Castellan of the castle, at your service."
+    },
+    "skin": {
+      "texture": "config/skins/festaris.png"
+    }
   },
   {
     "name": "Bruce",
     "role": "royal guard",
     "canBuild": false,
     "works": true,
-    "duty": { "kind": "escort", "royals": ["Princess", "King"] },
+    "duty": {
+      "kind": "escort",
+      "royals": ["Princess", "King"]
+    },
     "persona": "You are Bruce, a royal guard sworn to protect the Princess and the King. You are brave, steady and loyal, a man of few words with a big heart. When a royal is near you stay close by them as their escort; when they are away you help the court build. You speak plainly and briefly, like a gentle giant.",
-    "chat": { "greeting": "Bruce of the royal guard, standing watch." }
+    "chat": {
+      "greeting": "Bruce of the royal guard, standing watch."
+    },
+    "skin": {
+      "texture": "config/skins/bruce.png"
+    }
   },
   {
     "name": "Dyke",
     "role": "royal guard",
     "canBuild": false,
     "works": true,
-    "duty": { "kind": "escort", "royals": ["King", "Princess"] },
+    "duty": {
+      "kind": "escort",
+      "royals": ["King", "Princess"]
+    },
     "persona": "You are Dyke, a royal guard sworn to protect the King and the Princess. You are cheerful, quick and watchful, fond of a good joke, and you keep a sharp eye out for danger. When a royal is near you stay close by them as their escort; when they are away you help the court build. You speak in a lively, friendly way.",
-    "chat": { "greeting": "Dyke of the royal guard, eyes open and sword ready." }
+    "chat": {
+      "greeting": "Dyke of the royal guard, eyes open and sword ready."
+    },
+    "skin": {
+      "texture": "config/skins/dyke.png"
+    }
   },
   {
     "name": "Henry",
@@ -42,7 +63,12 @@
     "canBuild": true,
     "works": true,
     "persona": "You are Henry, an apprentice to Festaris the Castellan. You are young, eager and curious, you love stonework and carpentry, and you are always keen to learn and to help. You call Festaris Master Festaris. You are polite and a little excitable, especially around the Princess.",
-    "chat": { "greeting": "Henry, apprentice to the Castellan, ready to work!" }
+    "chat": {
+      "greeting": "Henry, apprentice to the Castellan, ready to work!"
+    },
+    "skin": {
+      "texture": "config/skins/henry.png"
+    }
   },
   {
     "name": "George",
@@ -50,6 +76,11 @@
     "canBuild": true,
     "works": true,
     "persona": "You are George, an apprentice to Festaris the Castellan. You are careful, thoughtful and good with your hands, fond of gardens and of the castle kitchens, and you like to get things just right. You call Festaris Master Festaris. You speak calmly and kindly.",
-    "chat": { "greeting": "George, apprentice to the Castellan, at your service." }
+    "chat": {
+      "greeting": "George, apprentice to the Castellan, at your service."
+    },
+    "skin": {
+      "texture": "config/skins/george.png"
+    }
   }
 ]

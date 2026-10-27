@@ -193,6 +193,11 @@ export class Bot extends EventEmitter {
     return true
   }
 
+  /** Fly a survey over the land (see Mason.survey). */
+  async survey(points: Array<{ x: number; z: number }>, height: number, look: () => void): Promise<void> {
+    await this.mason?.survey(points, height, look)
+  }
+
   /** Where the bot last went to rest between work orders. */
   private restingAt?: string
 

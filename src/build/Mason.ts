@@ -380,6 +380,26 @@ export class Mason {
     return false
   }
 
+  /** Fly high over a list of points (a survey flight), pausing at each; `look` runs at every stop. */
+  async survey(points: Array<{ x: number; z: number }>, height: number, look: () => void): Promise<void> {
+    if (this.current) return
+    this.current = 'surveying the land'
+    try {
+      for (const p of points) {
+        try {
+          await this.flyTo(new Vec3(p.x + 0.5, height, p.z + 0.5))
+        } catch (err) {
+          this.log.debug(`survey flight to ${p.x},${p.z}: ${errMsg(err)}`)
+        }
+        await sleep(4_000) // let the chunks around arrive
+        look()
+      }
+    } finally {
+      await this.land()
+      this.current = null
+    }
+  }
+
   /** Go and stand at a resting spot (between jobs), out of everyone's way. */
   async park(spot: { x: number; y: number; z: number }): Promise<void> {
     if (this.current) return
