@@ -12,6 +12,8 @@ export interface Worker {
   available(): boolean
   position(): { x: number; y: number; z: number } | undefined
   work(job: Job): Promise<JobResult>
+  /** Nothing to do right now: go and wait at this spot (out of the way of the work). */
+  idle?(spot: { x: number; y: number; z: number }): void
 }
 
 export type WorksEvent =
@@ -53,6 +55,9 @@ export class Works {
   private readonly centres = new Map<string, { x: number; z: number }>()
   /** 'finished' was reported (or the works were already finished when loaded). */
   private announced = false
+  /** Free courtyard cells where idle workers wait. */
+  private readonly restSpots: Array<{ x: number; y: number; z: number }> = []
+  private readonly restIndex = new Map<string, number>()
   paused = false
 
   constructor(
@@ -79,6 +84,21 @@ export class Works {
     }
     this.announced = this.finished
     this.save()
+    // Resting spots: courtyard paving with nothing planned on it (and not at the very edge).
+    const yard = plan.sections.filter((s) => s.kind === 'courtyard').flatMap((s) => s.cells)
+    for (const c of yard) {
+      const free = [1, 2].every((dy) => !plan.planned.has(`${c.x},${c.y + dy},${c.z}`))
+      const near = [-1, 1].some((d) => plan.planned.has(`${c.x + d},${c.y + 1},${c.z}`) || plan.planned.has(`${c.x},${c.y + 1},${c.z + d}`))
+      if (free && !near && c.y === plan.floorY) this.restSpots.push({ x: c.x, y: c.y + 1, z: c.z })
+    }
+  }
+
+  private restSpotFor(worker: string): { x: number; y: number; z: number } | undefined {
+    if (!this.restSpots.length) return undefined
+    if (!this.restIndex.has(worker)) this.restIndex.set(worker, this.restIndex.size)
+    const i = this.restIndex.get(worker)!
+    // Spread the crew over the courtyard.
+    return this.restSpots[Math.floor((i * this.restSpots.length) / 7) % this.restSpots.length]
   }
 
   get finished(): boolean {
@@ -113,7 +133,11 @@ export class Works {
       if (this.running.has(w.name)) continue
       if (!isFree(w)) continue
       const next = this.next(w)
-      if (!next) continue
+      if (!next) {
+        const spot = this.restSpotFor(w.name)
+        if (spot) w.idle?.(spot)
+        continue
+      }
       this.start(w, next)
     }
   }

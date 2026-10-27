@@ -40,7 +40,7 @@ export interface OverlordResult {
   summary: string
 }
 
-const MAX_ROUNDS = 6
+const MAX_ROUNDS = 10
 
 /** Room types the court needs in every castle, with the reason given back to the overlord. */
 const NEEDED: Array<[string[], string]> = [
@@ -92,6 +92,7 @@ THE RULES
 - A door's "at" counts along its wall from the west end (north and south walls) or the north end (east and west walls), and must stay at least one block away from the corners.
 - Rooms must be at least 4 by 4, walls included; buildings at least 5 by 5; towers between 3 and 9 square.
 - Leave an open courtyard of at least 8 by 8 inside the walls, reachable from the gate, so people can walk from the gate to every door.
+- The rooms of each storey should fill their building (share walls rather than leave empty space). A great hall or throne room needs at least 7 blocks on its short side; stables stand on the ground storey.
 - Think like a real castle builder: the kitchen next to the hall, the royal bedchambers high up in the keep, the guards near the gate, the stables by the wall.
 
 Answer with JSON only: { "site": <number of the site you choose>, "summary": "<one or two sentences about your plan, for the Castellan to announce>", "design": { ...the design... } }`
@@ -174,6 +175,24 @@ export function courtProblems(d: CastleDesign): string[] {
       const other = blockedBy(ox, oz, name)
       if (other && !doorCells.has(`${ox},${oz}`))
         problems.push(`the ${o.side} ${kind} of ${name} at ${o.at} opens straight into ${other.name} (give ${other.name} a door right there, or move this one)`)
+    }
+  }
+  // A builder's review: rooms that fill their storeys, halls big enough to feast in, horses below.
+  for (const b of d.buildings) {
+    const interior = Math.max(1, (b.width - 2) * (b.depth - 2))
+    for (const [k, storey] of b.storeys.entries()) {
+      const covered = new Set<string>()
+      for (const r of storey.rooms)
+        for (let x = r.x + 1; x < r.x + r.width - 1; x++)
+          for (let z = r.z + 1; z < r.z + r.depth - 1; z++) covered.add(`${x},${z}`)
+      if (covered.size < interior * 0.75)
+        problems.push(`storey ${k + 1} of ${b.name} leaves much of the building empty: let its rooms fill the whole building, sharing walls`)
+      for (const r of storey.rooms) {
+        const big = r.type === 'great_hall' || r.type === 'throne_room' || r.type === 'dining_hall'
+        if (big && (Math.min(r.width, r.depth) < 7 || r.width * r.depth < 80))
+          problems.push(`the ${r.name} in ${b.name} is too small for its purpose: make it at least 7 blocks on its short side and about 80 blocks in area`)
+        if (r.type === 'stables' && k > 0) problems.push(`the ${r.name} in ${b.name} must be on the ground storey: horses cannot climb ladders`)
+      }
     }
   }
   for (const b of d.buildings) checkDoors(b.name, b, b.doors, 'door')

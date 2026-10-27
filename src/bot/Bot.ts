@@ -193,9 +193,22 @@ export class Bot extends EventEmitter {
     return true
   }
 
+  /** Where the bot last went to rest between work orders. */
+  private restingAt?: string
+
+  /** Wait at a spot between work orders (once; it stays there until the next order). */
+  rest(spot: Point): void {
+    const k = `${spot.x},${spot.y},${spot.z}`
+    if (this.restingAt === k || !this.mason || this.mason.busy || this.builder?.busy) return
+    if (this.movement?.current()) return
+    this.restingAt = k
+    void this.mason.park(spot)
+  }
+
   /** Build one section of the court's works. */
   async work(job: Job): Promise<JobResult> {
     const mason = this.mason
+    this.restingAt = undefined
     if (!mason) return { placed: 0, dug: 0, missing: job.cells.length, blocked: 0, cancelled: true }
     if (this.dutyFollowing) this.dutyFollowing = false
     this.movement?.stop()

@@ -114,6 +114,34 @@ Each entry starts from the environment defaults and overrides only the keys it s
 can share a server and model but differ in name, persona or temperature. Bots connect one after
 another with a short stagger.
 
+The court in [config/bots.json](config/bots.json) has six members: Merlin the court wizard,
+Festaris the Castellan (in charge when the royals are away), the royal guards Bruce and Dyke
+(they escort the Princess and the King when they are in sight), and the Castellan's apprentices
+Henry and George. One of them answers each chat line: the one named, the one already talking
+with that player, or the herald.
+
+## Building together
+
+The court builds castles as a crew. A castle is written in a small JSON design language
+(walls, gates, towers, buildings with storeys of typed rooms, courtyard features); see
+[config/castles/great-castle.json](config/castles/great-castle.json) and `src/build/design.ts`.
+Set `WORKS_DESIGN` to a design and the app compiles it into furnished blocks and work orders.
+
+- The Castellan hands out the work orders in chat and the crew answers him; every free bot
+  takes the next order whose prerequisites are done (upper storeys wait for the ones below).
+- Bots build like creative-mode players, no operator commands: they clear natural terrain off
+  the site, fill foundations, and fly to place every block. They never break anything a player
+  made; the village path under the stables is simply left in place.
+- Progress is kept in `.state/`, so a restart carries on where it stopped; incomplete work
+  orders are retried, rooms already roofed over are reached through a gap in the roof that is
+  closed again afterwards.
+- With `WORKS_NEXT=overlord`, once the castle is finished the court plans the next one on its
+  own: the bots survey open ground, a larger model (`OVERLORD_MODEL`) picks a site and writes a
+  design, and every problem the builders find is sent back until the design is sound.
+
+`.command` lines control the works while the app runs: `works status`, `works pause`,
+`works resume`, `works start <design.json>` and `works plan`.
+
 ## Scripts
 
 Run each with `corepack pnpm run <name>`.
@@ -181,8 +209,8 @@ vendor/bedboo/        git submodule: mineflayer-bedrock (LGPL-3.0)
 
 ## Roadmap
 
-- More court members (the princess chooses the next one)
+- Outfits for the new court members (only Merlin has a skin so far)
 - Following flying players (creative flight), opening doors
-- Building on request, player-style (no operator commands)
+- Doors, stairs and banners in the castle designs
 - Tool-calling so the model can choose actions itself
 - World awareness: nearby blocks, mobs and items in the prompt

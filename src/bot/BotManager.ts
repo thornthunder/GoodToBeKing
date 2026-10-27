@@ -201,6 +201,8 @@ export class BotManager {
     )
     const blocks = plan.sections.reduce((n, s) => n + s.cells.length, 0)
     const { done, total } = this.works.progress()
+    // Milestones already passed (before a restart) are not announced again.
+    this.milestone = Math.floor((done / total) * 4)
     this.log.info(`works: ${plan.title}, ${total} sections (${done} done), ${blocks} blocks`)
     if (this.ready) this.runWorks()
     return true
@@ -219,6 +221,7 @@ export class BotManager {
         available: () => b.canWork(),
         position: () => b.position(),
         work: (job) => b.work(job),
+        idle: (spot) => b.rest(spot),
       }))
   }
 

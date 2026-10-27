@@ -81,6 +81,8 @@ export class Mason {
   private cancelled = false
   private current: string | null = null
   private held: string | null = null
+  /** The plan's blocks of the job in hand (what counts as our own work). */
+  private planned = new Map<string, string>()
 
   constructor(
     private readonly bot: MineflayerBot,
@@ -107,6 +109,7 @@ export class Mason {
   async work(job: Job): Promise<JobResult> {
     this.cancelled = false
     this.current = job.title
+    this.planned = job.planned
     const result: JobResult = { placed: 0, dug: 0, missing: 0, blocked: 0, cancelled: false }
     try {
       await this.clear(job, result)
@@ -294,24 +297,101 @@ export class Mason {
     return null
   }
 
-  private async placeOne(t: Target): Promise<boolean> {
-    const p = new Vec3(t.x, t.y, t.z)
+  private async placeOne(t: Target, shaft = true): Promise<boolean> {
     for (let attempt = 0; attempt < 3; attempt++) {
       if (!(await this.reach(t, attempt))) continue
-      const ref = this.reference(t)
-      if (!ref) return false
-      try {
-        await this.hold(t.block, t.data)
-        await withTimeout(this.bot.placeBlock(ref.block, ref.face), 5_000)
-      } catch (err) {
-        this.log.debug(`place ${t.block} at ${t.x},${t.y},${t.z} (try ${attempt + 1}): ${errMsg(err)}`)
+      if (await this.putHere(t, attempt)) return true
+    }
+    // Still out of reach: probably inside a room that is already roofed over.
+    return shaft && !this.cancelled ? this.viaShaft(t) : false
+  }
+
+  /** Place a block from where the bot is now. */
+  private async putHere(t: Target, attempt = 0): Promise<boolean> {
+    const p = new Vec3(t.x, t.y, t.z)
+    const ref = this.reference(t)
+    if (!ref) return false
+    try {
+      await this.hold(t.block, t.data)
+      await withTimeout(this.bot.placeBlock(ref.block, ref.face), 5_000)
+    } catch (err) {
+      this.log.debug(`place ${t.block} at ${t.x},${t.y},${t.z} (try ${attempt + 1}): ${errMsg(err)}`)
+    }
+    for (let i = 0; i < 4; i++) {
+      if (this.bot.blockAt(p)?.name === t.block) return true
+      await sleep(120)
+    }
+    return false
+  }
+
+  /**
+   * Last resort for a cell inside a finished room: lift a few of our own blocks straight above a
+   * spot beside it (the roof), fly down the shaft, place the block, fly back up and put the
+   * lifted blocks back. Never touches anything that is not planned work.
+   */
+  private async viaShaft(t: Target): Promise<boolean> {
+    for (const spot of this.spotsFor(t).slice(0, 3)) {
+      const sx = Math.floor(spot.x)
+      const sz = Math.floor(spot.z)
+      const sy = Math.floor(spot.y)
+      const lifted: Target[] = []
+      let open: number | undefined
+      for (let y = sy + 2; y < sy + 30; y++) {
+        const name = this.bot.blockAt(new Vec3(sx, y, sz))?.name
+        if (name === undefined) break
+        if (AIR.test(name) || SOFT.test(name)) {
+          let sky = true
+          for (let up = y; up < y + 12 && sky; up++) {
+            const n = this.bot.blockAt(new Vec3(sx, up, sz))?.name
+            if (n === undefined || !(AIR.test(n) || SOFT.test(n))) sky = false
+          }
+          if (sky) {
+            open = y
+            break
+          }
+          continue
+        }
+        if (this.planned.get(key(sx, y, sz)) !== name) break // not ours: leave it
+        lifted.push({ x: sx, y, z: sz, block: name })
       }
-      for (let i = 0; i < 4; i++) {
-        if (this.bot.blockAt(p)?.name === t.block) return true
-        await sleep(120)
+      if (open === undefined || !lifted.length || lifted.length > 6) continue
+      this.log.info(`reaching ${t.block} at ${t.x},${t.y},${t.z} through the roof (lifting ${lifted.length} blocks)`)
+      const dug: Target[] = []
+      try {
+        for (const b of [...lifted].reverse()) {
+          if (!(await this.reach({ ...b, block: 'air' }))) break
+          const block = this.bot.blockAt(new Vec3(b.x, b.y, b.z))
+          if (block) await withTimeout(this.bot.dig(block, true), 6_000)
+          if (this.open(new Vec3(b.x, b.y, b.z))) dug.push(b)
+        }
+        if (dug.length !== lifted.length) continue
+        await this.flyTo(new Vec3(sx + 0.5, open + 0.5, sz + 0.5))
+        await this.flyTo(spot)
+        const placed = await this.putHere(t)
+        await this.flyTo(new Vec3(sx + 0.5, open + 0.5, sz + 0.5))
+        return placed
+      } catch (err) {
+        this.log.debug(`shaft to ${t.x},${t.y},${t.z}: ${errMsg(err)}`)
+      } finally {
+        // Put the roof back, bottom up.
+        for (const b of dug.sort((a, b) => a.y - b.y)) await this.placeOne(b, false)
       }
     }
     return false
+  }
+
+  /** Go and stand at a resting spot (between jobs), out of everyone's way. */
+  async park(spot: { x: number; y: number; z: number }): Promise<void> {
+    if (this.current) return
+    this.current = 'going to rest'
+    try {
+      await this.flyTo(new Vec3(spot.x + 0.5, spot.y, spot.z + 0.5))
+    } catch (err) {
+      this.log.debug(`could not get to the resting spot: ${errMsg(err)}`)
+    } finally {
+      await this.land()
+      this.current = null
+    }
   }
 
   /** Get within reach of a cell (on the right side for facing blocks), flying as needed. */
