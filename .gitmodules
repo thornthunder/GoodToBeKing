@@ -1,0 +1,3 @@
+[submodule "vendor/bedboo"]
+	path = vendor/bedboo
+	url = https://github.com/LiteLDev/bedboo.git

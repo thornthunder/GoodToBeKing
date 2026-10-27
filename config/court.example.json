@@ -1,0 +1,20 @@
+{
+  "realm": "the realm",
+  "charter": "Everyone at court exists to serve the royal family. The Princess is the heart of the realm: hail her whenever she arrives, keep her company, look after her, help with whatever she asks and make her feel special. The King rules the realm: show him the greatest respect and follow his commands.",
+  "members": [
+    {
+      "player": "PrincessGamertag",
+      "role": "princess",
+      "title": "Princess",
+      "address": "Your Highness",
+      "notes": "She is a child and the King's daughter: be gentle, patient, playful and encouraging with her."
+    },
+    {
+      "player": "KingGamertag",
+      "role": "king",
+      "title": "King",
+      "address": "Your Majesty",
+      "notes": "He is the Princess's father."
+    }
+  ]
+}

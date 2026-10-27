@@ -1,0 +1,55 @@
+{
+  "name": "goodtobeking",
+  "version": "0.1.0",
+  "description": "AI-driven Minecraft Bedrock players: bots that join a Bedrock server and act as players, with Ollama providing the brains.",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src scripts",
+    "format": "prettier --write \"src/**/*.ts\" \"scripts/**/*.ts\" \"*.{json,md,mjs}\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"scripts/**/*.ts\"",
+    "smoke": "tsx scripts/smoke-loopback.ts",
+    "ollama:check": "tsx scripts/ollama-check.ts",
+    "check": "npm run typecheck && npm run lint && npm test",
+    "live:follow": "tsx scripts/live-follow.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thornthunder/GoodToBeKing.git"
+  },
+  "license": "MIT",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/thornthunder/GoodToBeKing/issues"
+  },
+  "homepage": "https://github.com/thornthunder/GoodToBeKing#readme",
+  "dependencies": {
+    "bedrock-protocol": "3.60.1",
+    "dotenv": "^18.0.9",
+    "minecraft-data": "3.117.0",
+    "mineflayer-bedrock": "workspace:*",
+    "mineflayer-pathfinder": "2.4.5",
+    "ollama": "^0.6.4",
+    "vec3": "0.1.10"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.5",
+    "eslint": "^10.13.0",
+    "prettier": "^3.9.10",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^5.0.5"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@12.14.0"
+}

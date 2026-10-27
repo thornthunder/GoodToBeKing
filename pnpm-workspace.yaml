@@ -1,0 +1,61 @@
+# GoodToBeKing uses mineflayer-bedrock from the bedboo submodule (vendor/bedboo, LGPL-3.0).
+# bedboo only works with the exact dependency versions and pnpm patches below, so this file
+# mirrors vendor/bedboo/pnpm-workspace.yaml. When you bump the submodule, copy its
+# overrides / packageExtensions / allowBuilds / patchedDependencies here again (patch paths
+# point into vendor/bedboo/patches).
+packages:
+  - vendor/bedboo/packages/*
+
+overrides:
+  bedrock-protocol: 3.60.1
+  minecraft-data: 3.117.0
+  mineflayer: 4.39.0
+  prismarine-block: 1.23.0
+  prismarine-chat: 1.13.0
+  prismarine-chunk: 1.41.0
+  prismarine-entity: 2.6.0
+  prismarine-item: 1.18.0
+  prismarine-nbt: 2.8.0
+  prismarine-physics: 1.11.1
+  prismarine-recipe: 1.5.0
+  prismarine-registry: 1.12.0
+  prismarine-windows: 2.10.0
+  prismarine-world: 3.7.0
+  raknet-native: 1.2.3
+  mineflayer-pathfinder: 2.4.5
+  mineflayer-pvp: 1.3.2
+  mineflayer-collectblock: 1.6.0
+  mineflayer-tool: 1.2.0
+  mineflayer-armor-manager: 2.0.1
+  mineflayer-auto-eat: 5.0.3
+  nethernet: 1.1.2
+
+# bedrock-protocol 3.60.1 depends on prismarine-xbox-services via a pinned GitHub commit.
+blockExoticSubdeps: false
+
+packageExtensions:
+  nethernet@1.1.2:
+    dependencies:
+      jsonwebtoken: ^9.0.3
+
+# raknet-native's install script would try a cmake build; bedboo's patch loads its prebuild.
+# esbuild (used by tsx and vitest) only checks its platform binary in its install script.
+allowBuilds:
+  raknet-native: false
+  esbuild: true
+
+patchedDependencies:
+  bedrock-protocol@3.60.1: vendor/bedboo/patches/bedrock-protocol@3.60.1.patch
+  mineflayer-armor-manager@2.0.1: vendor/bedboo/patches/mineflayer-armor-manager@2.0.1.patch
+  mineflayer-auto-eat@5.0.3: vendor/bedboo/patches/mineflayer-auto-eat@5.0.3.patch
+  mineflayer-collectblock@1.6.0: vendor/bedboo/patches/mineflayer-collectblock@1.6.0.patch
+  mineflayer-pathfinder@2.4.5: vendor/bedboo/patches/mineflayer-pathfinder@2.4.5.patch
+  mineflayer-pvp@1.3.2: vendor/bedboo/patches/mineflayer-pvp@1.3.2.patch
+  mineflayer-tool@1.2.0: vendor/bedboo/patches/mineflayer-tool@1.2.0.patch
+  nethernet@1.1.2: vendor/bedboo/patches/nethernet@1.1.2.patch
+  prismarine-block@1.23.0: vendor/bedboo/patches/prismarine-block@1.23.0.patch
+  prismarine-chunk@1.41.0: vendor/bedboo/patches/prismarine-chunk@1.41.0.patch
+  prismarine-entity@2.6.0: vendor/bedboo/patches/prismarine-entity@2.6.0.patch
+  prismarine-item@1.18.0: vendor/bedboo/patches/prismarine-item@1.18.0.patch
+  prismarine-registry@1.12.0: vendor/bedboo/patches/prismarine-registry@1.12.0.patch
+  raknet-native@1.2.3: vendor/bedboo/patches/raknet-native@1.2.3.patch

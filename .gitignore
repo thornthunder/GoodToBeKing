@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.local
+# Microsoft/Xbox auth token cache written by prismarine-auth
+.auth-cache/
+nmp-cache/
+*.log
+.DS_Store
+Thumbs.db
+# Real court roster: contains family gamertags (copy config/court.example.json)
+config/court.json
+# Created to stop a running app cleanly (see CLAUDE.md)
+.stop
+# Runtime state kept across restarts (hail times)
+.state/
