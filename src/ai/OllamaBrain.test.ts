@@ -9,6 +9,8 @@ import { OllamaBrain, type BrainOptions } from './OllamaBrain'
 import type { ChatMessage, ChatModel } from './OllamaClient'
 import { CourtRules, OrderBook, type Reading } from './orders'
 import { Magic } from '../magic/Magic'
+import { CommissionBook } from '../build/Commissions'
+import { DEFAULT_PALETTE } from '../build/blueprints'
 
 const court = new CourtRoster({
   realm: 'Testland',
@@ -314,16 +316,102 @@ describe('OllamaBrain court behaviour', () => {
     expect(calls[0].at(-1)?.content).toContain('Only the royal family may ask you to build')
   })
 
-  it('offers the spellbook, and replaces a promise, for something it cannot build', async () => {
+  it('offers what it can build, and replaces a promise, for something it cannot', async () => {
     const { brain, calls } = makeBrain('I will build you the finest house, little Princess.')
     const reply = await brain.onChat(
       chat('LittleOne42', 'Merlin build me a house'),
       seen('LittleOne42')
     )
     expect(reply?.action).toBeUndefined()
-    expect(reply?.say).toContain('my spellbook does not hold that yet')
+    // This test bot works no magic, so it speaks of the court's builders, not of a spellbook.
+    expect(reply?.say).toContain("beyond the court's builders")
     expect(reply?.say).toContain('a simple castle')
-    expect(calls[0].at(-1)?.content).toContain('Your spellbook only holds')
+    expect(calls[0].at(-1)?.content).toContain('You only know how to build')
+  })
+
+  describe('the Castellan', () => {
+    const staff = [
+      { name: 'Festaris', role: 'Castellan', canBuild: false },
+      { name: 'Henry', role: 'apprentice', canBuild: true, reportsTo: 'Festaris' },
+      { name: 'George', role: 'apprentice', canBuild: true, reportsTo: 'Festaris' },
+    ]
+    const castellan = (reply: string, commissions = new CommissionBook()) => {
+      const calls: ChatMessage[][] = []
+      const model: ChatModel = {
+        chat: async (messages) => {
+          if (messages[0].content.startsWith('You help'))
+            return { message: { role: 'assistant', content: JSON.stringify(NO_ORDER) } } as never
+          calls.push(messages)
+          return { message: { role: 'assistant', content: reply } } as never
+        },
+      }
+      const base = defaultBotConfig()
+      const cfg = { ...base, name: 'Festaris', role: 'Castellan', canBuild: false }
+      const brain = new OllamaBrain(cfg, model, court, createLogger('test'), { staff, commissions })
+      return { brain, calls, commissions }
+    }
+    const at = (...names: string[]) => ({ ...seen(...names), botName: 'Festaris' })
+
+    it('hands a build to his apprentices instead of declining it', async () => {
+      const { brain, calls } = castellan('I shall have George plant it for you, Your Highness.')
+      const reply = await brain.onChat(
+        chat('LittleOne42', 'festaris could you please build a flower garden'),
+        at('LittleOne42')
+      )
+      expect(reply?.action).toMatchObject({
+        type: 'commission',
+        blueprint: 'garden',
+        requestedBy: 'LittleOne42',
+      })
+      // His answer stands: handing it on is no empty promise.
+      expect(reply?.say).toBe('I shall have George plant it for you, Your Highness.')
+      expect(calls[0].at(-1)?.content).toContain('Henry or George will build a flower garden')
+    })
+
+    it('says truthfully how each build stands, and that one never asked for is not begun', () => {
+      const { brain, commissions } = castellan('unused')
+      expect(brain.systemPrompt(at('BigDad'))).toContain('Nobody has asked you for a build lately')
+      const c = commissions.add({
+        blueprint: 'garden',
+        title: 'a flower garden',
+        palette: DEFAULT_PALETTE,
+        requestedBy: 'LittleOne42',
+        takenBy: 'Festaris',
+        own: false,
+        near: { x: 1, y: 70, z: 2 },
+      })
+      expect(brain.systemPrompt(at('BigDad'))).toContain(
+        'a flower garden for the Princess: not started; it waits for a free builder'
+      )
+      commissions.start(c.id, 'George')
+      expect(brain.systemPrompt(at('BigDad'))).toContain(
+        'a flower garden for the Princess: George is building it right now'
+      )
+      commissions.finish(c.id, { ok: true })
+      expect(brain.systemPrompt(at('BigDad'))).toContain(
+        'a flower garden for the Princess: finished by George just now'
+      )
+    })
+
+    it('takes an order for a new palace, wherever the King wants it', async () => {
+      const { brain, calls } = castellan('A new palace it shall be, Your Majesty!')
+      const here = await brain.onChat(
+        chat('BigDad', 'Festaris, please build us a palace right here'),
+        at('BigDad')
+      )
+      expect(here?.action).toEqual({ type: 'works', what: 'palace', requestedBy: 'BigDad' })
+      expect(calls[0].at(-1)?.content).toContain('right where the King stands')
+      const there = await brain.onChat(
+        chat('BigDad', 'Festaris build a new castle at 400 -250'),
+        at('BigDad')
+      )
+      expect(there?.action).toEqual({
+        type: 'works',
+        what: 'castle',
+        requestedBy: 'BigDad',
+        at: { x: 400, z: -250 },
+      })
+    })
   })
 
   it('does not keep the note in the stored history', async () => {

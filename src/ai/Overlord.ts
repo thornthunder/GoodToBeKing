@@ -31,6 +31,10 @@ export interface Brief {
   example?: CastleDesign
   /** Names already used, so the new castle gets its own. */
   takenNames?: string[]
+  /** What is asked, when a royal ordered it ("The King orders a new palace ..."). */
+  request?: string
+  /** What the sites' directions are measured from (default: the old castle grounds). */
+  around?: string
 }
 
 export interface OverlordResult {
@@ -101,9 +105,9 @@ THE RULES
 
 Answer with JSON only: { "site": <number of the site you choose>, "summary": "<one or two sentences about your plan, for the Castellan to announce>", "design": { ...the design... } }`
 
-function siteLine(s: SiteOption, i: number): string {
+function siteLine(s: SiteOption, i: number, around = 'the old castle grounds'): string {
   return (
-    `Site ${i + 1}: ${s.area.width} by ${s.area.depth} blocks, ${s.direction} of the old castle grounds ` +
+    `Site ${i + 1}: ${s.area.width} by ${s.area.depth} blocks, ${s.direction} of ${around} ` +
     `(${s.distance} blocks away). Earth to move: ${s.cut} blocks to dig and ${s.fill} to fill; ` +
     `${s.trees} columns of trees; ${s.water} of water.`
   )
@@ -111,10 +115,10 @@ function siteLine(s: SiteOption, i: number): string {
 
 /** What the court needs, as one message for the overlord. */
 export function briefText(brief: Brief): string {
-  const sites = brief.sites.map(siteLine).join('\n')
+  const sites = brief.sites.map((s, i) => siteLine(s, i, brief.around)).join('\n')
   const crew = brief.crew.map((c) => `${c.name} (${c.role})`).join(', ')
   return [
-    'The court asks you for a second castle, different from the first.',
+    brief.request ?? 'The court asks you for a second castle, different from the first.',
     `The builders: ${crew}.`,
     'It must have rooms for the royal family (the King and the Princess, who is seven) and for the staff: ' +
       NEEDED.map(([, why]) => why).join(', ') +

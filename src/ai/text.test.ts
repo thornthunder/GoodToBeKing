@@ -63,6 +63,11 @@ describe('mentionsNameLoosely', () => {
     'rejects "%s"',
     (message) => expect(mentionsNameLoosely(message, 'Merlin')).toBe(false)
   )
+  it('forgives one slip in a short name, but not an everyday word', () => {
+    expect(mentionsNameLoosely('Henri come here', 'Henry')).toBe(true)
+    expect(mentionsNameLoosely('Festaris, build us a palace right here', 'Henry')).toBe(false)
+    expect(mentionsNameLoosely('Festeris, are you there', 'Festaris')).toBe(true)
+  })
   it('stays exact for short names', () => {
     expect(mentionsNameLoosely('hi bob', 'Bob')).toBe(true)
     expect(mentionsNameLoosely('hi rob', 'Bob')).toBe(false)

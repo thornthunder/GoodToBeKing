@@ -18,10 +18,24 @@ export interface ServerConfig {
    * the server port). Bedrock 1.26.60 servers answer only on Nethernet.
    */
   transport?: Transport
+  /**
+   * Nethernet's WebRTC: werift (pure JS, the default) or wrtc (native libwebrtc, needs the
+   * optional @roamhq/wrtc package); auto = wrtc when installed. werift encrypts every packet on
+   * the one JS thread: six bots kept it 94% busy, so flights and chat ran late.
+   */
+  webrtc?: WebrtcBackend
 }
 
 export type RaknetBackend = 'raknet-native' | 'jsp-raknet'
 export type Transport = 'raknet' | 'nethernet'
+export type WebrtcBackend = 'werift' | 'wrtc' | 'auto'
+
+function envWebrtc(key: string): WebrtcBackend | undefined {
+  const value = env(key)
+  if (value === undefined) return undefined
+  if (value === 'werift' || value === 'wrtc' || value === 'auto') return value
+  throw new Error(`${key} must be werift, wrtc or auto, got "${value}"`)
+}
 
 function envTransport(key: string): Transport | undefined {
   const value = env(key)
@@ -176,6 +190,7 @@ export function defaultBotConfig(): BotConfig {
       version: env('MC_VERSION'),
       raknetBackend: envRaknetBackend('MC_RAKNET_BACKEND'),
       transport: envTransport('MC_TRANSPORT'),
+      webrtc: envWebrtc('MC_WEBRTC'),
     },
     auth: {
       offline: envBool('MC_OFFLINE', true),

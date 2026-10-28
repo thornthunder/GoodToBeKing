@@ -13,7 +13,6 @@ import type { CourtRoster } from '../court'
 import type { Logger } from '../logger'
 import { errMsg } from '../util'
 import { useLanguage } from './language'
-import { Builder } from '../build/Builder'
 import { BuildLog, type BuildRecord } from '../build/BuildLog'
 import {
   DEFAULT_PALETTE,
@@ -22,6 +21,7 @@ import {
   type BlueprintId,
   type Palette,
 } from '../build/blueprints'
+import type { PlanCell } from '../build/compile'
 import { Mason, type Job, type JobResult } from '../build/Mason'
 import { findSite, type Point, type Site } from '../build/site'
 import { SEE_THROUGH } from '../build/sites'
@@ -56,6 +56,7 @@ export function serverOptions(server: ServerConfig): MineflayerBotOptions {
     ...(server.version ? { version: server.version } : {}),
     ...(server.raknetBackend ? { raknetBackend: server.raknetBackend } : {}),
     ...(server.transport ? { transport: server.transport } : {}),
+    ...(server.webrtc ? { nethernet: { webrtcBackend: server.webrtc } } : {}),
   } as MineflayerBotOptions
 }
 
@@ -123,9 +124,10 @@ export class Bot extends EventEmitter {
   /** mineflayer-bedrock bot: physics, world, pathfinding. Its `_client` is `client`. */
   private body?: MineflayerBot
   private movement?: Movement
-  private builder?: Builder
-  /** Works on sections of the court's great builds. */
+  /** Works on sections of the court's great builds, and raises the small builds royals ask for. */
   private mason?: Mason
+  /** Raising (or taking down) a build a royal asked for. */
+  private building = false
   /** A royal asked for something else: no work orders until then. */
   private worksPausedUntil = 0
   private readonly worksSummary?: () => string | undefined
@@ -186,7 +188,7 @@ export class Bot extends EventEmitter {
   private performDuty(): void {
     const movement = this.movement
     if (this.cfg.duty?.kind !== 'escort' || !movement || this.state.status !== 'spawned') return
-    if (this.builder?.busy || Date.now() < this.dutyPausedUntil) return
+    if (this.building || Date.now() < this.dutyPausedUntil) return
     if (this.brain.post?.()) return // a royal's standing order comes before the duty
     const target = this.dutyTarget()
     const current = movement.current()
@@ -206,9 +208,13 @@ export class Bot extends EventEmitter {
 
   /** Free to take a work order from the court's building works. */
   canWork(): boolean {
-    if (!this.cfg.works || this.state.status !== 'spawned' || !this.body || !this.mason)
-      return false
-    if (this.builder?.busy || this.mason.busy) return false
+    return Boolean(this.cfg.works) && this.isFree()
+  }
+
+  /** Idle: not building, not walking for anyone, not on duty or a royal's post. */
+  isFree(): boolean {
+    if (this.state.status !== 'spawned' || !this.body || !this.mason) return false
+    if (this.building || this.mason.busy) return false
     if (Date.now() < this.worksPausedUntil) return false
     if (this.movement?.current() && !this.dutyFollowing) return false
     if (this.dutyTarget() && Date.now() >= this.dutyPausedUntil) return false
@@ -351,7 +357,7 @@ export class Bot extends EventEmitter {
   private keepPost(): void {
     const post = this.brain.post?.()
     const movement = this.movement
-    if (post?.type !== 'follow' || !movement || this.builder?.busy) return
+    if (post?.type !== 'follow' || !movement || this.building) return
     const current = movement.current()
     if (current?.kind === 'following' && current.target === post.target) return
     if (!this.body?.players[post.target]?.entity) return
@@ -399,7 +405,7 @@ export class Bot extends EventEmitter {
   /** Wait at a spot between work orders (once; it stays there until the next order). */
   rest(spot: Point): void {
     const k = `${spot.x},${spot.y},${spot.z}`
-    if (this.restingAt === k || !this.mason || this.mason.busy || this.builder?.busy) return
+    if (this.restingAt === k || !this.mason || this.mason.busy || this.building) return
     if (this.movement?.current()) return
     this.restingAt = k
     void this.mason.park(spot)
@@ -430,6 +436,12 @@ export class Bot extends EventEmitter {
 
   position(): Point | undefined {
     const p = this.body?.entity?.position
+    return p ? { x: p.x, y: p.y, z: p.z } : undefined
+  }
+
+  /** Where a player stands, if this bot can see them. */
+  playerPosition(name: string): Point | undefined {
+    const p = this.body?.players[name]?.entity?.position
     return p ? { x: p.x, y: p.y, z: p.z } : undefined
   }
 
@@ -515,7 +527,6 @@ export class Bot extends EventEmitter {
         })
         .catch((err) => this.log.warn(`brain.onStuck failed: ${errMsg(err)}`))
     }
-    this.builder = new Builder(body, this.log.child('build'), this.buildLog, this.cfg.name)
     this.mason = new Mason(body, this.log.child('mason'))
     body.on('error', (err) => this.log.debug(`body error: ${errMsg(err)}`))
     body.once('spawn', () => this.movement?.configure())
@@ -569,25 +580,44 @@ export class Bot extends EventEmitter {
     if (!movement || this.state.status !== 'spawned') return
     switch (action.type) {
       case 'build':
-        this.pauseWorks()
-        void this.startBuild(action.blueprint, action.palette, action.requestedBy)
+      case 'commission': {
+        // The court keeps the request (see BotManager); without one, a builder just builds.
+        const request = {
+          blueprint: action.blueprint,
+          palette: action.palette,
+          requestedBy: action.requestedBy,
+          near: this.playerPosition(action.requestedBy),
+          own: action.type === 'build',
+        }
+        if (this.listenerCount('commission') > 0) this.emit('commission', request)
+        else if (action.type === 'build') {
+          this.pauseWorks()
+          void this.startBuild(action.blueprint, action.palette, action.requestedBy)
+        }
         return
+      }
       case 'undo':
         this.pauseWorks()
         void this.undoLastBuild(action.requestedBy)
+        return
+      case 'works':
+        // The court plans it (see BotManager): here, or at the coordinates the royal gave.
+        this.emit('works', {
+          what: action.what,
+          requestedBy: action.requestedBy,
+          near: action.at ?? this.playerPosition(action.requestedBy),
+        })
         return
       case 'cast':
         void this.castSpell(action)
         return
       case 'stay':
         // A standing order: no works and no escort while it stands (see post()).
-        this.builder?.cancel()
         this.mason?.cancel()
         movement.stop()
         this.dutyFollowing = false
         return
       case 'stop':
-        this.builder?.cancel()
         this.pauseWorks()
         movement.stop()
         // A royal said stop: the escort duty waits too, for a while.
@@ -595,7 +625,6 @@ export class Bot extends EventEmitter {
         this.dutyPausedUntil = Date.now() + DUTY_PAUSE_MS
         return
       default: {
-        this.builder?.cancel()
         this.pauseWorks()
         this.dutyFollowing = false
         this.dutyPausedUntil = 0
@@ -613,66 +642,170 @@ export class Bot extends EventEmitter {
   }
 
   /**
-   * Build a blueprint near a player (or near `at`), inside the build zone, then tell the brain
-   * how it went. Runs in the background; the bot keeps chatting while it builds.
+   * Raise a blueprint near a player (or near `place.at`) by creative flight, then tell the brain
+   * how it went. It goes wherever a royal asks: the site is always free ground, and nothing
+   * anyone made is ever broken. A build of the same thing left unfinished close by is finished
+   * instead of started again.
    */
   async startBuild(
     blueprintId: BlueprintId,
     palette: Palette,
     requestedBy: string,
-    at?: Point
-  ): Promise<void> {
-    const builder = this.builder
-    const body = this.body
+    place?: { at: Point; exact?: boolean }
+  ): Promise<BuildOutcome> {
     const bp = makeBlueprint(blueprintId, palette)
-    const report = (outcome: BuildOutcome) =>
-      this.brain
-        .onBuildDone(outcome, this.context())
-        .then((text) => {
-          if (text) this.chat(text)
-        })
-        .catch((err) => this.log.warn(`brain.onBuildDone failed: ${errMsg(err)}`))
-    const fail = (reason: BuildOutcome['reason']) =>
-      report({ title: bp.title, requestedBy, ok: false, placed: 0, total: bp.cells.length, reason })
-    if (!builder || !body) return
-    if (builder.busy) return void fail('busy')
-    // Let go of any work order first (the mason stops at its next block).
-    for (let i = 0; i < 50 && this.mason?.busy; i++) await new Promise((r) => setTimeout(r, 200))
-    const zone = this.cfg.buildZone
-    if (!zone) return void fail('no_zone')
-
-    const requester = body.players[requestedBy]?.entity?.position
-    const near = at ?? (requester ? { x: requester.x, y: requester.y, z: requester.z } : undefined)
-    if (!near) return void fail('not_visible')
-    if (Math.hypot(near.x - zone.center.x, near.z - zone.center.z) > zone.radius) {
-      return void fail('outside_zone')
-    }
-    const avoid = Object.values(body.players)
-      .map((p) => p.entity?.position)
-      .filter((p): p is NonNullable<typeof p> => Boolean(p))
-      .map((p) => ({ x: p.x, y: p.y, z: p.z }))
-    // An unfinished build of the same thing is resumed where it stands, not started again.
-    const unfinished = this.buildLog.unfinished(this.cfg.name, blueprintId)
-    const site = unfinished
-      ? resumeSite(unfinished)
-      : findSite(bp, builder.world(), {
-          near,
-          faceToward: requester ? near : undefined,
-          avoid,
-          zone,
-          minDistance: at ? -1 : 2,
-        })
-    if (!site) return void fail('no_site')
-
-    this.movement?.stop()
-    const result = await builder.build(site, {
+    const outcome = (reason: BuildOutcome['reason']): BuildOutcome => ({
       title: bp.title,
-      blueprint: bp.id,
       requestedBy,
-      palette: unfinished?.palette ?? palette,
-      resume: unfinished,
+      ok: false,
+      placed: 0,
+      total: bp.cells.length,
+      reason,
     })
-    await report(result)
+    const mason = this.mason
+    if (!mason || this.state.status !== 'spawned') return outcome('busy')
+    if (this.building) return this.reportBuild(outcome('busy'))
+    this.building = true
+    try {
+      // Let go of any work order first (the mason stops at its next block).
+      await this.letGo(mason)
+      const near = place?.at ?? this.playerPosition(requestedBy)
+      if (!near) return await this.reportBuild(outcome('not_visible'))
+      this.movement?.stop()
+      this.dutyFollowing = false
+      // Handed on from afar: fly over first, so the ground there is loaded.
+      const me = this.position()
+      if (!me || Math.hypot(me.x - near.x, me.z - near.z) > 16) await mason.visit(near)
+      // Still too far to see the ground there: that is no reason to say there is none.
+      const ground = mason.world().kind(Math.floor(near.x), Math.floor(near.y), Math.floor(near.z))
+      if (ground === undefined) return await this.reportBuild(outcome('unreachable'))
+      const unfinished = this.buildLog.unfinished(this.cfg.name, blueprintId)
+      const resume =
+        unfinished && Math.hypot(unfinished.origin.x - near.x, unfinished.origin.z - near.z) < 32
+          ? unfinished
+          : undefined
+      const avoid = Object.entries(this.body?.players ?? {})
+        .filter(([name]) => name !== this.username)
+        .map(([, p]) => p.entity?.position)
+        .filter((p): p is NonNullable<typeof p> => Boolean(p))
+        .map((p) => ({ x: p.x, y: p.y, z: p.z }))
+      const site = resume
+        ? resumeSite(resume)
+        : findSite(bp, mason.world(), {
+            near,
+            faceToward: place?.exact ? undefined : near,
+            avoid,
+            minDistance: place?.exact ? -1 : 2,
+          })
+      if (!site) return await this.reportBuild(outcome('no_site'))
+      const result = await this.raise(site, {
+        title: bp.title,
+        blueprint: blueprintId,
+        palette: resume?.palette ?? palette,
+        requestedBy,
+        resume,
+      })
+      return await this.reportBuild(result)
+    } finally {
+      this.building = false
+    }
+  }
+
+  /** Place a blueprint at its site with the mason, recording which blocks are ours (for undo). */
+  private async raise(
+    site: Site,
+    opts: {
+      title: string
+      blueprint: BlueprintId
+      palette: Palette
+      requestedBy: string
+      resume?: BuildRecord
+    }
+  ): Promise<BuildOutcome> {
+    const mason = this.mason
+    const { origin } = site
+    const cells: PlanCell[] = [
+      ...site.fill.map((p) => ({ ...p, block: opts.palette.primary })),
+      ...site.blueprint.cells.map((c) => ({
+        x: origin.x + c.x,
+        y: origin.y + c.y,
+        z: origin.z + c.z,
+        block: c.block,
+      })),
+    ]
+    const { title, requestedBy } = opts
+    if (!mason)
+      return { title, requestedBy, ok: false, placed: 0, total: cells.length, reason: 'cancelled' }
+    const key = (p: Point) => `${p.x},${p.y},${p.z}`
+    const stands = (c: PlanCell) => this.blockName(c) === c.block
+    // What stands already was not placed now; on a resume, the build's blocks are ours anyway.
+    const before = opts.resume ? new Set<string>() : new Set(cells.filter(stands).map(key))
+    const record: BuildRecord = {
+      id: opts.resume?.id ?? `${this.cfg.name}-${Date.now()}`,
+      bot: this.cfg.name,
+      blueprint: opts.blueprint,
+      title,
+      requestedBy,
+      origin,
+      quarterTurns: site.quarterTurns,
+      palette: opts.palette,
+      fill: site.fill,
+      total: cells.length,
+      complete: false,
+      finishedAt: Date.now(),
+      placed: opts.resume?.placed ?? [],
+    }
+    this.buildLog.upsert(record)
+    this.log.info(
+      `${opts.resume ? 'resuming' : 'building'} ${title} at ${origin.x},${origin.y},${origin.z}: ${cells.length} blocks`
+    )
+    const result = await mason.work({
+      id: record.id,
+      title,
+      cells,
+      columns: [],
+      planned: new Map(cells.map((c) => [key(c), c.block])),
+    })
+    const known = new Set(record.placed.map(key))
+    const placed = [
+      ...record.placed,
+      ...cells
+        .filter((c) => !before.has(key(c)) && !known.has(key(c)) && stands(c))
+        .map(({ x, y, z, block }) => ({ x, y, z, block })),
+    ]
+    const standing = cells.filter(stands).length
+    const complete = !result.cancelled && standing === cells.length
+    this.buildLog.upsert({ ...record, placed, complete, finishedAt: Date.now() })
+    const ok = !result.cancelled && standing >= cells.length * 0.9
+    return {
+      title,
+      requestedBy,
+      ok,
+      placed: standing,
+      total: cells.length,
+      reason: result.cancelled ? 'cancelled' : ok ? undefined : 'stuck',
+    }
+  }
+
+  /** Tell the brain how a build went (it says so in chat); returns the outcome. */
+  private async reportBuild(outcome: BuildOutcome): Promise<BuildOutcome> {
+    try {
+      const text = await this.brain.onBuildDone(outcome, this.context())
+      if (text) this.chat(text)
+    } catch (err) {
+      this.log.warn(`brain.onBuildDone failed: ${errMsg(err)}`)
+    }
+    return outcome
+  }
+
+  /** Stop the mason's current job (it stops at its next block) and wait until it has. */
+  private async letGo(mason: Mason): Promise<void> {
+    mason.cancel()
+    for (let i = 0; i < 50 && mason.busy; i++) await new Promise((r) => setTimeout(r, 200))
+  }
+
+  private blockName(p: Point): string | undefined {
+    return this.body?.blockAt(new WorldVec(p.x, p.y, p.z))?.name
   }
 
   /**
@@ -685,7 +818,7 @@ export class Bot extends EventEmitter {
     quarterTurns: number,
     requestedBy: string
   ): Promise<void> {
-    if (!this.builder || this.builder.busy) return
+    if (this.building) return
     const known = this.buildLog.unfinished(this.cfg.name, blueprintId)
     const record: BuildRecord = known ?? {
       id: `${this.cfg.name}-${Date.now()}`,
@@ -703,35 +836,49 @@ export class Bot extends EventEmitter {
       placed: [],
     }
     this.buildLog.upsert(record)
-    await this.startBuild(blueprintId, record.palette, requestedBy, origin)
+    await this.startBuild(blueprintId, record.palette, requestedBy, { at: origin, exact: true })
   }
 
-  /** Take down the last thing this bot built (only its own blocks). */
+  /** Take down the last thing this bot built: only its own blocks, still as it left them. */
   async undoLastBuild(requestedBy: string): Promise<void> {
-    const builder = this.builder
-    if (!builder || builder.busy) return
-    this.movement?.stop()
-    const result = await builder.undoLast()
-    if (!result) {
-      this.log.info('nothing to take down')
-      return
-    }
-    await this.brain
-      .onBuildDone(
-        {
-          title: result.title,
-          requestedBy,
-          undone: true,
-          ok: true,
-          placed: result.removed,
-          total: result.removed,
-        },
-        this.context()
-      )
-      .then((text) => {
-        if (text) this.chat(text)
+    const mason = this.mason
+    if (!mason || this.building) return
+    const last = this.buildLog.last(this.cfg.name)
+    if (!last) return void this.log.info('nothing to take down')
+    this.building = true
+    try {
+      await this.letGo(mason)
+      this.movement?.stop()
+      const me = this.position()
+      if (!me || Math.hypot(me.x - last.origin.x, me.z - last.origin.z) > 16)
+        await mason.visit(last.origin)
+      if (last.placed.some((p) => this.blockName(p) === undefined)) {
+        this.log.warn(`cannot see ${last.title} from here to take it down`)
+        return
+      }
+      const ours = last.placed.filter((p) => this.blockName(p) === p.block)
+      const result = await mason.work({
+        id: `undo-${last.id}`,
+        title: `taking down ${last.title}`,
+        cells: ours.map(({ x, y, z }) => ({ x, y, z, block: 'air', remove: true })),
+        columns: [],
+        planned: new Map(),
       })
-      .catch((err) => this.log.warn(`brain.onBuildDone failed: ${errMsg(err)}`))
+      if (result.cancelled) return
+      this.buildLog.remove(last)
+      const removed = ours.length - result.missing
+      this.log.info(`took down ${last.title}: removed ${removed}/${last.placed.length}`)
+      await this.reportBuild({
+        title: last.title,
+        requestedBy,
+        undone: true,
+        ok: true,
+        placed: removed,
+        total: removed,
+      })
+    } finally {
+      this.building = false
+    }
   }
 
   /** Say something in public chat. Long text is split into chat-sized parts. */
@@ -842,11 +989,7 @@ export class Bot extends EventEmitter {
           return { name: p.name, distance: me && pos ? distance(me, pos) : undefined }
         }),
       position: me,
-      activity:
-        this.builder?.activity() ??
-        this.mason?.activity() ??
-        this.movement?.describe() ??
-        undefined,
+      activity: this.mason?.activity() ?? this.movement?.describe() ?? undefined,
       works: this.cfg.works ? this.worksSummary?.() : undefined,
     }
   }
@@ -983,8 +1126,6 @@ export class Bot extends EventEmitter {
       this.client = undefined
       this.body = undefined
       this.movement = undefined
-      this.builder?.cancel()
-      this.builder = undefined
       this.mason?.cancel()
       this.mason = undefined
       clearInterval(this.dutyTimer)
@@ -1034,6 +1175,8 @@ export class Bot extends EventEmitter {
       event.kind === 'whisper' || !this.floor
         ? this.cfg.name
         : this.floor.responder(event, fromGuest)
+    if (event.kind !== 'whisper')
+      this.log.debug(`the floor gives this line to ${responder ?? 'nobody'}`)
     const ctx = {
       ...this.context(),
       mayReply: responder === this.cfg.name,

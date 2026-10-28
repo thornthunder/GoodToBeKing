@@ -56,6 +56,37 @@ export function detectBuildRequest(message: string): { blueprint: BlueprintId | 
   return { blueprint: ANYTHING.test(message) ? 'tower' : null }
 }
 
+/** A whole new castle: more than any blueprint, designed by the master builder for the spot. */
+const GREAT_WORKS =
+  /\b(palace|fortress|citadel|stronghold|(?:new|another|second|third|big|bigger|great|grand|huge|giant|real|whole) castle)\b/i
+/** "at 120 70 -340", "near x 120 z -340": a place given by its coordinates. */
+const COORDINATES =
+  /\b(?:at|near|around|on)\s+(?:the\s+)?(?:coordinates?\s+)?(?:x\s*=?\s*)?(-?\d+)[\s,]+(?:y\s*=?\s*|z\s*=?\s*)?(-?\d+)(?:[\s,]+(?:z\s*=?\s*)?(-?\d+))?/i
+
+export interface WorksRequest {
+  /** "palace", "castle", "fortress"... */
+  what: string
+  /** Where, when given by coordinates (y may be left out); otherwise where the royal stands. */
+  at?: { x: number; y?: number; z: number }
+}
+
+/** A request for great works: a new palace or castle, here or at the coordinates given. */
+export function detectWorksRequest(message: string): WorksRequest | null {
+  if (!BUILD_VERB.test(message)) return null
+  const works = GREAT_WORKS.exec(message)
+  if (!works) return null
+  const what = works[1].split(/\s+/).at(-1)!.toLowerCase()
+  const c = COORDINATES.exec(message)
+  if (!c) return { what }
+  const [x, second, third] = [c[1], c[2], c[3]].map((n) =>
+    n === undefined ? undefined : Number(n)
+  )
+  return {
+    what,
+    at: third === undefined ? { x: x!, z: second! } : { x: x!, y: second, z: third },
+  }
+}
+
 const UNDO =
   /\b(take (it|that|this) down|tear (it|that|this) down|knock (it|that|this) down|remove (it|that|this|the \w+)|get rid of (it|that|this)|undo)\b/i
 
@@ -76,7 +107,7 @@ const SUBJECT = String.raw`(?:i|i'll|i will|i shall|i am|i'm|let me|let us|let's
 const ACTION = String.raw`(?:on my way|build|building|construct|raise|craft|bring|fetch|carry|teleport|fly there|go there|take you there)`
 const PROMISE = new RegExp(String.raw`\b${SUBJECT}\b[^.!?]{0,40}?\b${ACTION}\b`, 'i')
 const REFUSAL =
-  /\b(can't|cannot|can not|not yet|unable|not able|must stay|must remain|stay here|not ready|still being|slumbering)\b/i
+  /\b(can't|cannot|can not|not yet|just yet|unable|not able|must stay|must remain|stay here|not ready|still being|slumbering|(do not|don't) (possess|have) the means)\b/i
 
 /** True when a reply agrees to or claims an action the bot cannot perform. */
 export function promisesAction(reply: string): boolean {
@@ -91,11 +122,16 @@ export function abilityNote(ability: MissingAbility, botName: string): string {
   )
 }
 
-/** In-character decline used when the model promised the impossible anyway. */
-export function declineLine(ability: MissingAbility, address: string): string {
+/**
+ * In-character decline used when the model promised the impossible anyway. `magic`: the bot
+ * builds from a spellbook (Merlin); the others speak of the court's builders.
+ */
+export function declineLine(ability: MissingAbility, address: string, magic = false): string {
   switch (ability) {
     case 'build':
-      return `Alas, ${address}, my spellbook does not hold that yet. It holds ${spellbookList()}: which would please you?`
+      return magic
+        ? `Alas, ${address}, my spellbook does not hold that yet. It holds ${spellbookList()}: which would please you?`
+        : `Alas, ${address}, that is beyond the court's builders for now. They can raise ${spellbookList()}: which would please you?`
     case 'fetch':
       return `Alas, ${address}, my satchel cannot carry things yet. Tell me what you seek and I will help you think where to find it.`
     case 'travel':

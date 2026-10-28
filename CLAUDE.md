@@ -49,7 +49,8 @@ corepack pnpm exec tsx scripts/make-court-skins.ts [preview-dir]                
 
 Write a line to a file named `.command` in the project root (checked every second):
 `<bot> build <blueprint> x y z [for <player>]`, `<bot> resume <blueprint> x y z [turns N]`,
-`<bot> undo`, and for the court's building works `works status|pause|resume`,
+`<bot> commission <blueprint> [at x y z] [for <player>]` (as if a royal asked that bot: the
+Castellan hands it to a builder), `<bot> undo`, and for the court's building works `works status|pause|resume`,
 `works start <design.json>` and `works plan` (the overlord designs the next castle now). For
 magic: `Merlin cast <spell> [on <who>] [to <place>] [item <x>] [creature <x>] [for <player>]`,
 `Merlin spells` (logs spells, places and gifts still to fade), `Merlin fade` (takes every gift
@@ -175,7 +176,21 @@ Windows, killing a background `npx` shell does not kill its node children at all
 - `build/Mason.ts`: builds one section by creative flight: clears natural blocks top down
   (`NATURAL`; never anything players made, except `remove` cells), fills, then places bottom
   layer first, hovering above the layer so it is never shut in under a ceiling. Cells where a
-  player-made block stands (the village path) are counted as `blocked`, not missing.
+  player-made block stands (the village path) are counted as `blocked`, not missing. It also
+  raises the small blueprints (`Bot.startBuild`: fly over with `visit`, `findSite` on
+  `mason.world()`, one job; the blocks it placed go to the build log for "take it down", which
+  is a job of `remove` cells). The old walking builder could not reach ground-level blocks.
+- `build/Commissions.ts`: the builds royals ask for (`.state/commissions.json`). A builder asked
+  directly builds at once (`own`); the Castellan (no `canBuild`, builders reporting to him)
+  takes the request and `BotManager.assignCommissions` hands it to his nearest free builder,
+  with a line each way, before any castle section. Each courtier who took or builds one has its
+  true state in its prompt (`describeCommission`), and one not listed was never started, so
+  nobody invents progress. Cut short: waits again; incomplete or unreachable: 3 tries; no flat
+  ground: failed. Builds go wherever the royal stood, anywhere (no build zone).
+- Great works: "build a palace / a new castle here" (or "at x y z", `detectWorksRequest`) to the
+  Castellan becomes a `works` action; `BotManager.orderWorks` has the overlord design it within
+  48 blocks of that spot (`planNextCastle(ordered)`), or queues it in `court-works.json`
+  (`ordered`) until the castle in hand is finished.
 - `build/Works.ts`: hands free workers the next ready section (prerequisites done, own crew
   first, nearest of the first few), retries incomplete sections (3 tries), keeps state in
   `.state/works-<plan>.json`, and gives incomplete sections one more try after a restart.
@@ -207,8 +222,10 @@ Windows, killing a background `npx` shell does not kill its node children at all
   `server/start-bds.cmd` (+ `.ps1`) runs the server and types `op Merlin` whenever he spawns.
   Merlin checks his rights (`execute as @s run testfor @s`) after each spawn and every minute while they are
   missing; until then his magic sleeps and he says so in character.
-- Building happens within `BUILD_RADIUS` (100) of `BUILD_CENTER` (105, 75, 122). The princess's
-  house and the village paths lie south of the castle; never dig player-made blocks.
+- The court's own choices (the overlord picking a site by itself) stay within `BUILD_RADIUS`
+  (100) of `BUILD_CENTER` (105, 75, 122). What a royal asks for is built where they say,
+  anywhere (the King's wish, 2026-10-28). Never dig player-made blocks: the princess's house and
+  the village paths lie south of the castle.
 - Requests to a shared model take turns inside this program (`ModelQueue` in OllamaClient):
   reading a royal's line is urgent and cuts a memory extraction short (it reruns afterwards), the
   overlord is normal. Ollama serves its own queue in arrival order, so without this a royal waited
@@ -233,6 +250,11 @@ Windows, killing a background `npx` shell does not kill its node children at all
   "Mojang announced its removal"). `MC_TRANSPORT=nethernet` connects over WebRTC with HTTP
   signalling on the game port. A spawn then takes 15-30 s when several bots join at once, so the
   offline spawn timeout is 90 s.
+- nethernet's default WebRTC is werift, pure JS: DTLS and SCTP for every packet run on our one
+  thread. Six bots kept it 94% busy (profile: crypto, buffers and GC about half); then chat
+  arrives a minute late, `request_ability` answers miss bedboo's flight-confirm window ("flight
+  stopped") and the server pulls flying bots back. `MC_WEBRTC=wrtc|auto` selects the native
+  `@roamhq/wrtc` backend (an optional package, not installed yet).
 - mineflayer-bedrock always asks for version `1.26.51`; `MC_VERSION` only matters for other
   clients.
 - `text` packet gained a `category` field (`message_only` | `authored` | `parameters`) in

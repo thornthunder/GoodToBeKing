@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { declineLine, detectMissingAbility, detectMoveCommand, promisesAction } from './abilities'
+import {
+  declineLine,
+  detectMissingAbility,
+  detectMoveCommand,
+  detectWorksRequest,
+  promisesAction,
+} from './abilities'
 
 describe('detectMoveCommand', () => {
   it.each([
@@ -73,12 +79,35 @@ describe('promisesAction', () => {
   })
 })
 
+describe('detectWorksRequest', () => {
+  it('knows a palace or a new castle from the small builds', () => {
+    expect(detectWorksRequest('Festaris, please build us a palace right here')).toEqual({
+      what: 'palace',
+    })
+    expect(detectWorksRequest('build another castle at 120 70 -340')).toEqual({
+      what: 'castle',
+      at: { x: 120, y: 70, z: -340 },
+    })
+    expect(detectWorksRequest('make a fortress near x 50 z 60')).toEqual({
+      what: 'fortress',
+      at: { x: 50, z: 60 },
+    })
+    // A castle from the book, and talk about palaces, are not great works.
+    expect(detectWorksRequest('build me a castle')).toBeNull()
+    expect(detectWorksRequest('the palace is lovely')).toBeNull()
+  })
+})
+
 describe('declineLine', () => {
   it('uses the form of address and makes no promise', () => {
     for (const ability of ['build', 'fetch', 'travel'] as const) {
-      const line = declineLine(ability, 'Your Highness')
-      expect(line).toContain('Your Highness')
-      expect(promisesAction(line)).toBe(false)
+      for (const magic of [true, false]) {
+        const line = declineLine(ability, 'Your Highness', magic)
+        expect(line).toContain('Your Highness')
+        expect(promisesAction(line)).toBe(false)
+      }
     }
+    // Only the wizard has a spellbook.
+    expect(declineLine('build', 'Your Highness')).not.toContain('spellbook')
   })
 })

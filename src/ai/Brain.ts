@@ -52,8 +52,13 @@ export type BotAction =
       casts: Array<{ spell: string; args: SpellArgs; target: string }>
       requestedBy: string
     }
+  /** Build it yourself, now. */
   | { type: 'build'; blueprint: BlueprintId; palette: Palette; requestedBy: string }
+  /** Hand the build to a free builder of your staff (the Castellan's way). */
+  | { type: 'commission'; blueprint: BlueprintId; palette: Palette; requestedBy: string }
   | { type: 'undo'; requestedBy: string }
+  /** A royal orders great works: a new palace or castle, where they stand or at `at`. */
+  | { type: 'works'; what: string; requestedBy: string; at?: { x: number; y?: number; z: number } }
 
 /** How a build went, for the brain to talk about. */
 export interface BuildOutcome {
@@ -62,7 +67,7 @@ export interface BuildOutcome {
   ok: boolean
   placed: number
   total: number
-  reason?: 'cancelled' | 'stuck' | 'no_site' | 'outside_zone' | 'no_zone' | 'not_visible' | 'busy'
+  reason?: 'cancelled' | 'stuck' | 'no_site' | 'not_visible' | 'busy' | 'unreachable'
   /** The build was taken down again (undo), not raised. */
   undone?: boolean
 }

@@ -5,14 +5,24 @@ import type { Logger } from '../logger'
 import { errMsg, sleep } from '../util'
 import type { FillColumn, PlanCell, Vec } from './compile'
 import type { Side } from './design'
+import type { BlockKind, WorldView } from './site'
 
 /** Blocks the world grew by itself: these may be cleared off a building site. */
 export const NATURAL =
   /^(sand|red_sand|gravel|dirt|coarse_dirt|grass_block|podzol|mycelium|clay|stone|sandstone|red_sandstone|andesite|diorite|granite|tuff|deepslate|snow|snow_layer|ice|moss_block|moss_carpet|[a-z_]*_leaves|[a-z_]*_log|short_grass|tall_grass|fern|large_fern|deadbush|dead_bush|vine|glow_lichen|sweet_berry_bush|bush|leaf_litter|firefly_bush|wildflowers|short_dry_grass|tall_dry_grass|poppy|dandelion|allium|cornflower|azure_bluet|oxeye_daisy|[a-z_]*_tulip|lily_of_the_valley|peony|rose_bush|lilac|sunflower|pink_petals|brown_mushroom|red_mushroom|sugar_cane|cactus)$/
 
 const AIR = /^(air|cave_air|void_air)$/
-const SOFT = /^(short_grass|tall_grass|fern|large_fern|deadbush|dead_bush|snow_layer|vine|glow_lichen|leaf_litter|short_dry_grass|tall_dry_grass|bush|wildflowers)$/
+const SOFT =
+  /^(short_grass|tall_grass|fern|large_fern|deadbush|dead_bush|snow_layer|vine|glow_lichen|leaf_litter|short_dry_grass|tall_dry_grass|bush|wildflowers)$/
 const LIQUID = /water|lava|bubble_column/
+
+/** What the site finder may build over: a placed block simply replaces these. */
+const SITE_REPLACEABLE = /^(short_grass|tall_grass|fern|large_fern|deadbush|dead_bush|snow_layer)$/
+/** Ground that flowers grow on. */
+const SOIL = /^(grass_block|dirt|coarse_dirt|podzol|rooted_dirt|moss_block|mycelium)$/
+/** Never built on or into, even though they are full blocks. */
+const NOT_GROUND =
+  /leaves|_log$|_wood$|_stem$|hyphae|water|lava|chest|barrel|shulker|door|bed$|sign|furnace|hopper/
 
 /** How far above a column's fill top natural blocks are cleared (trees included). */
 const CLEAR_HEIGHT = 30
@@ -68,7 +78,8 @@ interface Target {
 }
 
 const key = (x: number, y: number, z: number) => `${x},${y},${z}`
-const floorVec = (p: { x: number; y: number; z: number }) => new Vec3(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z))
+const floorVec = (p: { x: number; y: number; z: number }) =>
+  new Vec3(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z))
 
 /**
  * Works through one section of a large plan like a creative-mode player: clears natural blocks
@@ -90,7 +101,9 @@ export class Mason {
   ) {
     const req = createRequire(require.resolve('mineflayer-bedrock/package.json'))
     this.Item = (
-      req('prismarine-item') as (registry: unknown) => new (t: number, c: number, m?: number) => unknown
+      req('prismarine-item') as (
+        registry: unknown
+      ) => new (t: number, c: number, m?: number) => unknown
     )(bot.registry)
   }
 
@@ -104,6 +117,57 @@ export class Mason {
 
   cancel(): void {
     if (this.current) this.cancelled = true
+  }
+
+  /** The world as the site finder sees it (undefined where nothing is loaded). */
+  world(): WorldView {
+    return {
+      kind: (x, y, z): BlockKind | undefined => {
+        const block = this.bot.blockAt(new Vec3(x, y, z))
+        if (!block) return undefined
+        if (AIR.test(block.name)) return 'air'
+        if (SITE_REPLACEABLE.test(block.name)) return 'replaceable'
+        if (NOT_GROUND.test(block.name)) return 'other'
+        if (SOIL.test(block.name)) return 'soil'
+        return block.boundingBox === 'block' ? 'solid' : 'other'
+      },
+    }
+  }
+
+  /**
+   * Fly over to a far spot before building there, so the ground around it is loaded: up above
+   * whatever stands there, then wait for the chunks.
+   */
+  async visit(p: { x: number; y: number; z: number }): Promise<void> {
+    if (this.current) return
+    this.cancelled = false
+    this.current = 'on the way to a building site'
+    try {
+      let top = Math.floor(p.y) + 2
+      for (let y = Math.floor(p.y) + 30; y > top; y--) {
+        const name = this.bot.blockAt(new Vec3(Math.floor(p.x), y, Math.floor(p.z)))?.name
+        if (name && !AIR.test(name)) {
+          top = y + 2
+          break
+        }
+      }
+      const dest = new Vec3(Math.floor(p.x) + 0.5, top, Math.floor(p.z) + 0.5)
+      // A late answer from the server about flying can stop a flight that just began: try again.
+      for (let attempt = 1; attempt <= 3 && !this.cancelled; attempt++) {
+        try {
+          await this.flyTo(dest)
+          break
+        } catch (err) {
+          this.log.debug(
+            `could not fly over to ${p.x},${p.y},${p.z} (try ${attempt}): ${errMsg(err)}`
+          )
+          await sleep(1_000)
+        }
+      }
+    } finally {
+      this.current = null
+    }
+    await sleep(3_000) // let the chunks around arrive
   }
 
   async work(job: Job): Promise<JobResult> {
@@ -140,7 +204,12 @@ export class Mason {
       if (c.block === 'air') {
         if (c.remove && name && !AIR.test(name)) missing++
       } else if (name !== c.block) {
-        const foreign = name !== undefined && !AIR.test(name) && !SOFT.test(name) && !LIQUID.test(name) && !NATURAL.test(name)
+        const foreign =
+          name !== undefined &&
+          !AIR.test(name) &&
+          !SOFT.test(name) &&
+          !LIQUID.test(name) &&
+          !NATURAL.test(name)
         if (foreign) blocked++
         else missing++
       }
@@ -170,7 +239,11 @@ export class Mason {
       const p = new Vec3(c.x, c.y, c.z)
       const block = this.bot.blockAt(p)
       if (!block || AIR.test(block.name) || block.name === c.block) continue
-      if (c.block === 'air' ? c.remove || NATURAL.test(block.name) : NATURAL.test(block.name) && !SOFT.test(block.name))
+      if (
+        c.block === 'air'
+          ? c.remove || NATURAL.test(block.name)
+          : NATURAL.test(block.name) && !SOFT.test(block.name)
+      )
         want(p, block)
     }
     if (!digs.length) return
@@ -232,7 +305,9 @@ export class Mason {
         }
         const stuck = todo.filter((t) => t.y === layer)
         skippedLayers++
-        this.log.info(`${job.title}: ${stuck.length} blocks on layer ${layer} have nothing to stand on yet; skipping them`)
+        this.log.info(
+          `${job.title}: ${stuck.length} blocks on layer ${layer} have nothing to stand on yet; skipping them`
+        )
         for (const t of stuck) todo.splice(todo.indexOf(t), 1)
         continue
       }
@@ -241,17 +316,24 @@ export class Mason {
       const p = new Vec3(t.x, t.y, t.z)
       const existing = this.bot.blockAt(p)
       if (existing?.name === t.block) continue
-      if (existing && !AIR.test(existing.name) && !SOFT.test(existing.name) && !LIQUID.test(existing.name)) {
+      if (
+        existing &&
+        !AIR.test(existing.name) &&
+        !SOFT.test(existing.name) &&
+        !LIQUID.test(existing.name)
+      ) {
         if (!NATURAL.test(existing.name)) {
           result.blocked++
           continue
         }
         // Natural ground in the way (left over from clearing): dig it first.
-        if (await this.reach({ ...t, block: 'air' })) await withTimeout(this.bot.dig(existing, true), 6_000).catch(() => {})
+        if (await this.reach({ ...t, block: 'air' }))
+          await withTimeout(this.bot.dig(existing, true), 6_000).catch(() => {})
       }
       if (await this.placeOne(t)) {
         result.placed++
-        if (result.placed % 50 === 0) this.log.info(`${job.title}: ${result.placed} blocks placed, ${todo.length} to go`)
+        if (result.placed % 50 === 0)
+          this.log.info(`${job.title}: ${result.placed} blocks placed, ${todo.length} to go`)
       }
     }
     if (skippedLayers) this.log.debug(`${job.title}: skipped ${skippedLayers} unsupported layers`)
@@ -270,7 +352,12 @@ export class Mason {
         }
         break
       }
-      out.push({ x: col.x, y, z: col.z, block: y === col.top ? (col.topMaterial ?? col.material) : col.material })
+      out.push({
+        x: col.x,
+        y,
+        z: col.z,
+        block: y === col.top ? (col.topMaterial ?? col.material) : col.material,
+      })
     }
     return out
   }
@@ -280,7 +367,12 @@ export class Mason {
       const e = player.entity
       if (!e || e === this.bot.entity) continue
       const p = e.position
-      if (Math.abs(p.x - (t.x + 0.5)) < 0.8 && Math.abs(p.z - (t.z + 0.5)) < 0.8 && t.y >= Math.floor(p.y) - 0 && t.y <= Math.floor(p.y + 1.8))
+      if (
+        Math.abs(p.x - (t.x + 0.5)) < 0.8 &&
+        Math.abs(p.z - (t.z + 0.5)) < 0.8 &&
+        t.y >= Math.floor(p.y) - 0 &&
+        t.y <= Math.floor(p.y + 1.8)
+      )
         return true
     }
     return false
@@ -315,7 +407,9 @@ export class Mason {
       await this.hold(t.block, t.data)
       await withTimeout(this.bot.placeBlock(ref.block, ref.face), 5_000)
     } catch (err) {
-      this.log.debug(`place ${t.block} at ${t.x},${t.y},${t.z} (try ${attempt + 1}): ${errMsg(err)}`)
+      this.log.debug(
+        `place ${t.block} at ${t.x},${t.y},${t.z} (try ${attempt + 1}): ${errMsg(err)}`
+      )
     }
     for (let i = 0; i < 4; i++) {
       if (this.bot.blockAt(p)?.name === t.block) return true
@@ -355,7 +449,9 @@ export class Mason {
         lifted.push({ x: sx, y, z: sz, block: name })
       }
       if (open === undefined || !lifted.length || lifted.length > 6) continue
-      this.log.info(`reaching ${t.block} at ${t.x},${t.y},${t.z} through the roof (lifting ${lifted.length} blocks)`)
+      this.log.info(
+        `reaching ${t.block} at ${t.x},${t.y},${t.z} through the roof (lifting ${lifted.length} blocks)`
+      )
       const dug: Target[] = []
       try {
         for (const b of [...lifted].reverse()) {
@@ -381,7 +477,11 @@ export class Mason {
   }
 
   /** Fly high over a list of points (a survey flight), pausing at each; `look` runs at every stop. */
-  async survey(points: Array<{ x: number; z: number }>, height: number, look: () => void): Promise<void> {
+  async survey(
+    points: Array<{ x: number; z: number }>,
+    height: number,
+    look: () => void
+  ): Promise<void> {
     if (this.current) return
     this.current = 'surveying the land'
     try {
@@ -419,8 +519,12 @@ export class Mason {
     const center = new Vec3(t.x + 0.5, t.y + 0.5, t.z + 0.5)
     const eyes = () => this.bot.entity.position.offset(0, 1.62, 0)
     const feet = floorVec(this.bot.entity.position)
-    const inTheWay = feet.x === t.x && feet.z === t.z && (feet.y === t.y || feet.y + 1 === t.y || feet.y - 1 === t.y)
-    if (attempt === 0 && !inTheWay && eyes().distanceTo(center) <= REACH && this.rightSide(t)) return true
+    const inTheWay =
+      feet.x === t.x &&
+      feet.z === t.z &&
+      (feet.y === t.y || feet.y + 1 === t.y || feet.y - 1 === t.y)
+    if (attempt === 0 && !inTheWay && eyes().distanceTo(center) <= REACH && this.rightSide(t))
+      return true
     const spots = this.spotsFor(t)
     for (const spot of spots.slice(0, 4 + attempt * 4)) {
       try {
@@ -442,7 +546,9 @@ export class Mason {
     const ox = p.x - (t.x + 0.5)
     const oz = p.z - (t.z + 0.5)
     // Mostly on that side, and more along that axis than across it.
-    return dx !== 0 ? Math.sign(ox) === dx && Math.abs(ox) > Math.abs(oz) + 0.5 : Math.sign(oz) === dz && Math.abs(oz) > Math.abs(ox) + 0.5
+    return dx !== 0
+      ? Math.sign(ox) === dx && Math.abs(ox) > Math.abs(oz) + 0.5
+      : Math.sign(oz) === dz && Math.abs(oz) > Math.abs(ox) + 0.5
   }
 
   /** Free spots to hover at (feet positions), best first. */
@@ -454,7 +560,8 @@ export class Mason {
     } else if (t.against) {
       const [ax, , az] = t.against
       for (const d of [1, 2]) for (const dy of [0, 1, -1]) offsets.push([-ax * d, dy, -az * d])
-      for (const s of [-1, 1]) offsets.push([-ax * 2 + (az !== 0 ? s : 0), 0, -az * 2 + (ax !== 0 ? s : 0)])
+      for (const s of [-1, 1])
+        offsets.push([-ax * 2 + (az !== 0 ? s : 0), 0, -az * 2 + (ax !== 0 ? s : 0)])
     } else {
       // Above the layer first: a bot never gets shut in under a ceiling it is building.
       for (const dy of [1, 0, 2, -1])
@@ -522,7 +629,9 @@ export class Mason {
           [-0.3, 0.3],
           [0.3, 0.3],
         ]) {
-          const name = this.bot.blockAt(new Vec3(Math.floor(p.x + dx), Math.floor(p.y + dy), Math.floor(p.z + dz)))?.name
+          const name = this.bot.blockAt(
+            new Vec3(Math.floor(p.x + dx), Math.floor(p.y + dy), Math.floor(p.z + dz))
+          )?.name
           if (name === undefined || !(AIR.test(name) || SOFT.test(name))) return false
         }
     }
@@ -559,7 +668,8 @@ export class Mason {
   private async hold(block: string, data?: number): Promise<void> {
     const want = `${block}:${data ?? 0}`
     if (this.held === want && this.bot.heldItem?.name === block) return
-    const info = this.bot.registry.itemsByName[block] as { id: number; stackSize?: number } | undefined
+    const info = this.bot.registry.itemsByName[block] as
+      { id: number; stackSize?: number } | undefined
     if (info === undefined) throw new Error(`no item called ${block}`)
     // Beds and cakes stack to one: the server refuses a creative stack bigger than the item allows.
     const count = Math.max(1, Math.min(64, info.stackSize ?? 64))
@@ -570,7 +680,8 @@ export class Mason {
 
   private async land(): Promise<void> {
     try {
-      if ((this.bot.entity as unknown as { flying?: boolean })?.flying) this.bot.creative.stopFlying()
+      if ((this.bot.entity as unknown as { flying?: boolean })?.flying)
+        this.bot.creative.stopFlying()
     } catch {
       // not flying
     }

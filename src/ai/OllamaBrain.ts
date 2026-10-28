@@ -4,6 +4,7 @@ import type { Logger } from '../logger'
 import { errMsg } from '../util'
 import { makeBlueprint, spellbookList, type Palette } from '../build/blueprints'
 import { choosePalette } from '../build/palette'
+import { describeCommission, type CommissionBook } from '../build/Commissions'
 import type {
   BotAction,
   Brain,
@@ -20,8 +21,10 @@ import {
   detectMissingAbility,
   detectMoveCommand,
   detectUndoRequest,
+  detectWorksRequest,
   promisesAction,
   type MissingAbility,
+  type WorksRequest,
 } from './abilities'
 import { CourtMemory, recall } from './CourtMemory'
 import {
@@ -131,6 +134,8 @@ export class OllamaBrain implements Brain {
   private readonly rules: CourtRules
   /** Merlin's magic; undefined for bots that work none. */
   private readonly magic?: Magic
+  /** The builds the royal family asked for (shared by the court). */
+  private readonly commissions?: CommissionBook
   /** An order or rule from the King that clashes with others, waiting for "yes" or "no". */
   private pendingOrder?: {
     member: CourtMember
@@ -154,6 +159,7 @@ export class OllamaBrain implements Brain {
     this.orders = opts.orders ?? new OrderBook()
     this.rules = opts.rules ?? new CourtRules()
     this.magic = opts.magic
+    this.commissions = opts.commissions
   }
 
   /** Writes down what was heard now and resolves once every extraction has finished (for tests). */
@@ -786,6 +792,8 @@ export class OllamaBrain implements Brain {
         note: '(You now take down the last thing you built, as asked. Say so in one short sentence.)',
       }
     }
+    const works = detectWorksRequest(event.message)
+    if (works) return this.worksTurn(event, member, works)
     const request = detectBuildRequest(event.message)
     if (!request) return null
     if (!member) {
@@ -793,7 +801,8 @@ export class OllamaBrain implements Brain {
         note: `(Only the royal family may ask you to build. Decline ${who} kindly; do not promise to build.)`,
       }
     }
-    if (!this.cfg.canBuild) {
+    const crew = this.builders()
+    if (!this.cfg.canBuild && crew.length === 0) {
       const builders = this.staff.filter((s) => s.canBuild).map((s) => s.name)
       return {
         note:
@@ -804,7 +813,9 @@ export class OllamaBrain implements Brain {
     }
     if (!request.blueprint) {
       return {
-        note: `(Your spellbook only holds ${spellbookList()}. Kindly offer one of those instead; do not promise anything else.)`,
+        note: this.cfg.canBuild
+          ? `(${this.magic ? 'Your spellbook' : 'You'} only ${this.magic ? 'holds' : 'know how to build'} ${spellbookList()}. Kindly offer one of those instead; do not promise anything else.)`
+          : `(Your builders can only raise ${spellbookList()}. Kindly offer one of those instead; do not promise anything else.)`,
         ability: 'build',
       }
     }
@@ -814,13 +825,92 @@ export class OllamaBrain implements Brain {
       this.memory.facts(member.player)
     )
     const title = makeBlueprint(request.blueprint, palette).title
-    const colours = paletteWords(palette)
+    const colours = paletteWords(palette) ? ` in ${paletteWords(palette)}` : ''
+    if (!this.cfg.canBuild) {
+      // The Castellan does not build: he hands it to whichever of his builders is free first.
+      return {
+        action: {
+          type: 'commission',
+          blueprint: request.blueprint,
+          palette,
+          requestedBy: event.from,
+        },
+        note:
+          `(You hand this to your builders: ${listWords(
+            crew.map((s) => s.name),
+            'or'
+          )} will build ` +
+          `${title}${colours} near ${who} as soon as one of them is free. Say so gladly in one ` +
+          'short sentence; never say it is built already.)',
+      }
+    }
     return {
       action: { type: 'build', blueprint: request.blueprint, palette, requestedBy: event.from },
       note:
-        `(You now begin building ${title}${colours ? ` in ${colours}` : ''} near ${who}. ` +
+        `(You now begin building ${title}${colours} near ${who}. ` +
         'Say so gladly in one short sentence; building takes a little while.)',
     }
+  }
+
+  /**
+   * A royal orders a new palace or castle, wherever they like. The Castellan takes the order: the
+   * master builder designs it for that spot and the whole crew builds it. Others leave it to him.
+   */
+  private worksTurn(event: ChatEvent, member: CourtMember | undefined, works: WorksRequest): Turn {
+    const who = member ? `the ${member.title}` : event.from
+    if (!member) {
+      return {
+        note: `(Only the royal family may order great works. Decline ${who} kindly; do not promise to build.)`,
+      }
+    }
+    if (this.builders().length === 0) {
+      const castellan = this.staff.find((s) => /castellan/i.test(s.role))?.name ?? 'the Castellan'
+      return {
+        note:
+          `(A new ${works.what} is great works for the whole crew, and ${castellan} leads them. ` +
+          `Say kindly that ${who} should give ${castellan} the order; do not promise to build it yourself.)`,
+        ability: 'build',
+      }
+    }
+    const at = works.at
+    const where = at
+      ? `at ${at.x}${at.y !== undefined ? ` ${at.y}` : ''} ${at.z}`
+      : `right where ${who} stands`
+    return {
+      action: { type: 'works', what: works.what, requestedBy: event.from, ...(at ? { at } : {}) },
+      note:
+        `(You take ${who}'s order for a new ${works.what} ${where}: the master builder draws the plans ` +
+        'for that spot, then the whole crew builds it. Say so gladly in one short sentence; never say ' +
+        'it is begun or built already.)',
+    }
+  }
+
+  /** The builders who report to this bot (the Castellan's apprentices). */
+  private builders(): StaffMember[] {
+    const me = this.cfg.name.toLowerCase()
+    return this.staff.filter((s) => s.canBuild && s.reportsTo?.toLowerCase() === me)
+  }
+
+  /** The builds this bot took or works on, for its prompt: what truly stands and what does not. */
+  private commissionsSection(): string | undefined {
+    const crew = this.builders()
+    if (!this.commissions || (!this.cfg.canBuild && crew.length === 0)) return undefined
+    const mine = this.commissions.of(this.cfg.name).slice(-6)
+    if (mine.length === 0) {
+      return (
+        '- Nobody has asked you for a build lately. If a royal asks how a build is coming along, ' +
+        'say truthfully that none is on your list, and offer to have it built now.'
+      )
+    }
+    const label = (player: string) => {
+      const member = this.court.find(player)
+      return member ? `the ${member.title}` : player
+    }
+    return [
+      '- Builds the royal family asked of you, and how each truly stands (never say one is ' +
+        'done, or nearly done, unless it says so here; one not listed was never started):',
+      ...mine.map((c) => `  - ${describeCommission(c, this.cfg.name, label)}.`),
+    ].join('\n')
   }
 
   /**
@@ -974,14 +1064,6 @@ export class OllamaBrain implements Brain {
         event: `You looked for a clear, flat spot near ${who} to build ${title} but found none: trees, water or steep ground are in the way, and you never break anything. Say so kindly and suggest an open, flat place.`,
         fallback: `Alas, ${address}, there is no clear, flat ground here for ${title}. Shall we find a more open spot?`,
       },
-      outside_zone: {
-        event: `${who} asked for ${title}, but you may only build on the royal grounds and they are too far from them. Say so kindly in one short sentence.`,
-        fallback: `Alas, ${address}, I may only build on the royal grounds. Let us go there and I shall build it!`,
-      },
-      no_zone: {
-        event: `${who} asked for ${title}, but you have not been granted any royal grounds to build on. Say so kindly in one short sentence.`,
-        fallback: `Alas, ${address}, I have not been granted any grounds to build on yet.`,
-      },
       not_visible: {
         event: `${who} asked for ${title}, but you cannot see them from here to know where to build. Ask them to come closer.`,
         fallback: `I cannot see you from here, ${address}. Come closer and I shall build it beside you!`,
@@ -993,6 +1075,10 @@ export class OllamaBrain implements Brain {
       stuck: {
         event: `You had to stop building ${title} for ${who}: too many blocks would not go where they belong. Say so kindly in one short sentence.`,
         fallback: `Alas, ${address}, the stones would not obey me this time. ${title} is only half done.`,
+      },
+      unreachable: {
+        event: `You could not get over to the spot where ${title} for ${who} is to go, just now. Say kindly in one short sentence that you will try again soon.`,
+        fallback: `I could not get there just now, ${address}. I shall try again soon!`,
       },
       cancelled: { event: '', fallback: '' },
       undone: {
@@ -1097,7 +1183,7 @@ export class OllamaBrain implements Brain {
       }
       if (opts.ability && (!reply || promisesAction(reply))) {
         if (reply) this.log.info(`replacing a reply that promised to ${opts.ability}: ${reply}`)
-        reply = declineLine(opts.ability, opts.address ?? 'my friend')
+        reply = declineLine(opts.ability, opts.address ?? 'my friend', Boolean(this.magic))
       }
       reply ??= opts.fallback ?? null
       if (reply) {
@@ -1154,9 +1240,20 @@ export class OllamaBrain implements Brain {
       ctx.works &&
         `- The court is building ${ctx.works}. You are part of the crew; talk about it naturally when asked.`,
       this.cfg.canBuild
-        ? `- You can build from your spellbook when the royal family asks: ${spellbookList()}. ` +
+        ? `- You can build ${this.magic ? 'from your spellbook' : 'these'} when the royal family asks: ${spellbookList()}. ` +
           'The building happens by itself; just talk about it. Only build for the royal family.'
-        : `- You do not build yourself; ${listWords(this.staff.filter((s) => s.canBuild).map((s) => s.name)) || 'others'} build for the court.`,
+        : this.builders().length
+          ? `- You do not build yourself, but when the royal family asks for one of these, you have ${listWords(
+              this.builders().map((s) => s.name),
+              'or'
+            )} build it: ${spellbookList()}. ` +
+            'It is handed on and built by itself once one of them is free; only the royal family may ask. ' +
+            'When they order a whole new palace or castle, you take that order too: the master builder ' +
+            'designs it for the spot they choose, anywhere they like, and the whole crew builds it.'
+          : `- You do not build yourself; ${listWords(this.staff.filter((s) => s.canBuild).map((s) => s.name)) || 'others'} build for the court.`,
+      this.commissionsSection(),
+      (this.cfg.canBuild || this.builders().length > 0) &&
+        '- The court builds wherever the royal family asks, never breaking anything anyone made.',
       this.staff.length > 0 &&
         `- Your fellow members of the court (other characters like you): ${this.staff.map((s) => `${s.name} (${s.role}, ${s.reportsTo ? `reports to ${s.reportsTo}` : 'answers to the royal family'})`).join(', ')}. ` +
           'When someone talks to one of them by name, let that one answer.',
@@ -1168,7 +1265,7 @@ export class OllamaBrain implements Brain {
           .join(', ')}. You cast a spell when ` +
           'the royal family asks; the magic happens by itself, so just talk about it. You know no ' +
           'other spells, but the King can teach you new ones.',
-      '- You still cannot build anything outside your spellbook, fetch or carry items, or find ' +
+      `- You still cannot build anything outside ${this.magic ? 'your spellbook' : 'that list'}, fetch or carry items, or find ` +
         'places by name. If asked to, never agree or promise to do it. Kindly explain in ' +
         'character that this magic is not ready yet and offer something else.',
       '- Always answer the royal family unless they are clearly talking to someone else.',
@@ -1284,6 +1381,8 @@ export interface BrainOptions {
   rules?: CourtRules
   /** Spells this bot can cast (Merlin). */
   magic?: Magic
+  /** The builds the royal family asked for, shared by the court. */
+  commissions?: CommissionBook
 }
 
 export interface StaffMember {
@@ -1381,9 +1480,9 @@ function fallbackHail(members: CourtMember[]): string {
 }
 
 /** "Henry", "Henry and George", "Merlin, Henry and George" */
-function listWords(names: string[]): string {
+function listWords(names: string[], last: 'and' | 'or' = 'and'): string {
   if (names.length <= 1) return names[0] ?? ''
-  return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
+  return `${names.slice(0, -1).join(', ')} ${last} ${names.at(-1)}`
 }
 
 /** Notes for the model, one per line, skipping empty ones. */

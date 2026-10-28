@@ -9,7 +9,16 @@ import { OllamaBrain } from '../ai/OllamaBrain'
 import { OllamaClient } from '../ai/OllamaClient'
 import { slug } from '../build/compile'
 import { BuildLog } from '../build/BuildLog'
-import { BLUEPRINT_IDS, DEFAULT_PALETTE, type BlueprintId } from '../build/blueprints'
+import type { BuildOutcome } from '../ai/Brain'
+import {
+  BLUEPRINT_IDS,
+  DEFAULT_PALETTE,
+  makeBlueprint,
+  type BlueprintId,
+  type Palette,
+} from '../build/blueprints'
+import { CommissionBook, type Commission } from '../build/Commissions'
+import type { Point } from '../build/site'
 import { compileDesign } from '../build/compile'
 import { validateDesign, type CastleDesign } from '../build/design'
 import { Works, type Worker, type WorksEvent } from '../build/Works'
@@ -25,6 +34,27 @@ import { ChatFloor } from './ChatFloor'
 
 /** Runtime state that should survive restarts (git-ignored). */
 const STATE_DIR = '.state'
+
+/** A palace a royal orders goes up within this many blocks of the spot they chose. */
+const ORDERED_RADIUS = 48
+
+/** A new palace or castle a royal ordered, waiting for its plans. */
+interface OrderedWorks {
+  /** "palace", "castle" */
+  what: string
+  requestedBy: string
+  /** "the King" */
+  by: string
+  near: Point
+  at: number
+}
+
+interface CourtWorks {
+  current?: string
+  built: string[]
+  /** Ordered by a royal: planned as soon as the crew is free. */
+  ordered?: OrderedWorks
+}
 
 /** At most one exchange of work talk between bots this often. */
 const CHATTER_GAP_MS = 40_000
@@ -43,6 +73,9 @@ export class BotManager {
   private ready = false
   private planning = false
   private readonly cfg: AppConfig
+  private readonly court: CourtRoster
+  /** The builds the royal family asked for, and who is on them. */
+  readonly commissions = new CommissionBook(path.resolve(STATE_DIR, 'commissions.json'))
 
   constructor(
     cfg: AppConfig,
@@ -50,6 +83,7 @@ export class BotManager {
   ) {
     this.cfg = cfg
     const court = new CourtRoster(cfg.court)
+    this.court = court
     const botNames = cfg.bots.map((b) => b.name)
     // Who speaks: bots in configured order for the royals; the Castellan first for guests.
     const castellanFirst = [...botNames].sort(
@@ -88,6 +122,7 @@ export class BotManager {
         orders: new OrderBook(path.resolve(STATE_DIR, `orders-${botCfg.name.toLowerCase()}.json`)),
         rules,
         magic,
+        commissions: this.commissions,
       })
       const bot = new Bot(botCfg, brain, botLog, {
         // Our own helper scripts' players (the surveyor) are ignored like fellow bots.
@@ -98,12 +133,14 @@ export class BotManager {
         buildLog: builds,
         floor,
         court,
-        works: () => this.works?.summary(),
+        works: () => this.worksLine(),
         magic,
       })
       bot.on('chat', (event: { from: string }) => {
         if (court.find(event.from)) this.lastRoyalLine = Date.now()
       })
+      bot.on('commission', (request: CommissionRequest) => this.commission(bot, request))
+      bot.on('works', (order: WorksOrder) => void this.orderWorks(bot, order))
       this.bots.push(bot)
     }
     // Carry on with whatever the court was last building (the overlord's design, once there is one).
@@ -128,39 +165,99 @@ export class BotManager {
   }
 
   /** Which designs the court has built and is building, kept in .state/court-works.json. */
-  private courtWorks(): { current?: string; built: string[] } {
+  private courtWorks(): CourtWorks {
     try {
-      return JSON.parse(fs.readFileSync(path.resolve(STATE_DIR, 'court-works.json'), 'utf8')) as {
-        current?: string
-        built: string[]
-      }
+      return JSON.parse(
+        fs.readFileSync(path.resolve(STATE_DIR, 'court-works.json'), 'utf8')
+      ) as CourtWorks
     } catch {
       return { built: [] }
     }
   }
 
-  private saveCourtWorks(state: { current?: string; built: string[] }): void {
+  private saveCourtWorks(state: CourtWorks): void {
     fs.mkdirSync(path.resolve(STATE_DIR), { recursive: true })
     fs.writeFileSync(path.resolve(STATE_DIR, 'court-works.json'), JSON.stringify(state, null, 2))
   }
 
+  /** The court's works for the prompts: what is being built, and what was ordered next. */
+  private worksLine(): string | undefined {
+    const ordered = this.courtWorks().ordered
+    const next = ordered
+      ? `next, the new ${ordered.what} ${ordered.by} ordered${this.planning ? ', whose plans the master builder is drawing right now' : ''}`
+      : this.planning
+        ? 'the master builder is drawing the plans for the next castle right now'
+        : undefined
+    return [this.works?.summary(), next].filter(Boolean).join('; ') || undefined
+  }
+
+  /** A royal orders a new palace or castle: it is planned now, or once the crew is free. */
+  private async orderWorks(bot: Bot, order: WorksOrder): Promise<void> {
+    const member = this.court.find(order.requestedBy)
+    const by = member ? `the ${member.title}` : order.requestedBy
+    const near =
+      order.near ?? this.bots.map((b) => b.playerPosition(order.requestedBy)).find(Boolean)
+    if (!near) {
+      await bot.speak(
+        `You cannot see where ${by} stands, so you do not know where the new ${order.what} should go. ` +
+          `Ask ${by} kindly to come where the court can see, or to name the coordinates.`,
+        `Where shall it stand? Come where I can see you, or name the place.`
+      )
+      return
+    }
+    const y =
+      near.y ?? this.bots.map((b) => b.topAt(near.x, near.z)?.y).find((h) => h !== undefined) ?? 80
+    const ordered: OrderedWorks = {
+      what: order.what,
+      requestedBy: order.requestedBy,
+      by,
+      near: { x: Math.floor(near.x), y: Math.floor(y), z: Math.floor(near.z) },
+      at: Date.now(),
+    }
+    // A newer order replaces one still waiting for its plans.
+    const state = this.courtWorks()
+    state.ordered = ordered
+    this.saveCourtWorks(state)
+    this.log.info(
+      `${by} orders a new ${order.what} near ${ordered.near.x},${ordered.near.y},${ordered.near.z}`
+    )
+    if (this.planning || (this.works && !this.works.finished)) {
+      await bot.speak(
+        `Tell ${by} kindly, in one or two short sentences, that the crew first finishes what it is ` +
+          `building now (${this.works?.summary() ?? 'other plans'}), and then begins the new ` +
+          `${order.what} at the spot ${by} chose.`,
+        `The crew finishes the work in hand first, then the new ${order.what} begins.`
+      )
+      return
+    }
+    await this.planNextCastle(ordered)
+  }
+
   /**
-   * The court plans its next castle on its own: the bots survey the land they can see, the
-   * overlord (a larger model) chooses a site and designs the castle, and the works begin.
+   * The court plans its next castle: the bots survey the land they can see, the overlord (a
+   * larger model) chooses a site and designs the castle, and the works begin. On its own the
+   * court keeps to its build zone; a palace a royal ordered goes up near the spot they chose.
    */
-  async planNextCastle(): Promise<void> {
+  async planNextCastle(ordered?: OrderedWorks): Promise<void> {
     if (this.planning) return
     this.planning = true
     const foreman = this.foreman()
     try {
       const scout = this.bots.find((b) => b.state.status === 'spawned')
-      const zone = this.bots.find((b) => b.cfg.buildZone)?.cfg.buildZone
+      const zone = ordered
+        ? { center: ordered.near, radius: ORDERED_RADIUS }
+        : this.bots.find((b) => b.cfg.buildZone)?.cfg.buildZone
       if (!scout || !zone)
         return this.log.warn('cannot plan a castle: no bot in the world or no build zone')
       await foreman?.speak(
-        'Tell everyone that the master builder and you are now drawing up the plans for a second castle, ' +
-          'which the court will choose and design all by itself. Ask them to rest a moment.',
-        'The master builder and I are drawing up plans for a second castle. Rest a moment, friends!'
+        ordered
+          ? `Tell everyone that the master builder and you are now drawing up the plans for the new ${ordered.what} ` +
+              `${ordered.by} ordered, at the spot ${ordered.by} chose. Ask them to rest a moment.`
+          : 'Tell everyone that the master builder and you are now drawing up the plans for a second castle, ' +
+              'which the court will choose and design all by itself. Ask them to rest a moment.',
+        ordered
+          ? `The master builder and I are drawing up the plans for the new ${ordered.what}. Rest a moment, friends!`
+          : 'The master builder and I are drawing up plans for a second castle. Rest a moment, friends!'
       )
       const built = this.courtWorks().built
       const avoid: Rect[] = []
@@ -201,6 +298,17 @@ export class BotManager {
         sites = findCastleSites(topAt, zone, { avoid })
       }
       for (const [i, s] of sites.entries()) this.log.info(`site ${i + 1}: ${JSON.stringify(s)}`)
+      if (ordered && sites.length === 0) {
+        const state = this.courtWorks()
+        state.ordered = undefined
+        this.saveCourtWorks(state)
+        await foreman?.speak(
+          `Tell ${ordered.by} kindly that there is no open ground big enough for a ${ordered.what} near the ` +
+            'spot chosen: the court never builds over houses, paths or anything anyone made. Ask for another spot.',
+          `Alas, there is no open ground big enough here. Shall we find another spot?`
+        )
+        return
+      }
       const model = process.env.OVERLORD_MODEL ?? 'gemma4:31b'
       const ai = overlordClient(this.bots[0].cfg.ai, model, this.log.child('overlord'))
       const overlord = new Overlord(ai, model, this.log.child('overlord'))
@@ -221,6 +329,12 @@ export class BotManager {
           .map((b) => ({ name: b.cfg.name, role: b.cfg.role })),
         example,
         takenNames: [example?.name, this.works?.plan.title].filter(Boolean) as string[],
+        ...(ordered
+          ? {
+              request: `${capital(ordered.by)} orders a new ${ordered.what}, different from the castles already built.`,
+              around: `the spot ${ordered.by} chose`,
+            }
+          : {}),
       })
       if (!result) {
         await foreman?.speak(
@@ -239,9 +353,12 @@ export class BotManager {
       const finished = state.current ?? this.cfg.worksDesign
       if (finished && !state.built.includes(finished)) state.built.push(finished)
       state.current = file
+      if (ordered) state.ordered = undefined
       this.saveCourtWorks(state)
       await foreman?.speak(
-        `Announce the plan for the second castle, ${result.design.name}, which the master builder drew ${result.site.direction} of the castle grounds: ${result.summary} Call the crew back to work.`,
+        ordered
+          ? `Announce the plan for ${result.design.name}, the new ${ordered.what} ${ordered.by} ordered, which the master builder drew near the spot ${ordered.by} chose: ${result.summary} Call the crew to work.`
+          : `Announce the plan for the second castle, ${result.design.name}, which the master builder drew ${result.site.direction} of the castle grounds: ${result.summary} Call the crew back to work.`,
         `Behold the plan for ${result.design.name}! Back to work, all!`
       )
       this.startWorks(file)
@@ -286,7 +403,109 @@ export class BotManager {
 
   private runWorks(): void {
     clearInterval(this.worksTimer)
-    this.worksTimer = setInterval(() => this.works?.tick(this.workers()), 5_000)
+    this.worksTimer = setInterval(() => {
+      // The royal family's wishes first, then the castle.
+      this.assignCommissions()
+      this.works?.tick(this.workers())
+    }, 5_000)
+  }
+
+  /** A royal asked a bot for a build: the court writes it down, and it is built or handed on. */
+  private commission(bot: Bot, request: CommissionRequest): void {
+    const c = this.commissions.add({
+      blueprint: request.blueprint,
+      title: makeBlueprint(request.blueprint, request.palette).title,
+      palette: request.palette,
+      requestedBy: request.requestedBy,
+      takenBy: bot.cfg.name,
+      own: request.own,
+      near: request.near && {
+        x: Math.floor(request.near.x),
+        y: Math.floor(request.near.y),
+        z: Math.floor(request.near.z),
+      },
+    })
+    const where = c.near ? `near ${c.near.x},${c.near.y},${c.near.z}` : '(not in sight yet)'
+    this.log.info(`${bot.cfg.name} takes ${c.id}: ${c.title} for ${c.requestedBy} ${where}`)
+    // Asked of a builder: he builds it at once. Asked of the Castellan: the next free builder does.
+    if (c.own) void this.carryOut(c, bot)
+    else this.assignCommissions()
+  }
+
+  /** Hand each waiting commission to a free builder, the nearest first. */
+  private assignCommissions(): void {
+    if (!this.ready) return
+    for (const c of this.commissions.waiting()) {
+      if (!c.near) {
+        const seen = this.bots.map((b) => b.playerPosition(c.requestedBy)).find(Boolean)
+        if (!seen) continue
+        this.commissions.locate(c.id, seen)
+      }
+      const near = c.near!
+      const crew = this.crewFor(c).filter((b) => b.isFree())
+      const distance = (b: Bot) => {
+        const p = b.position()
+        return p ? Math.hypot(p.x - near.x, p.z - near.z) : Infinity
+      }
+      const worker = crew.sort((a, b) => distance(a) - distance(b))[0]
+      if (worker) void this.carryOut(c, worker)
+    }
+  }
+
+  /** Who may build a commission: the builder who took it, or the builders of the one who took it. */
+  private crewFor(c: Commission): Bot[] {
+    const taker = c.takenBy.toLowerCase()
+    if (c.own) return this.bots.filter((b) => b.cfg.name.toLowerCase() === taker)
+    return this.bots.filter((b) => b.cfg.canBuild && b.cfg.reportsTo?.toLowerCase() === taker)
+  }
+
+  /** A builder raises a commission; one handed on is given out by the one who took it, aloud. */
+  private async carryOut(c: Commission, worker: Bot): Promise<void> {
+    const name = worker.cfg.name
+    this.commissions.start(c.id, name)
+    this.log.info(`${name} builds ${c.id}: ${c.title} for ${c.requestedBy}`)
+    const member = this.court.find(c.requestedBy)
+    const who = member ? `the ${member.title}` : c.requestedBy
+    if (!c.own) {
+      const boss = this.find(c.takenBy)
+      void (async () => {
+        await boss?.speak(
+          `Tell ${name} to build ${c.title} for ${who} now. Address ${name} by name, in one short sentence.`,
+          `${name}, build ${c.title} for ${who}, if you please.`
+        )
+        await sleep(3_000)
+        await worker.speak(
+          `${c.takenBy}, whom you report to, just asked you to build ${c.title} for ${who}. ` +
+            `Answer ${c.takenBy} in one short sentence that you are on your way.`,
+          `At once, Master ${c.takenBy}!`
+        )
+      })().catch((err) => this.log.warn(`commission talk failed: ${errMsg(err)}`))
+    }
+    let outcome: BuildOutcome
+    try {
+      outcome = await worker.startBuild(
+        c.blueprint,
+        c.palette,
+        c.requestedBy,
+        c.near ? { at: c.near } : undefined
+      )
+    } catch (err) {
+      this.log.warn(`${name} failed to build ${c.title}: ${errMsg(err)}`)
+      outcome = {
+        title: c.title,
+        requestedBy: c.requestedBy,
+        ok: false,
+        placed: 0,
+        total: 0,
+        reason: 'stuck',
+      }
+    }
+    this.commissions.finish(c.id, outcome)
+    const now = this.commissions.find(c.id)
+    this.log.info(
+      `${c.id} (${c.title} for ${c.requestedBy}): ${now?.status}` +
+        `${outcome.reason ? ` (${outcome.reason})` : ''}, ${outcome.placed}/${outcome.total} blocks`
+    )
   }
 
   private workers(): Worker[] {
@@ -321,16 +540,20 @@ export class BotManager {
     const boss = foreman?.cfg.name
     const title = this.works?.plan.title ?? 'the castle'
     switch (e.kind) {
-      case 'begin':
+      case 'begin': {
+        const first = this.courtWorks().built.length === 0
         this.chatter(async () => {
           await (foreman ?? this.bots[0])?.speak(
-            `Announce to everyone that the court now begins building ${e.plan.title} around Merlin's first castle, as the King wished: ` +
-              'a keep with a kitchen, a great hall, a throne room and royal bedchambers, ranges for the guards and staff, stables and towers. ' +
-              'Call every member of the court to lend a hand.',
-            `Hear me, all! By the King's wish we begin ${e.plan.title} today. Every hand to the work!`
+            first
+              ? `Announce to everyone that the court now begins building ${e.plan.title} around Merlin's first castle, as the King wished: ` +
+                  'a keep with a kitchen, a great hall, a throne room and royal bedchambers, ranges for the guards and staff, stables and towers. ' +
+                  'Call every member of the court to lend a hand.'
+              : `Announce to everyone that the court now begins building ${e.plan.title}. Call every member of the court to lend a hand.`,
+            `Hear me, all! We begin ${e.plan.title} today. Every hand to the work!`
           )
         }, true)
         return
+      }
       case 'assign': {
         const worker = this.find(e.worker)
         this.chatter(async () => {
@@ -394,8 +617,16 @@ export class BotManager {
             `Announce proudly to everyone that ${e.plan.title} is finished, and invite the King and the Princess to come and see it.`,
             `${e.plan.title} is finished! Your Majesty, Your Highness, come and see!`
           )
-          // The first castle was planned for the court; the next one the court plans itself.
-          if (process.env.WORKS_NEXT === 'overlord' && this.courtWorks().built.length === 0) {
+          // A palace a royal ordered comes next; otherwise, after the first castle (planned for
+          // the court), the court plans its next one itself.
+          const ordered = this.courtWorks().ordered
+          if (ordered) {
+            await sleep(20_000)
+            await this.planNextCastle(ordered)
+          } else if (
+            process.env.WORKS_NEXT === 'overlord' &&
+            this.courtWorks().built.length === 0
+          ) {
             await sleep(20_000)
             await this.planNextCastle()
           }
@@ -411,6 +642,7 @@ export class BotManager {
   /**
    * Developer commands, one per line (see the `.command` file in CLAUDE.md):
    *   <bot> build <blueprint> <x> <y> <z> [for <player>]
+   *   <bot> commission <blueprint> [at <x> <y> <z>] [for <player>]  (as if a royal asked the bot)
    *   <bot> undo [for <player>]
    */
   runCommand(line: string): void {
@@ -430,7 +662,24 @@ export class BotManager {
         )
       }
       this.log.info(`command: ${bot.cfg.name} builds ${id} at ${x},${y},${z} for ${requestedBy}`)
-      void bot.startBuild(id, DEFAULT_PALETTE, requestedBy, { x, y, z })
+      void bot.startBuild(id, DEFAULT_PALETTE, requestedBy, { at: { x, y, z }, exact: true })
+    } else if (verb === 'commission') {
+      const id = words[2] as BlueprintId
+      const atIndex = words.indexOf('at')
+      const [x, y, z] = atIndex > 0 ? words.slice(atIndex + 1, atIndex + 4).map(Number) : []
+      const near = atIndex > 0 ? { x, y, z } : undefined
+      if (!BLUEPRINT_IDS.includes(id) || (near && [x, y, z].some((n) => !Number.isFinite(n)))) {
+        return this.log.warn(
+          `usage: <bot> commission <${BLUEPRINT_IDS.join('|')}> [at <x> <y> <z>] [for <player>]`
+        )
+      }
+      this.commission(bot, {
+        blueprint: id,
+        palette: DEFAULT_PALETTE,
+        requestedBy,
+        near,
+        own: Boolean(bot.cfg.canBuild),
+      })
     } else if (verb === 'resume') {
       // <bot> resume <blueprint> <origin x> <y> <z> [turns <0-3>] [for <player>]
       const id = words[2] as BlueprintId
@@ -511,7 +760,13 @@ export class BotManager {
       }
     }
     this.ready = true
-    if (this.works) this.runWorks()
+    this.runWorks()
+    // A palace a royal ordered and the crew free: its plans are drawn now.
+    const ordered = this.courtWorks().ordered
+    if (ordered && (!this.works || this.works.finished)) {
+      setTimeout(() => void this.planNextCastle(ordered), 30_000)
+      return
+    }
     // Finished before this start and nothing planned since: the court plans its next castle now.
     if (
       this.works?.finished &&
@@ -525,6 +780,29 @@ export class BotManager {
     clearInterval(this.worksTimer)
     await Promise.all(this.bots.map((bot) => bot.disconnect('Shutting down')))
   }
+}
+
+/** A royal's order for great works, as the bot that took it heard it (see Bot.act). */
+interface WorksOrder {
+  what: string
+  requestedBy: string
+  /** The coordinates named (y may be missing), or where the royal stood. */
+  near?: { x: number; y?: number; z: number }
+}
+
+function capital(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+/** What a bot hands the court when a royal asks it for a build (see Bot.act). */
+interface CommissionRequest {
+  blueprint: BlueprintId
+  palette: Palette
+  requestedBy: string
+  /** Where the royal stood, as the bot saw it. */
+  near?: Point
+  /** The bot builds it itself (a builder asked directly). */
+  own: boolean
 }
 
 function isCastellan(cfg: AppConfig, name: string): boolean {

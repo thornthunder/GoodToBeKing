@@ -70,7 +70,11 @@ export function mentionsNameLoosely(message: string, name: string): boolean {
   const words = message.toLowerCase().match(/[a-z]+/g) ?? []
   return words.some((word) => {
     const base = word.endsWith('s') && word.length > target.length ? word.slice(0, -1) : word
-    return Math.abs(base.length - target.length) <= 1 && levenshtein(base, target) <= 2
+    if (base[0] !== target[0] || Math.abs(base.length - target.length) > 1) return false
+    // Two slips only in a word of the name's own length ("Marlon") or in a long name: otherwise
+    // everyday words come too close ("here" is two edits from "Henry").
+    const slips = base.length === target.length || target.length >= 7 ? 2 : 1
+    return levenshtein(base, target) <= slips
   })
 }
 
