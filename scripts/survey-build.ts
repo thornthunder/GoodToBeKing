@@ -5,6 +5,7 @@
  *
  *   tsx scripts/survey-build.ts <blueprint> <x> <y> <z> [turns]
  */
+import { serverOptions } from '../src/bot/Bot'
 import { createBot } from 'mineflayer-bedrock'
 import { Vec3 } from 'vec3'
 import { BLUEPRINT_IDS, makeBlueprint, rotate, type BlueprintId } from '../src/build/blueprints'
@@ -18,8 +19,7 @@ const bp = rotate(makeBlueprint(id as BlueprintId), Number(turns))
 const cfg = defaultBotConfig()
 
 const bot = createBot({
-  host: cfg.server.host,
-  port: cfg.server.port,
+  ...serverOptions(cfg.server),
   username: 'Surveyor',
   auth: 'offline',
   hideErrors: true,

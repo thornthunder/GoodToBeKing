@@ -48,6 +48,8 @@ export interface BuildOutcome {
   placed: number
   total: number
   reason?: 'cancelled' | 'stuck' | 'no_site' | 'outside_zone' | 'no_zone' | 'not_visible' | 'busy'
+  /** The build was taken down again (undo), not raised. */
+  undone?: boolean
 }
 
 /** A reply to chat: words to say and/or an action to take. */

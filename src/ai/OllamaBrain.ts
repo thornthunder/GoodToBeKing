@@ -426,12 +426,18 @@ export class OllamaBrain implements Brain {
         fallback: `Alas, ${address}, the stones would not obey me this time. ${title} is only half done.`,
       },
       cancelled: { event: '', fallback: '' },
+      undone: {
+        event: `You took down ${title} for ${who}, as asked: the blocks you placed are gone again. Tell them in one short sentence.`,
+        fallback: `As you wish, ${address}: ${title} is gone again.`,
+      },
     }
-    const key = outcome.ok
-      ? outcome.placed < outcome.total
-        ? 'partial'
-        : 'ok'
-      : (outcome.reason ?? 'stuck')
+    const key = outcome.undone
+      ? 'undone'
+      : outcome.ok
+        ? outcome.placed < outcome.total
+          ? 'partial'
+          : 'ok'
+        : (outcome.reason ?? 'stuck')
     const prompt = prompts[key]
     if (!prompt?.event) return null
     return this.generate(ctx, { eventPrompt: `[event] ${prompt.event}`, fallback: prompt.fallback })

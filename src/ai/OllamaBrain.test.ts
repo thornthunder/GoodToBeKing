@@ -323,6 +323,15 @@ describe('OllamaBrain court behaviour', () => {
     expect(calls[1].at(-1)?.content).toContain('found none')
   })
 
+  it('reports a build taken down as gone, not as raised', async () => {
+    const { brain, calls } = makeBrain('It is gone, Your Majesty.')
+    const undone = { title: 'a little tower', requestedBy: 'BigDad', placed: 55, total: 55 }
+    await brain.onBuildDone({ ...undone, ok: true, undone: true }, seen('BigDad'))
+    const asked = calls[0].at(-1)?.content ?? ''
+    expect(asked).toContain('You took down a little tower for the King')
+    expect(asked).not.toContain('finished building')
+  })
+
   it('comforts a royal who died, naming the title instead of the player name', async () => {
     const { brain, calls } = makeBrain('Fear not, Your Highness, try again!')
     const event: ChatEvent = {

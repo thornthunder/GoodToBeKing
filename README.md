@@ -11,7 +11,7 @@ Building and other in-world actions are the next milestones.
 
 - Node.js 24 or newer on x64 (the RakNet transport ships x64 prebuilds only)
 - pnpm through corepack (bundled with Node; the version is pinned in `package.json`)
-- A Bedrock Dedicated Server 1.26.51 / 1.26.52 to join
+- A Bedrock Dedicated Server 1.26.60 to join (over Nethernet: `MC_TRANSPORT=nethernet`)
 - An Ollama server with at least one chat model pulled
 
 ## Quick start

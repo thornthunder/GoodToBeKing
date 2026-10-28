@@ -6,6 +6,7 @@
  *   tsx scripts/survey-terrain.ts <x1> <z1> <x2> <z2> [baseY]
  */
 import fs from 'node:fs'
+import { serverOptions } from '../src/bot/Bot'
 import { createBot } from 'mineflayer-bedrock'
 import { Vec3 } from 'vec3'
 import { defaultBotConfig } from '../src/config'
@@ -29,8 +30,7 @@ const LETTER: Array<[RegExp, string]> = [
 ]
 const cfg = defaultBotConfig()
 const bot = createBot({
-  host: cfg.server.host,
-  port: cfg.server.port,
+  ...serverOptions(cfg.server),
   username: 'Surveyor',
   auth: 'offline',
   hideErrors: true,

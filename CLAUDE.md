@@ -15,7 +15,9 @@ CommonJS output, Node 24+.
 Always use pnpm (`corepack pnpm ...`), never npm: mineflayer-bedrock needs the exact versions
 and patches in `pnpm-workspace.yaml`, which mirrors `vendor/bedboo/pnpm-workspace.yaml`. After
 bumping the submodule, re-copy its overrides / packageExtensions / allowBuilds /
-patchedDependencies (patch paths point into `vendor/bedboo/patches`).
+patchedDependencies (patch paths point into `vendor/bedboo/patches`). Our own patch,
+`patches/minecraft-data@3.117.0.patch`, stands in for Bedrock 1.26.60 support (see the protocol
+notes); drop it once bedboo supports the server's version.
 
 ```bash
 corepack pnpm install
@@ -158,7 +160,18 @@ Windows, killing a background `npx` shell does not kill its node children at all
 
 ## Protocol notes (bedrock-protocol 3.60, Bedrock 1.26.x)
 
-- The protocol version is auto-detected from the server ping; `MC_VERSION` forces one.
+- The server runs Bedrock 1.26.60 (protocol 2225). mineflayer-bedrock accepts only the version
+  `1.26.51`, so `patches/minecraft-data@3.117.0.patch` puts the 1.26.60 protocol under that label
+  (and the number 2225). The schema is minecraft-data's `bedrock_1_26_60` branch (commit
+  6b31d379), checked field by field against Mojang's bedrock-protocol-docs (1.26.50 -> 1.26.60)
+  and gophertunnel's 1.26.60 support. The login still says `GameVersion` 1.26.51; the server
+  accepts it.
+- 1.26.60 servers answer only on Nethernet: no RakNet ping, no RakNet connection (bedboo:
+  "Mojang announced its removal"). `MC_TRANSPORT=nethernet` connects over WebRTC with HTTP
+  signalling on the game port. A spawn then takes 15-30 s when several bots join at once, so the
+  offline spawn timeout is 90 s.
+- mineflayer-bedrock always asks for version `1.26.51`; `MC_VERSION` only matters for other
+  clients.
 - `text` packet gained a `category` field (`message_only` | `authored` | `parameters`) in
   1.26. Outgoing chat uses `category: 'authored'`; older serializers ignore unknown fields.
   Required outgoing fields: `type, needs_translation, category, source_name, message, xuid,

@@ -11,7 +11,7 @@ import { createBot } from 'mineflayer-bedrock'
 import { Movements, goals, pathfinder, type Pathfinder } from 'mineflayer-pathfinder'
 import { OllamaBrain } from '../src/ai/OllamaBrain'
 import { OllamaClient } from '../src/ai/OllamaClient'
-import { Bot } from '../src/bot/Bot'
+import { Bot, serverOptions } from '../src/bot/Bot'
 import { defaultBotConfig } from '../src/config'
 import { CourtRoster } from '../src/court'
 import { createLogger, setLogLevel } from '../src/logger'
@@ -40,8 +40,7 @@ async function main(): Promise<void> {
   log.info('TestMerlin is in the world')
 
   const leader = createBot({
-    host: cfg.server.host,
-    port: cfg.server.port,
+    ...serverOptions(cfg.server),
     username: 'Apprentice',
     auth: 'offline',
     hideErrors: true,

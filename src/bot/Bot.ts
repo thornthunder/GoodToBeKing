@@ -8,7 +8,7 @@ import {
 } from 'mineflayer-bedrock'
 import type { BotAction, Brain, BrainContext, BuildOutcome } from '../ai/Brain'
 import { splitChatMessage } from '../ai/text'
-import type { BotConfig } from '../config'
+import type { BotConfig, ServerConfig } from '../config'
 import type { CourtRoster } from '../court'
 import type { Logger } from '../logger'
 import { errMsg } from '../util'
@@ -44,6 +44,17 @@ import {
   type TextPacket,
   type Vec3,
 } from './packets'
+
+/** createBot options that say where and how to reach the server (shared with the scripts). */
+export function serverOptions(server: ServerConfig): MineflayerBotOptions {
+  return {
+    host: server.host,
+    port: server.port,
+    ...(server.version ? { version: server.version } : {}),
+    ...(server.raknetBackend ? { raknetBackend: server.raknetBackend } : {}),
+    ...(server.transport ? { transport: server.transport } : {}),
+  } as MineflayerBotOptions
+}
 
 export type BotStatus = 'idle' | 'connecting' | 'joined' | 'spawned' | 'closed'
 
@@ -185,7 +196,8 @@ export class Bot extends EventEmitter {
 
   /** Free to take a work order from the court's building works. */
   canWork(): boolean {
-    if (!this.cfg.works || this.state.status !== 'spawned' || !this.body || !this.mason) return false
+    if (!this.cfg.works || this.state.status !== 'spawned' || !this.body || !this.mason)
+      return false
     if (this.builder?.busy || this.mason.busy) return false
     if (Date.now() < this.worksPausedUntil) return false
     if (this.movement?.current() && !this.dutyFollowing) return false
@@ -194,7 +206,11 @@ export class Bot extends EventEmitter {
   }
 
   /** Fly a survey over the land (see Mason.survey). */
-  async survey(points: Array<{ x: number; z: number }>, height: number, look: () => void): Promise<void> {
+  async survey(
+    points: Array<{ x: number; z: number }>,
+    height: number,
+    look: () => void
+  ): Promise<void> {
     await this.mason?.survey(points, height, look)
   }
 
@@ -270,8 +286,9 @@ export class Bot extends EventEmitter {
     if (this.client) throw new Error(`${this.cfg.name} is already connected`)
     this.stopping = false
     const { server, auth } = this.cfg
-    // Device-code sign-in needs a human, so give online mode far longer.
-    const spawnTimeoutMs = auth.offline ? 30_000 : 300_000
+    // Device-code sign-in needs a human, so give online mode far longer. Over Nethernet a spawn
+    // takes 15-30 s when several bots join at once (start_game alone can take 25 s).
+    const spawnTimeoutMs = auth.offline ? 90_000 : 300_000
 
     this.state.status = 'connecting'
     this.log.info(
@@ -281,14 +298,11 @@ export class Bot extends EventEmitter {
     )
 
     const options: MineflayerBotOptions = {
-      host: server.host,
-      port: server.port,
+      ...serverOptions(server),
       username: this.cfg.name,
       auth: auth.offline ? 'offline' : 'microsoft',
       offline: auth.offline,
       profilesFolder: auth.profilesFolder,
-      ...(server.version ? { version: server.version } : {}),
-      ...(server.raknetBackend ? { raknetBackend: server.raknetBackend } : {}),
       conLog: (...args: unknown[]) => this.log.info(args.map(String).join(' ')),
       onMsaCode: (data) =>
         this.log.warn(
@@ -516,8 +530,9 @@ export class Bot extends EventEmitter {
     await this.brain
       .onBuildDone(
         {
-          title: `taking down ${result.title}`,
+          title: result.title,
           requestedBy,
+          undone: true,
           ok: true,
           placed: result.removed,
           total: result.removed,
@@ -579,7 +594,10 @@ export class Bot extends EventEmitter {
         }),
       position: me,
       activity:
-        this.builder?.activity() ?? this.mason?.activity() ?? this.movement?.describe() ?? undefined,
+        this.builder?.activity() ??
+        this.mason?.activity() ??
+        this.movement?.describe() ??
+        undefined,
       works: this.cfg.works ? this.worksSummary?.() : undefined,
     }
   }

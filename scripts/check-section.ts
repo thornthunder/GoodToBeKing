@@ -4,6 +4,7 @@
  *   tsx scripts/check-section.ts <design.json> [section id prefix ...]
  */
 import fs from 'node:fs'
+import { serverOptions } from '../src/bot/Bot'
 import { createBot } from 'mineflayer-bedrock'
 import { Vec3 } from 'vec3'
 import { compileDesign } from '../src/build/compile'
@@ -14,7 +15,7 @@ const [file, ...prefixes] = process.argv.slice(2)
 const plan = compileDesign(JSON.parse(fs.readFileSync(file, 'utf8')) as CastleDesign)
 const sections = plan.sections.filter((s) => !prefixes.length || prefixes.some((p) => s.id.startsWith(p)))
 const cfg = defaultBotConfig()
-const bot = createBot({ host: cfg.server.host, port: cfg.server.port, username: 'Surveyor', auth: 'offline', hideErrors: true })
+const bot = createBot({ ...serverOptions(cfg.server), username: 'Surveyor', auth: 'offline', hideErrors: true })
 bot.once('spawn', async () => {
   await bot.waitForChunksToLoad()
   await new Promise((r) => setTimeout(r, 3000))

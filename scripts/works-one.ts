@@ -4,6 +4,7 @@
  *   tsx scripts/works-one.ts <design.json> <section id> [bot name]
  */
 import fs from 'node:fs'
+import { serverOptions } from '../src/bot/Bot'
 import { createBot } from 'mineflayer-bedrock'
 import { compileDesign } from '../src/build/compile'
 import type { CastleDesign } from '../src/build/design'
@@ -18,7 +19,7 @@ if (!section) throw new Error(`no section ${sectionId}; try one of: ${plan.secti
 setLogLevel((process.env.LOG_LEVEL as 'debug') ?? 'info')
 const log = createLogger(name)
 const cfg = defaultBotConfig()
-const body = createBot({ host: cfg.server.host, port: cfg.server.port, username: name, auth: 'offline', hideErrors: true })
+const body = createBot({ ...serverOptions(cfg.server), username: name, auth: 'offline', hideErrors: true })
 body.on('error', (e) => log.debug(`body error: ${e.message}`))
 body.once('spawn', async () => {
   await body.waitForChunksToLoad()

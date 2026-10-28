@@ -13,9 +13,22 @@ export interface ServerConfig {
   version?: string
   /** RakNet implementation: native C++ (default) or the pure-JS port. */
   raknetBackend?: RaknetBackend
+  /**
+   * How to reach the server: RakNet (the default) or Nethernet (WebRTC, with HTTP signalling on
+   * the server port). Bedrock 1.26.60 servers answer only on Nethernet.
+   */
+  transport?: Transport
 }
 
 export type RaknetBackend = 'raknet-native' | 'jsp-raknet'
+export type Transport = 'raknet' | 'nethernet'
+
+function envTransport(key: string): Transport | undefined {
+  const value = env(key)
+  if (value === undefined) return undefined
+  if (value === 'raknet' || value === 'nethernet') return value
+  throw new Error(`${key} must be raknet or nethernet, got "${value}"`)
+}
 
 function envRaknetBackend(key: string): RaknetBackend | undefined {
   const value = env(key)
@@ -153,6 +166,7 @@ export function defaultBotConfig(): BotConfig {
       port: envNum('MC_PORT', 19132),
       version: env('MC_VERSION'),
       raknetBackend: envRaknetBackend('MC_RAKNET_BACKEND'),
+      transport: envTransport('MC_TRANSPORT'),
     },
     auth: {
       offline: envBool('MC_OFFLINE', true),

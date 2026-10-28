@@ -44,6 +44,8 @@ allowBuilds:
   raknet-native: false
   esbuild: true
 
+# patches/minecraft-data@3.117.0.patch is ours, not bedboo's: it serves the Bedrock 1.26.60
+# protocol (2225) under the 1.26.51 label that mineflayer-bedrock insists on (see CLAUDE.md).
 patchedDependencies:
   bedrock-protocol@3.60.1: vendor/bedboo/patches/bedrock-protocol@3.60.1.patch
   minecraft-data@3.117.0: patches/minecraft-data@3.117.0.patch
