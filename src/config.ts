@@ -86,6 +86,11 @@ export interface BotConfig {
   buildZone?: Zone
   /** The bot's place at court, e.g. "court wizard" or "royal guard". */
   role: string
+  /**
+   * The courtier this bot reports to and takes orders from; the royal family outranks everyone.
+   * Undefined: it answers to the royal family alone.
+   */
+  reportsTo?: string
   /** Whether this bot builds from the spellbook (others suggest asking a builder). */
   canBuild: boolean
   /** A standing duty, e.g. escorting a royal (see Bot.performDuty). */
@@ -244,6 +249,12 @@ export function loadConfig(): AppConfig {
     if (!bot.name) throw new Error('Every bot needs a name')
     if (names.has(bot.name)) throw new Error(`Duplicate bot name: ${bot.name}`)
     names.add(bot.name)
+  }
+  for (const bot of bots) {
+    if (bot.reportsTo !== undefined && (!names.has(bot.reportsTo) || bot.reportsTo === bot.name))
+      throw new Error(
+        `${bot.name} reports to "${bot.reportsTo}", who is not another bot of the court`
+      )
   }
 
   const logLevel = envStr('LOG_LEVEL', 'info').toLowerCase()

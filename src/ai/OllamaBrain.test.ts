@@ -518,6 +518,28 @@ describe('OllamaBrain court behaviour', () => {
     expect(prompt).toContain('Never tell them to anyone')
   })
 
+  it('knows the chain of command: who reports to whom', () => {
+    const staff = [
+      { name: 'Merlin', role: 'court wizard', canBuild: true },
+      { name: 'Festaris', role: 'Castellan', canBuild: false },
+      { name: 'Henry', role: 'apprentice', canBuild: true, reportsTo: 'Festaris' },
+    ]
+    const brainOf = (name: string, reportsTo?: string) => {
+      const base = defaultBotConfig()
+      const cfg = { ...base, name, ...(reportsTo ? { reportsTo } : {}) }
+      return new OllamaBrain(cfg, { chat: vi.fn() }, court, createLogger('test'), { staff })
+    }
+    const prompt = (name: string, reportsTo?: string) =>
+      brainOf(name, reportsTo).systemPrompt({ ...ctx('LittleOne42'), botName: name })
+
+    const merlin = prompt('Merlin')
+    expect(merlin).toContain('You answer to the royal family alone. Nobody else at court')
+    expect(merlin).toContain('Henry (apprentice, reports to Festaris)')
+    expect(merlin).toContain('Festaris (Castellan, answers to the royal family)')
+    expect(prompt('Festaris')).toContain('Henry report to you: you give them their tasks')
+    expect(prompt('Henry', 'Festaris')).toContain('You report to Festaris: you take orders')
+  })
+
   it('puts the court and the safety rules in the system prompt', () => {
     const { brain } = makeBrain('unused')
     const prompt = brain.systemPrompt({

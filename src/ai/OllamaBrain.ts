@@ -641,8 +641,9 @@ export class OllamaBrain implements Brain {
           'The building happens by itself; just talk about it. Only build for the royal family.'
         : `- You do not build yourself; ${listWords(this.staff.filter((s) => s.canBuild).map((s) => s.name)) || 'others'} build for the court.`,
       this.staff.length > 0 &&
-        `- Your fellow members of the court (other characters like you): ${this.staff.map((s) => `${s.name} (${s.role})`).join(', ')}. ` +
+        `- Your fellow members of the court (other characters like you): ${this.staff.map((s) => `${s.name} (${s.role}, ${s.reportsTo ? `reports to ${s.reportsTo}` : 'answers to the royal family'})`).join(', ')}. ` +
           'When someone talks to one of them by name, let that one answer.',
+      `- ${this.chainOfCommand()}`,
       '- You still cannot build anything outside your spellbook, fetch or carry items, or find ' +
         'places by name. If asked to, never agree or promise to do it. Kindly explain in ' +
         'character that this magic is not ready yet and offer something else.',
@@ -659,6 +660,22 @@ export class OllamaBrain implements Brain {
     return [identity, this.court.describe(), this.memorySection(ctx), SAFETY_RULES, rules]
       .filter(Boolean)
       .join('\n\n')
+  }
+
+  /** Where this bot stands in the court's chain of command. */
+  private chainOfCommand(): string {
+    const boss = this.cfg.reportsTo
+    const staff = this.staff.filter((s) => s.reportsTo === this.cfg.name).map((s) => s.name)
+    return [
+      boss
+        ? `You report to ${boss}: you take orders from ${boss} and from the royal family, who ` +
+          `outrank everyone, and you tell ${boss} when your work is done.`
+        : 'You answer to the royal family alone.',
+      'Nobody else at court gives you orders.',
+      staff.length > 0 && `${listWords(staff)} report to you: you give them their tasks.`,
+    ]
+      .filter(Boolean)
+      .join(' ')
   }
 
   /**
@@ -736,6 +753,8 @@ export interface StaffMember {
   name: string
   role: string
   canBuild: boolean
+  /** Who this courtier reports to; undefined = the royal family alone. */
+  reportsTo?: string
 }
 
 /** What a chat line asks of the body, plus a one-off note so the reply matches. */

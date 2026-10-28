@@ -123,6 +123,10 @@ Windows, killing a background `npx` shell does not kill its node children at all
 
 - The court is `config/bots.json` (Merlin, Festaris the Castellan, guards Bruce and Dyke,
   apprentices Henry and George); `works: true` puts a bot in the building crew.
+  Chain of command (`reportsTo`): the royal family outranks everyone; Merlin and Festaris answer
+  to the royals alone; Bruce, Dyke, Henry and George report to Festaris. Each prompt states the
+  bot's place (`chainOfCommand`), and the Castellan gives building tasks only to his own staff
+  (Merlin picks his part himself and tells the court).
 - `build/design.ts`: the castle design language (area, curtain wall, gates, towers, buildings with
   storeys of typed rooms, features). Coordinates are relative to the area's north-west corner;
   rooms include their walls and share wall lines. `validateDesign` explains problems in plain

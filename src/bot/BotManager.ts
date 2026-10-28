@@ -53,7 +53,12 @@ export class BotManager {
       (a, b) => Number(isCastellan(cfg, b)) - Number(isCastellan(cfg, a))
     )
     const floor = new ChatFloor(botNames, castellanFirst)
-    const staff = cfg.bots.map((b) => ({ name: b.name, role: b.role, canBuild: b.canBuild }))
+    const staff = cfg.bots.map((b) => ({
+      name: b.name,
+      role: b.role,
+      canBuild: b.canBuild,
+      reportsTo: b.reportsTo,
+    }))
     // What each bot built, so "take it down" removes only that bot's own blocks.
     const builds = new BuildLog(path.resolve(STATE_DIR, 'builds.json'))
     for (const botCfg of cfg.bots) {
@@ -297,7 +302,8 @@ export class BotManager {
       case 'assign': {
         const worker = this.find(e.worker)
         this.chatter(async () => {
-          if (foreman && worker && foreman !== worker) {
+          // The Castellan gives tasks only to his own staff; Merlin picks his part himself.
+          if (foreman && worker && worker.cfg.reportsTo === boss) {
             await foreman.speak(
               `Tell ${e.worker} to build ${e.section.title} now. Address ${e.worker} by name.`,
               `${e.worker}, see to ${e.section.title}, if you please.`
@@ -333,14 +339,14 @@ export class BotManager {
           return
         }
         this.chatter(async () => {
-          const own = !foreman || worker === foreman
+          const own = !foreman || worker?.cfg.reportsTo !== boss
           await worker?.speak(
             own
               ? `Tell the court in one short sentence that you have just finished ${e.section.title}.`
               : `Tell ${boss} in one short sentence that you have finished ${e.section.title}.`,
             `${e.section.title} is finished!`
           )
-          if (foreman && worker && foreman !== worker && Math.random() < 0.5) {
+          if (foreman && worker && worker.cfg.reportsTo === boss && Math.random() < 0.5) {
             await sleep(3_000)
             await foreman.speak(
               `${e.worker} just finished ${e.section.title}. Thank ${e.worker} warmly in one short sentence.`,
