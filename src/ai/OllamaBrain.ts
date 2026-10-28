@@ -53,6 +53,18 @@ import { SILENT_TOKEN, cleanChatReply, mentionsName, mentionsNameLoosely } from 
 /** Do not hail the same player again if they rejoin within this window. */
 export const REHAIL_AFTER_MS = 10 * 60_000
 
+/** A royal's answer not ready after this long: the bot thinks aloud first. */
+const THINKING_MS = 2_500
+/** At most one "let me think" a minute, so a long talk is not full of them. */
+const THINKING_GAP_MS = 60_000
+const THINKING_LINES = [
+  'Hmm, let me see...',
+  'Well now, let me think...',
+  'Oh, let me think about that...',
+  'Mhm... one moment...',
+  'Hmm... well...',
+]
+
 /** An unanswered riddle is forgotten after this long. */
 const RIDDLE_EXPIRES_MS = 15 * 60_000
 
@@ -128,6 +140,8 @@ export class OllamaBrain implements Brain {
   /** Set when this turn solves or gives up the active riddle; cleared after the reply. */
   private riddleDone = false
   private readonly toldRiddles = new Set<string>()
+  private lastThinking = 0
+  private lastThinkingLine?: string
   /** This bot's standing orders, and what it owes its superior. */
   private readonly orders: OrderBook
   /** The rules the royal family laid down for the whole court. */
@@ -289,25 +303,36 @@ export class OllamaBrain implements Brain {
     const speaker = member ? `The ${member.title}` : event.from
     // The line just before this one (already in history) was ours: they are answering us.
     const answeringUs = this.history.at(-2)?.role === 'assistant'
-    const plain = this.actionTurn(event, member, ctx)
-    const turn = reads && member ? await this.orderTurn(event, member, ctx, plain) : plain
-    const missing = turn.ability ?? detectMissingAbility(event.message)
-    // A wizard can travel by magic: only the spell decides what is possible then.
-    const ability = turn.action || (this.magic && missing === 'travel') ? undefined : missing
-    const riddleNote = this.riddleTurn(event.message)
-    const notes = [turn.note, ability ? abilityNote(ability, ctx.botName) : '', riddleNote].filter(
-      Boolean
-    )
-    const move = turn
-    const say = await this.generate(ctx, {
-      note: notes.join('\n') || undefined,
-      ...(ability ? { ability, address: member?.address ?? 'my friend' } : {}),
-      // A royal who names the bot (even misspelled) or answers it gets a reply, not silence.
-      insist:
-        member && (answeringUs || mentionsNameLoosely(event.message, ctx.botName))
-          ? `(${speaker} is talking to you, ${ctx.botName}: answer kindly.)`
-          : undefined,
-    })
+    // Reading the line and answering often takes a royal 4-6 s of waiting: when it takes a while
+    // the bot says something at once, as a person would ("Hmm, let me see...").
+    const thinking = member ? this.thinkAloud(ctx) : undefined
+    let move: Turn
+    let say: string | null
+    try {
+      const plain = this.actionTurn(event, member, ctx)
+      const turn = reads && member ? await this.orderTurn(event, member, ctx, plain) : plain
+      const missing = turn.ability ?? detectMissingAbility(event.message)
+      // A wizard can travel by magic: only the spell decides what is possible then.
+      const ability = turn.action || (this.magic && missing === 'travel') ? undefined : missing
+      const riddleNote = this.riddleTurn(event.message)
+      const notes = [
+        turn.note,
+        ability ? abilityNote(ability, ctx.botName) : '',
+        riddleNote,
+      ].filter(Boolean)
+      move = turn
+      say = await this.generate(ctx, {
+        note: notes.join('\n') || undefined,
+        ...(ability ? { ability, address: member?.address ?? 'my friend' } : {}),
+        // A royal who names the bot (even misspelled) or answers it gets a reply, not silence.
+        insist:
+          member && (answeringUs || mentionsNameLoosely(event.message, ctx.botName))
+            ? `(${speaker} is talking to you, ${ctx.botName}: answer kindly.)`
+            : undefined,
+      })
+    } finally {
+      clearTimeout(thinking)
+    }
     if (this.riddleDone) {
       this.activeRiddle = undefined
       this.riddleDone = false
@@ -315,6 +340,23 @@ export class OllamaBrain implements Brain {
     if (say) this.hear(`${ctx.botName}: ${say}`)
     if (!say && !move.action) return null
     return move.action ? { say, action: move.action } : { say }
+  }
+
+  /**
+   * Say a short "let me think" line if the answer is not ready soon. It is not kept in the
+   * history: the model answers as if it had only paused.
+   */
+  private thinkAloud(ctx: BrainContext): NodeJS.Timeout | undefined {
+    const say = ctx.interim
+    if (!say || Date.now() - this.lastThinking < THINKING_GAP_MS) return undefined
+    return setTimeout(() => {
+      this.lastThinking = Date.now()
+      const lines = this.cfg.chat.thinking?.length ? this.cfg.chat.thinking : THINKING_LINES
+      const fresh = lines.filter((l) => l !== this.lastThinkingLine)
+      const line = fresh[Math.floor(Math.random() * fresh.length)] ?? lines[0]
+      this.lastThinkingLine = line
+      say(line)
+    }, THINKING_MS)
   }
 
   /**

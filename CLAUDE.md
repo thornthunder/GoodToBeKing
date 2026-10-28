@@ -205,6 +205,9 @@ Windows, killing a background `npx` shell does not kill its node children at all
   from their building's own corner are read as meant (`normaliseRooms`); `courtProblems` adds
   a builder's review (rooms that fill their storeys, halls big enough, stables on the ground).
 
+- Thinking aloud: when a royal's answer is not ready after 2.5 s (the line is read by the big
+  model first), the bot says one of its `chat.thinking` lines (bots.json; at most one a minute,
+  by whisper for a whisper, kept out of the history).
 - Silence guard: when a royal names the bot (even misspelled, `mentionsNameLoosely`) or answers
   the bot's last line and the model replies `[silent]`, `generate` asks once more with a note.
 - `CourtMemory` re-reads its file when the mtime changes, so hand edits are safe while running.

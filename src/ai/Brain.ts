@@ -23,6 +23,8 @@ export interface SeenPlayer {
 
 /** Snapshot of what the bot knows about the world when the brain is consulted. */
 export interface BrainContext {
+  /** Say something before the answer is ready (to the speaker, the way the line came). */
+  interim?: (text: string) => void
   botName: string
   /** The other players currently on the server (fellow bots excluded). */
   players: SeenPlayer[]

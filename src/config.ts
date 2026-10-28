@@ -86,6 +86,8 @@ export interface ChatConfig {
   greeting?: string
   /** How many chat lines the bot remembers when prompting the model. */
   historySize: number
+  /** Said at once when an answer for a royal takes a while ("Hmm, let me see..."). */
+  thinking?: string[]
 }
 
 export interface BotConfig {

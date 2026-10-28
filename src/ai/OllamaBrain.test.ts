@@ -267,6 +267,41 @@ describe('OllamaBrain court behaviour', () => {
     expect(calls[0].at(-1)?.content).toContain('cannot find a way to reach them')
   })
 
+  it('thinks aloud when an answer for a royal takes a while, once a minute at most', async () => {
+    vi.useFakeTimers()
+    try {
+      const slow: ChatModel = {
+        chat: async (messages) => {
+          if (messages[0].content.startsWith('You help'))
+            return { message: { role: 'assistant', content: JSON.stringify(NO_ORDER) } } as never
+          await new Promise((r) => setTimeout(r, 5_000))
+          return { message: { role: 'assistant', content: 'Ah, the answer!' } } as never
+        },
+      }
+      const base = defaultBotConfig()
+      const cfg = {
+        ...base,
+        name: 'Merlin',
+        chat: { ...base.chat, thinking: ['Hmm, my books...'] },
+      }
+      const brain = new OllamaBrain(cfg, slow, court, createLogger('test'))
+      const said: string[] = []
+      const context = { ...seen('LittleOne42'), interim: (t: string) => said.push(t) }
+      const first = brain.onChat(chat('LittleOne42', 'Merlin, what is a dragon?'), context)
+      await vi.advanceTimersByTimeAsync(3_000)
+      expect(said).toEqual(['Hmm, my books...'])
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect((await first)?.say).toBe('Ah, the answer!')
+      // Within the minute, the next slow answer comes without one.
+      const second = brain.onChat(chat('LittleOne42', 'Merlin, and a unicorn?'), context)
+      await vi.advanceTimersByTimeAsync(8_000)
+      await second
+      expect(said).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('tells the model what it is doing right now', () => {
     const { brain } = makeBrain('unused')
     const prompt = brain.systemPrompt({ ...seen('LittleOne42'), activity: 'following LittleOne42' })

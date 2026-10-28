@@ -1198,6 +1198,8 @@ export class Bot extends EventEmitter {
       this.log.debug(`the floor gives this line to ${responder ?? 'nobody'}`)
     const ctx = {
       ...this.context(),
+      interim: (text: string) =>
+        event.kind === 'whisper' ? this.whisper(event.from, text) : this.chat(text),
       mayReply: responder === this.cfg.name,
       hears: this.hears(event, responder),
     }
