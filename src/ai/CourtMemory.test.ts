@@ -35,6 +35,16 @@ describe('CourtMemory', () => {
     expect(memory.entries('LittleOne42').filter((f) => f.private)).toHaveLength(3)
   })
 
+  it('drops a private or secret mark the model copied into the text', () => {
+    const memory = new CourtMemory()
+    memory.add('BigDad', [{ text: 'The King hid the key. (secret)', secret: true }])
+    memory.add('BigDad', ['The King likes tea. (private) (secret).'])
+    expect(memory.facts('BigDad', { withPrivate: true })).toEqual([
+      'The King hid the key.',
+      'The King likes tea.',
+    ])
+  })
+
   it('never stores secrets', () => {
     const memory = new CourtMemory()
     const kept = memory.add('LittleOne42', [

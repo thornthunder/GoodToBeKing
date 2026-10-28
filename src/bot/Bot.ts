@@ -242,6 +242,7 @@ export class Bot extends EventEmitter {
     this.log.warn(`${spell.name} failed: ${result.reason}`)
     // Refused for want of rights: the magic sleeps until someone types "op Merlin" again.
     if (result.reason?.includes('commands.generic.error.permissions')) {
+      this.log.warn(`magic is asleep: type "op ${this.username}" in the server console`)
       this.magic!.available = false
       this.lastMagicCheck = Date.now()
     }

@@ -101,10 +101,10 @@ export class CourtMemory {
     const added: Fact[] = []
     for (const item of facts) {
       const raw = typeof item === 'string' ? item : item.text
-      // The prompt marks private facts itself; a model that copies the mark into the text is undone.
+      // The prompt marks private and secret facts itself; a mark copied into the text is undone.
       const text = raw
         .replace(/\s+/g, ' ')
-        .replace(/\s*\(private\)\.?\s*$/i, '')
+        .replace(/(\s*\((private|secret)\)\.?)+\s*$/i, '')
         .trim()
       const norm = normalise(text)
       if (!norm || seen.has(norm) || isSecret(text)) continue
