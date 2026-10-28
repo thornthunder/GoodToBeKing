@@ -289,7 +289,9 @@ export class Bot extends EventEmitter {
   private async checkMagic(): Promise<void> {
     const magic = this.magic
     if (!magic) return
-    const result = await this.command('testfor @s')
+    // Without rights the server refuses this one plainly; a bare "testfor" gets no answer at all.
+    const result = await this.command('execute as @s run testfor @s')
+    if (result.output.some((o) => o.startsWith('no answer'))) return // ask again later
     if (magic.available === result.ok) return
     magic.available = result.ok
     if (result.ok) this.log.info('magic is awake: the server lets this bot run commands')

@@ -194,7 +194,7 @@ Windows, killing a background `npx` shell does not kill its node children at all
   no account id, so the server cannot keep operator rights on disk ("Missing id, won't persist
   permissions on disk") and Merlin loses them on every reconnect; a client-sent XUID is ignored.
   `server/start-bds.cmd` (+ `.ps1`) runs the server and types `op Merlin` whenever he spawns.
-  Merlin checks his rights (`testfor @s`) after each spawn and every minute while they are
+  Merlin checks his rights (`execute as @s run testfor @s`) after each spawn and every minute while they are
   missing; until then his magic sleeps and he says so in character.
 - Building happens within `BUILD_RADIUS` (100) of `BUILD_CENTER` (105, 75, 122). The princess's
   house and the village paths lie south of the castle; never dig player-made blocks.
