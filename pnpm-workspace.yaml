@@ -46,6 +46,7 @@ allowBuilds:
 
 patchedDependencies:
   bedrock-protocol@3.60.1: vendor/bedboo/patches/bedrock-protocol@3.60.1.patch
+  minecraft-data@3.117.0: patches/minecraft-data@3.117.0.patch
   mineflayer-armor-manager@2.0.1: vendor/bedboo/patches/mineflayer-armor-manager@2.0.1.patch
   mineflayer-auto-eat@5.0.3: vendor/bedboo/patches/mineflayer-auto-eat@5.0.3.patch
   mineflayer-collectblock@1.6.0: vendor/bedboo/patches/mineflayer-collectblock@1.6.0.patch

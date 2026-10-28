@@ -190,6 +190,7 @@ packageExtensionsChecksum: sha256-iI1IoHYWvuJSK67BH9RIVizB3pzhP306C2a79Ve8Y9o=
 
 patchedDependencies:
   bedrock-protocol@3.60.1: 210a086d792ac39095e42352e11367547ed78674a220883a414d0497029ac922
+  minecraft-data@3.117.0: c57dc9c6f6ed0b5bf12cf6ddea06acb35adc0acad97f41d71954899ed131310a
   mineflayer-armor-manager@2.0.1: c9eacbaa8216eda33fbd3e0076148b75a987163663b93153351d8b39ab13d57e
   mineflayer-auto-eat@5.0.3: ac0a87efa86ea438b92da285435fb3fcc49fb30642e4ef79df934895ebbd782f
   mineflayer-collectblock@1.6.0: d5d5059fc7aa027251f654c685c568990572791abfc4c27ee62c76a501ba38a8
@@ -216,7 +217,7 @@ importers:
         version: 18.0.9
       minecraft-data:
         specifier: 3.117.0
-        version: 3.117.0
+        version: 3.117.0(patch_hash=c57dc9c6f6ed0b5bf12cf6ddea06acb35adc0acad97f41d71954899ed131310a)
       mineflayer-bedrock:
         specifier: workspace:*
         version: link:vendor/bedboo/packages/mineflayer-bedrock
@@ -311,7 +312,7 @@ importers:
     dependencies:
       minecraft-data:
         specifier: 3.117.0
-        version: 3.117.0
+        version: 3.117.0(patch_hash=c57dc9c6f6ed0b5bf12cf6ddea06acb35adc0acad97f41d71954899ed131310a)
     devDependencies:
       mocha:
         specifier: 12.0.3
@@ -330,7 +331,7 @@ importers:
         version: 3.60.1(patch_hash=210a086d792ac39095e42352e11367547ed78674a220883a414d0497029ac922)(supports-color@8.1.1)
       minecraft-data:
         specifier: 3.117.0
-        version: 3.117.0
+        version: 3.117.0(patch_hash=c57dc9c6f6ed0b5bf12cf6ddea06acb35adc0acad97f41d71954899ed131310a)
       mineflayer:
         specifier: 4.39.0
         version: 4.39.0(supports-color@8.1.1)
@@ -3416,7 +3417,7 @@ snapshots:
       json-bigint: 1.0.0
       jsonwebtoken: 9.0.3
       jsp-raknet: 2.2.0(supports-color@8.1.1)
-      minecraft-data: 3.117.0
+      minecraft-data: 3.117.0(patch_hash=c57dc9c6f6ed0b5bf12cf6ddea06acb35adc0acad97f41d71954899ed131310a)
       minecraft-folder-path: 1.2.0
       nethernet: 1.1.2(patch_hash=52b72c4d012668748e6703b9bd90d12badb4c8334d7b40e4f836a0e52473f0b0)(supports-color@8.1.1)
       prismarine-auth: 3.1.1(supports-color@8.1.1)
@@ -4331,7 +4332,7 @@ snapshots:
     dependencies:
       readable-stream: 1.0.34
 
-  minecraft-data@3.117.0: {}
+  minecraft-data@3.117.0(patch_hash=c57dc9c6f6ed0b5bf12cf6ddea06acb35adc0acad97f41d71954899ed131310a): {}
 
   minecraft-folder-path@1.2.0: {}
 
@@ -4344,7 +4345,7 @@ snapshots:
       debug: 4.4.3(supports-color@8.1.1)
       endian-toggle: 0.0.0
       lodash.merge: 4.6.2
-      minecraft-data: 3.117.0
+      minecraft-data: 3.117.0(patch_hash=c57dc9c6f6ed0b5bf12cf6ddea06acb35adc0acad97f41d71954899ed131310a)
       minecraft-folder-path: 1.2.0
       node-fetch: 2.7.0
       node-rsa: 0.4.2
@@ -4362,7 +4363,7 @@ snapshots:
 
   mineflayer-armor-manager@2.0.1(patch_hash=c9eacbaa8216eda33fbd3e0076148b75a987163663b93153351d8b39ab13d57e)(mineflayer@4.39.0(supports-color@8.1.1)):
     dependencies:
-      minecraft-data: 3.117.0
+      minecraft-data: 3.117.0(patch_hash=c57dc9c6f6ed0b5bf12cf6ddea06acb35adc0acad97f41d71954899ed131310a)
       mineflayer: 4.39.0(supports-color@8.1.1)
 
   mineflayer-auto-eat@5.0.3(patch_hash=ac0a87efa86ea438b92da285435fb3fcc49fb30642e4ef79df934895ebbd782f)(supports-color@8.1.1)(vec3@0.1.10):
@@ -4385,7 +4386,7 @@ snapshots:
 
   mineflayer-pathfinder@2.4.5(patch_hash=c957b2fb22a276bfd2629d134aade1a7a5be8ad6eba20e2b730cc6bba1cea4a2)(supports-color@8.1.1):
     dependencies:
-      minecraft-data: 3.117.0
+      minecraft-data: 3.117.0(patch_hash=c57dc9c6f6ed0b5bf12cf6ddea06acb35adc0acad97f41d71954899ed131310a)
       prismarine-block: 1.23.0(patch_hash=5edfb19e7b0840f9838255865486627372ea1078d53100580d0e087607805899)(supports-color@8.1.1)
       prismarine-entity: 2.6.0(patch_hash=4dda3a4e7e9f7e51f0c16c4eb1771c34b634e594a32cb0deee199b5232614474)(supports-color@8.1.1)
       prismarine-item: 1.18.0(patch_hash=089fd0685eac5d9859be4cf766a3296436318555eda9b5a69693710fd3700632)
@@ -4426,7 +4427,7 @@ snapshots:
 
   mineflayer@4.39.0(supports-color@8.1.1):
     dependencies:
-      minecraft-data: 3.117.0
+      minecraft-data: 3.117.0(patch_hash=c57dc9c6f6ed0b5bf12cf6ddea06acb35adc0acad97f41d71954899ed131310a)
       minecraft-protocol: 1.68.0(supports-color@8.1.1)
       mojangson: 2.1.0
       prismarine-biome: 1.4.0(prismarine-registry@1.12.0(patch_hash=e2d9b1aa9e8c0ac704d87932fbb2105e38cf7c529dcdfdbe1d51ed9e2e011534))
@@ -4643,7 +4644,7 @@ snapshots:
 
   prismarine-block@1.23.0(patch_hash=5edfb19e7b0840f9838255865486627372ea1078d53100580d0e087607805899)(supports-color@8.1.1):
     dependencies:
-      minecraft-data: 3.117.0
+      minecraft-data: 3.117.0(patch_hash=c57dc9c6f6ed0b5bf12cf6ddea06acb35adc0acad97f41d71954899ed131310a)
       prismarine-biome: 1.4.0(prismarine-registry@1.12.0(patch_hash=e2d9b1aa9e8c0ac704d87932fbb2105e38cf7c529dcdfdbe1d51ed9e2e011534))
       prismarine-chat: 1.13.0(supports-color@8.1.1)
       prismarine-item: 1.18.0(patch_hash=089fd0685eac5d9859be4cf766a3296436318555eda9b5a69693710fd3700632)
@@ -4694,7 +4695,7 @@ snapshots:
 
   prismarine-physics@1.11.1:
     dependencies:
-      minecraft-data: 3.117.0
+      minecraft-data: 3.117.0(patch_hash=c57dc9c6f6ed0b5bf12cf6ddea06acb35adc0acad97f41d71954899ed131310a)
       prismarine-nbt: 2.8.0
       vec3: 0.2.0
 
@@ -4712,7 +4713,7 @@ snapshots:
 
   prismarine-registry@1.12.0(patch_hash=e2d9b1aa9e8c0ac704d87932fbb2105e38cf7c529dcdfdbe1d51ed9e2e011534):
     dependencies:
-      minecraft-data: 3.117.0
+      minecraft-data: 3.117.0(patch_hash=c57dc9c6f6ed0b5bf12cf6ddea06acb35adc0acad97f41d71954899ed131310a)
       prismarine-block: 1.23.0(patch_hash=5edfb19e7b0840f9838255865486627372ea1078d53100580d0e087607805899)(supports-color@8.1.1)
       prismarine-nbt: 2.8.0
 
