@@ -2,6 +2,7 @@
   {
     "name": "Merlin",
     "role": "court wizard",
+    "magic": true,
     "canBuild": true,
     "works": true,
     "skin": {

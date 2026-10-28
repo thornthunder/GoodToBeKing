@@ -50,7 +50,9 @@ corepack pnpm exec tsx scripts/make-court-skins.ts [preview-dir]                
 Write a line to a file named `.command` in the project root (checked every second):
 `<bot> build <blueprint> x y z [for <player>]`, `<bot> resume <blueprint> x y z [turns N]`,
 `<bot> undo`, and for the court's building works `works status|pause|resume`,
-`works start <design.json>` and `works plan` (the overlord designs the next castle now).
+`works start <design.json>` and `works plan` (the overlord designs the next castle now). For
+magic: `Merlin cast <spell> [on <who>] [to <place>] [item <x>] [creature <x>] [for <player>]` and
+`Merlin spells` (logs spells, places and gifts still to fade).
 
 ### Stopping a running app
 
@@ -125,6 +127,16 @@ Windows, killing a background `npx` shell does not kill its node children at all
   newest wins. Follow and stay orders are posts: no building works or escort duty while they
   stand; `Bot.tick` keeps following, and a follow order ends when its target leaves. A bot with
   `reportsTo` owes a report on every royal order and gives it when its superior is within earshot.
+- `magic/`: Merlin's magic. `spells.ts` holds the building blocks (teleport, effect, weather,
+  time, summon, particle, sound, give, saddle) with their allowlists, the built-in spells and
+  `commandsFor`, which writes the commands; the model only picks a spell and its target, place,
+  item or creature (in the order reading), and nothing it writes is run. `Magic.ts` keeps learned
+  spells and gifts in `.state/magic-<bot>.json`, cooldowns (teleports none, effects 2 min,
+  weather, time and gifts 10 min, creatures 5 min, sparkles 30 s), and takes gifts back after a
+  day (`clear`, or the saddle off the horse it tagged). `places.ts` names a free spot in every
+  room of the castles built and being built. Spells only for royals and courtiers, never on a
+  royal who outranks the one asking; only the King teaches a spell, and Merlin learns it after
+  repeating it back and a "yes". `Bot.command` sends a command and waits for `command_output`.
 - `bot/ChatFloor.ts`: one bot answers each line (the one named, the one already talking with that
   player, or the herald: the first bot online, the Castellan first for guests). Only the herald
   hails and reacts to notices. Guards with `duty: escort` follow their royal when one is in sight.
@@ -175,7 +187,10 @@ Windows, killing a background `npx` shell does not kill its node children at all
 ## Project constraints
 
 - The bots must work **without operator rights**: no `/tp`, `/fill`, `/setblock`, `/give`.
-  Movement and building have to be done through player-level packets.
+  Movement and building have to be done through player-level packets. The one exception, by the
+  family's choice, is Merlin's magic (`magic: true`): Merlin is an operator by name (`op Merlin`
+  in the server console; the world has `allow-cheats=true`), and only the spells in
+  `src/magic/spells.ts` ever run commands, built by code from allowlists.
 - Building happens within `BUILD_RADIUS` (100) of `BUILD_CENTER` (105, 75, 122). The princess's
   house and the village paths lie south of the castle; never dig player-made blocks.
 - The court shares one Ollama server (48 GB of VRAM) with another program. The court loads only

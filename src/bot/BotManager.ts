@@ -3,6 +3,8 @@ import path from 'node:path'
 import { CourtMemory } from '../ai/CourtMemory'
 import { CourtRules, OrderBook } from '../ai/orders'
 import { HailLog } from '../ai/HailLog'
+import { Magic } from '../magic/Magic'
+import { placesFromFiles, type Place } from '../magic/places'
 import { OllamaBrain } from '../ai/OllamaBrain'
 import { OllamaClient } from '../ai/OllamaClient'
 import { slug } from '../build/compile'
@@ -68,6 +70,13 @@ export class BotManager {
       const botLog = log.child(botCfg.name)
       const ai = new OllamaClient(botCfg.ai, botLog.child('ollama'))
       const hails = new HailLog(path.resolve(STATE_DIR, `${botCfg.name}.hails.json`))
+      const magic = botCfg.magic
+        ? new Magic({
+            file: path.resolve(STATE_DIR, `magic-${botCfg.name.toLowerCase()}.json`),
+            court: botNames,
+            places: () => this.places(),
+          })
+        : undefined
       const brain = new OllamaBrain(botCfg, ai, court, botLog.child('brain'), {
         hails,
         // Each bot remembers only what it heard itself, so one can keep a secret and news
@@ -78,6 +87,7 @@ export class BotManager {
         staff,
         orders: new OrderBook(path.resolve(STATE_DIR, `orders-${botCfg.name.toLowerCase()}.json`)),
         rules,
+        magic,
       })
       const bot = new Bot(botCfg, brain, botLog, {
         // Our own helper scripts' players (the surveyor) are ignored like fellow bots.
@@ -89,6 +99,7 @@ export class BotManager {
         floor,
         court,
         works: () => this.works?.summary(),
+        magic,
       })
       bot.on('chat', (event: { from: string }) => {
         if (court.find(event.from)) this.lastRoyalLine = Date.now()
@@ -98,6 +109,22 @@ export class BotManager {
     // Carry on with whatever the court was last building (the overlord's design, once there is one).
     const current = this.courtWorks().current ?? cfg.worksDesign
     if (current) this.startWorks(current)
+  }
+
+  private placesCache?: { at: number; places: Place[] }
+
+  /** Named places of the castles built and being built (for Merlin's portal), cached a while. */
+  private places(): Place[] {
+    if (this.placesCache && Date.now() - this.placesCache.at < 10 * 60_000) {
+      return this.placesCache.places
+    }
+    const works = this.courtWorks()
+    const files = [...works.built, ...(works.current ? [works.current] : [])].map((f) =>
+      path.resolve(f.replace(/\\/g, '/'))
+    )
+    const places = placesFromFiles([...new Set(files)])
+    this.placesCache = { at: Date.now(), places }
+    return places
   }
 
   /** Which designs the court has built and is building, kept in .state/court-works.json. */
@@ -415,6 +442,28 @@ export class BotManager {
       }
       this.log.info(`command: ${bot.cfg.name} resumes ${id} at ${x},${y},${z} (turns ${turns})`)
       void bot.resumeBuildAt(id, { x, y, z }, turns, requestedBy)
+    } else if (verb === 'cast') {
+      // <bot> cast <spell> [on <who>] [to <place ...>] [item <x>] [creature <x>] [effect <x>] [for <player>]
+      const after = (key: string) => {
+        const i = words.indexOf(key)
+        return i > 0 ? words[i + 1] : undefined
+      }
+      const toIndex = words.indexOf('to')
+      const stops = ['on', 'item', 'creature', 'effect', 'for']
+      const place =
+        toIndex > 0
+          ? words
+              .slice(toIndex + 1)
+              .filter((_, i, rest) => !rest.slice(0, i + 1).some((w) => stops.includes(w)))
+              .join(' ')
+          : undefined
+      void bot.castCommand(words[2] ?? '', {
+        target: after('on') ?? (requestedBy === 'the court' ? bot.cfg.name : requestedBy),
+        requestedBy,
+        args: { place, item: after('item'), creature: after('creature'), effect: after('effect') },
+      })
+    } else if (verb === 'spells') {
+      bot.listSpells()
     } else if (verb === 'undo') {
       this.log.info(`command: ${bot.cfg.name} takes down its last build`)
       void bot.undoLastBuild(requestedBy)

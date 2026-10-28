@@ -86,6 +86,20 @@ What the family tells about real life (age, school, family and the like) is kept
 online, so a visiting player never reads it in chat. Passwords and login details are never
 stored. The bots never ask for personal information.
 
+### Merlin's magic
+
+Merlin is the court's wizard, and the family made him an operator so he can work real magic: he
+appears beside whoever calls him, sends a royal to any room of the castles, gathers the court,
+heals, grants night sight, water breathing, feather fall, a short float, swiftness, bounce or a
+fire ward, clears the sky or brings rain, sets the time of day, sets off fireworks and sparkles,
+calls a friendly creature, and gives magic gifts (a cake, flowers, a saddle on the princess's
+horse) that fade after a day. Teleports can be cast any time; other spells need a while to
+gather again. The King can teach him new spells by describing them: Merlin repeats the spell
+back and learns it when the King says yes, as long as it is built from these same kinds of magic.
+Only the spells in his book ever run a command; the model never writes one.
+
+Server setup: `allow-cheats=true` in `server.properties`, and `op Merlin` in the server console.
+
 ### Orders and rules
 
 The court keeps a chain of command: the King outranks everyone, then the Princess; Merlin and

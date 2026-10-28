@@ -9,7 +9,7 @@ export const COURT_LAWS = [
   'Keep everything kind, cheerful and safe for a young child.',
   'Never break, take or change anything a player built or owns.',
   'Never hurt a player or their animals.',
-  'Never cheat: use no commands or powers an ordinary player does not have.',
+  'Use no powers beyond your own: only Merlin works magic, and only the spells he knows.',
 ]
 
 /** What the body does to keep a standing order: walk after someone, or stay put. */
@@ -209,8 +209,25 @@ export class CourtRules {
 }
 
 /** How the model read a royal's line. */
+/** What a magic-working bot's reader needs to know: its spells, the places, how spells are built. */
+export interface MagicInfo {
+  spells: Array<{ id: string; does: string; needs: string[] }>
+  places: string[]
+  guide: string[]
+}
+
+/** A request for a spell, as the model read it. */
+export interface SpellRequest {
+  id: string
+  target?: string
+  place?: string
+  item?: string
+  creature?: string
+  effect?: string
+}
+
 export interface Reading {
-  type: 'order' | 'rule' | 'release' | 'none'
+  type: 'order' | 'rule' | 'release' | 'teach' | 'none'
   /** The order or release is meant for this bot (alone, with others, or the whole court). */
   forMe: boolean
   /** The order or rule as one short instruction. */
@@ -221,6 +238,80 @@ export interface Reading {
   clashes: string[]
   /** For a release: the ids of the standing orders it ends. */
   releases: string[]
+  /** For a request for magic: which spell, on whom, and what it needs. */
+  spell?: SpellRequest
+  /** For a spell the King teaches: its name, what it does, and its steps. */
+  teach?: { name: string; does: string; steps: unknown[] }
+}
+
+/** The reading schema; with magic, also a spell request and a spell being taught. */
+export function readingSchema(magic?: MagicInfo): object {
+  if (!magic) return READING_SCHEMA
+  const text = { type: 'string' }
+  const num = { type: 'number' }
+  return {
+    ...READING_SCHEMA,
+    properties: {
+      ...READING_SCHEMA.properties,
+      type: { type: 'string', enum: ['order', 'rule', 'release', 'teach', 'none'] },
+      spell: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', enum: [...magic.spells.map((s) => s.id), 'unknown'] },
+          target: text,
+          place: text,
+          item: text,
+          creature: text,
+          effect: text,
+        },
+        required: ['id'],
+      },
+      teach: {
+        type: 'object',
+        properties: {
+          name: text,
+          does: text,
+          steps: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                kind: {
+                  type: 'string',
+                  enum: [
+                    'teleport',
+                    'effect',
+                    'weather',
+                    'time',
+                    'summon',
+                    'particle',
+                    'sound',
+                    'give',
+                    'saddle',
+                  ],
+                },
+                who: text,
+                to: text,
+                at: text,
+                effect: text,
+                seconds: num,
+                amplifier: num,
+                weather: text,
+                time: text,
+                creature: text,
+                count: num,
+                particle: text,
+                sound: text,
+                item: text,
+              },
+              required: ['kind'],
+            },
+          },
+        },
+        required: ['name', 'does', 'steps'],
+      },
+    },
+  }
 }
 
 export const READING_SCHEMA = {
@@ -236,8 +327,8 @@ export const READING_SCHEMA = {
   required: ['type', 'forMe', 'summary', 'lasting', 'clashes', 'releases'],
 }
 
-export function readingPrompt(bot: string, role: string): string {
-  return [
+export function readingPrompt(bot: string, role: string, magic?: MagicInfo): string {
+  const lines = [
     `You help ${bot}, the ${role} of a royal court on a family Minecraft server, keep track of orders.`,
     'Read the newest line, said by a member of the royal family, and decide what it is:',
     `- "order": it tells ${bot}, a group ${bot} belongs to, or the whole court what to do, where to be`,
@@ -258,7 +349,25 @@ export function readingPrompt(bot: string, role: string): string {
     '  Only real contradictions: "stay by the gate" and "follow the Princess" clash; "be polite" and',
     '  "stay by the gate" do not. A new order that only repeats a standing one does not clash.',
     'releases: for a release, the ids of the standing orders it ends; otherwise empty.',
-  ].join('\n')
+  ]
+  if (magic) {
+    lines.push(
+      `${bot} works magic. A request for one of these spells is an "order" that is not lasting,`,
+      'with "spell" filled in:',
+      ...magic.spells.map(
+        (s) => `- ${s.id}: ${s.does}${s.needs.length ? ` [needs: ${s.needs.join(', ')}]` : ''}`
+      ),
+      'spell.target: whom it is cast on: "speaker" when that is the one speaking or nobody else is',
+      '  named; otherwise the name or title of the one named, such as "the King" or "Bruce".',
+      `spell.place, for a spell that needs one, exactly as written here: ${magic.places.join('; ')}.`,
+      'spell.item, spell.creature, spell.effect: for a spell that needs them, as its line lists.',
+      'A request for magic that is none of these spells is an "order" with spell.id "unknown".',
+      `The King may teach ${bot} a new spell by describing it. Then the type is "teach", and`,
+      '"teach" holds its name, what it does, and its steps, built only from these kinds:',
+      ...magic.guide
+    )
+  }
+  return lines.join('\n')
 }
 
 export function readingInput(opts: {

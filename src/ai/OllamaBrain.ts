@@ -28,17 +28,20 @@ import {
   COURT_LAWS,
   CourtRules,
   OrderBook,
-  READING_SCHEMA,
   confirmation,
   judge,
   rankOf,
   readingInput,
   readingPrompt,
+  readingSchema,
   type Clash,
+  type MagicInfo,
   type Order,
   type Post,
   type Reading,
 } from './orders'
+import type { Magic } from '../magic/Magic'
+import { needs, stepGuide, type Step } from '../magic/spells'
 import { guessedRiddle, pickRiddle, wantsRiddle, type Riddle } from './riddles'
 import { HailLog } from './HailLog'
 import type { ChatMessage, ChatModel } from './OllamaClient'
@@ -126,6 +129,8 @@ export class OllamaBrain implements Brain {
   private readonly orders: OrderBook
   /** The rules the royal family laid down for the whole court. */
   private readonly rules: CourtRules
+  /** Merlin's magic; undefined for bots that work none. */
+  private readonly magic?: Magic
   /** An order or rule from the King that clashes with others, waiting for "yes" or "no". */
   private pendingOrder?: {
     member: CourtMember
@@ -148,6 +153,7 @@ export class OllamaBrain implements Brain {
     this.staff = (opts.staff ?? []).filter((s) => s.name !== cfg.name)
     this.orders = opts.orders ?? new OrderBook()
     this.rules = opts.rules ?? new CourtRules()
+    this.magic = opts.magic
   }
 
   /** Writes down what was heard now and resolves once every extraction has finished (for tests). */
@@ -279,7 +285,9 @@ export class OllamaBrain implements Brain {
     const answeringUs = this.history.at(-2)?.role === 'assistant'
     const plain = this.actionTurn(event, member, ctx)
     const turn = reads && member ? await this.orderTurn(event, member, ctx, plain) : plain
-    const ability = turn.action ? undefined : (turn.ability ?? detectMissingAbility(event.message))
+    const missing = turn.ability ?? detectMissingAbility(event.message)
+    // A wizard can travel by magic: only the spell decides what is possible then.
+    const ability = turn.action || (this.magic && missing === 'travel') ? undefined : missing
     const riddleNote = this.riddleTurn(event.message)
     const notes = [turn.note, ability ? abilityNote(ability, ctx.botName) : '', riddleNote].filter(
       Boolean
@@ -380,6 +388,7 @@ export class OllamaBrain implements Brain {
 
     const reading = await this.read(event, member, ctx)
     if (!reading || reading.type === 'none') return turn
+    if (reading.type === 'teach') return this.teachTurn(member, reading, turn, event.message)
     if (reading.type !== 'rule' && !reading.forMe) return turn
 
     if (reading.type === 'release') {
@@ -435,6 +444,117 @@ export class OllamaBrain implements Brain {
     return this.keep(member, reading, turn, verdict.replaces, event.message)
   }
 
+  /** The King describes a new spell: check it, repeat it back, and learn it on "yes". */
+  private teachTurn(
+    member: CourtMember,
+    reading: Reading,
+    turn: Turn,
+    message: string
+  ): Turn & { speak?: boolean } {
+    const magic = this.magic
+    if (!magic) return turn
+    const giver = `the ${member.title}`
+    if (rankOf(member.role) < this.topRank()) {
+      return {
+        note: `(Only the King may teach you new magic. Say so kindly to ${giver}.)`,
+        speak: true,
+      }
+    }
+    const teach = reading.teach
+    const problems = teach?.name ? magic.problems(teach.steps) : ['no spell was described']
+    if (!teach || problems.length) {
+      return {
+        note:
+          `(${giver} wants to teach you a spell, but you cannot learn it as described: ` +
+          `${problems.join('; ')}. Explain kindly what your magic can do, and ask again.)`,
+        speak: true,
+      }
+    }
+    this.pendingOrder = { member, reading, turn, clashes: [], message, at: Date.now() }
+    return {
+      note:
+        `(${giver} teaches you a new spell, "${teach.name}": ${teach.does} Repeat in one or two ` +
+        `short sentences what it will do, and ask ${giver} to confirm before you learn it.)`,
+      speak: true,
+    }
+  }
+
+  /** A royal asks for a spell: check whom it is for, what it needs and whether it is ready. */
+  private spellTurn(member: CourtMember, reading: Reading): Turn {
+    const magic = this.magic
+    const request = reading.spell
+    if (!magic || !request) return { note: '' }
+    const giver = `the ${member.title}`
+    const spell = request.id === 'unknown' ? undefined : magic.find(request.id)
+    if (!spell) {
+      return {
+        note:
+          `(You know no such spell. Say so kindly and offer one you know: ` +
+          `${magic
+            .spells()
+            .map((s) => s.name)
+            .join(', ')}. The King can teach you new spells.)`,
+      }
+    }
+    const target = this.spellTarget(request.target, member)
+    if (!target) {
+      return {
+        note: `(You cannot tell whom to cast ${spell.name} on; you work magic only on the royal family and the court. Ask kindly.)`,
+      }
+    }
+    const onTarget = spell.steps.some(
+      (s) => ('who' in s && s.who === 'target') || ('at' in s && s.at === 'target')
+    )
+    if (onTarget && target !== member.player && this.rankOfGiver(target) > rankOf(member.role)) {
+      return {
+        note: `(${giver} asks you to cast ${spell.name} on someone who outranks them. Kindly decline: that needs their own wish.)`,
+      }
+    }
+    const args = {
+      place: request.place,
+      item: request.item,
+      creature: request.creature,
+      effect: request.effect,
+    }
+    const problem = magic.check(spell, args)
+    if (problem)
+      return { note: `(You cannot cast ${spell.name} like that: ${problem}. Say so kindly.)` }
+    const wait = magic.wait(spell)
+    if (wait > 0) {
+      const minutes = Math.ceil(wait / 60_000)
+      return {
+        note: `(Your magic for ${spell.name} is still gathering: it is ready again in ${minutes} minute${minutes > 1 ? 's' : ''}. Say so kindly, in character.)`,
+      }
+    }
+    return {
+      action: { type: 'cast', spell: spell.id, args, target, requestedBy: member.player },
+      note: `(You cast ${spell.name} now: ${spell.does} Say so in one short, magical sentence.)`,
+    }
+  }
+
+  /** Whom a spell is for: the speaker, a royal by title or name, or a courtier. Never a guest. */
+  private spellTarget(name: string | undefined, member: CourtMember): string | undefined {
+    const raw = (name ?? '').trim()
+    if (!raw || /^(speaker|requester|me|myself|her|him|them|you)$/i.test(raw)) return member.player
+    const key = raw.replace(/^the /i, '').toLowerCase()
+    const royal = this.court.members.find(
+      (m) => m.title.toLowerCase() === key || m.player.toLowerCase() === key
+    )
+    if (royal) return royal.player
+    return [this.cfg.name, ...this.staff.map((s) => s.name)].find((n) => n.toLowerCase() === key)
+  }
+
+  /** What the order reader needs to know about this bot's magic. */
+  private magicInfo(): MagicInfo | undefined {
+    const magic = this.magic
+    if (!magic) return undefined
+    return {
+      spells: magic.spells().map((s) => ({ id: s.id, does: s.does, needs: needs(s) })),
+      places: magic.places().map((p) => p.name),
+      guide: stepGuide(),
+    }
+  }
+
   /** Take an order or rule: it replaces what it clashed with, and the body carries it out. */
   private keep(
     member: CourtMember,
@@ -444,6 +564,23 @@ export class OllamaBrain implements Brain {
     message: string
   ): Turn {
     const giver = `the ${member.title}`
+    if (reading.type === 'teach' && reading.teach && this.magic) {
+      const spell = this.magic.learn(
+        {
+          name: reading.teach.name,
+          does: reading.teach.does,
+          steps: reading.teach.steps as Step[],
+        },
+        giver
+      )
+      this.log.info(`learned the spell ${spell.id} from ${giver}: ${JSON.stringify(spell.steps)}`)
+      return {
+        ...turn,
+        note: `(You have learned the spell "${spell.name}". Say so proudly in one short sentence.)`,
+      }
+    }
+    // A spell is cast at once, never kept as a standing order.
+    if (reading.spell && this.magic) return this.spellTurn(member, reading)
     const replaced = replaces.length ? `(It replaces ${this.describe(replaces)}.)` : ''
     this.orders.remove(replaces.filter((id) => id.startsWith('O')))
     if (reading.type === 'rule') {
@@ -498,7 +635,7 @@ export class OllamaBrain implements Brain {
       const model = this.cfg.ai.orderModel
       const response = await this.ai.chat(
         [
-          { role: 'system', content: readingPrompt(ctx.botName, this.cfg.role) },
+          { role: 'system', content: readingPrompt(ctx.botName, this.cfg.role, this.magicInfo()) },
           {
             role: 'user',
             content: readingInput({
@@ -511,7 +648,7 @@ export class OllamaBrain implements Brain {
           },
         ],
         {
-          format: READING_SCHEMA,
+          format: readingSchema(this.magicInfo()),
           temperature: 0,
           // A royal waits for the answer: if the big model is busy or cold, the chat model reads.
           ...(model ? { model, shared: true, timeoutMs: 15_000 } : {}),
@@ -525,6 +662,7 @@ export class OllamaBrain implements Brain {
           : Boolean(this.orders.find(id) ?? this.rules.find(id))
       reading.clashes = (reading.clashes ?? []).filter(known)
       reading.releases = (reading.releases ?? []).filter(known)
+      if (reading.spell && typeof reading.spell.id !== 'string') delete reading.spell
       this.log.debug(`reading: ${JSON.stringify(reading)}`)
       return reading
     } catch (err) {
@@ -970,6 +1108,13 @@ export class OllamaBrain implements Brain {
         `- Your fellow members of the court (other characters like you): ${this.staff.map((s) => `${s.name} (${s.role}, ${s.reportsTo ? `reports to ${s.reportsTo}` : 'answers to the royal family'})`).join(', ')}. ` +
           'When someone talks to one of them by name, let that one answer.',
       `- ${this.chainOfCommand()}`,
+      this.magic &&
+        `- You work magic: ${this.magic
+          .spells()
+          .map((s) => s.name)
+          .join(', ')}. You cast a spell when ` +
+          'the royal family asks; the magic happens by itself, so just talk about it. You know no ' +
+          'other spells, but the King can teach you new ones.',
       '- You still cannot build anything outside your spellbook, fetch or carry items, or find ' +
         'places by name. If asked to, never agree or promise to do it. Kindly explain in ' +
         'character that this magic is not ready yet and offer something else.',
@@ -1084,6 +1229,8 @@ export interface BrainOptions {
   orders?: OrderBook
   /** The court's rules, shared by every bot. */
   rules?: CourtRules
+  /** Spells this bot can cast (Merlin). */
+  magic?: Magic
 }
 
 export interface StaffMember {

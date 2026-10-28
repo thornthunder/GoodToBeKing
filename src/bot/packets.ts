@@ -79,6 +79,14 @@ export interface PlayerListPacket {
   records: PlayerRecord[] | { type: string; records?: PlayerRecord[] }
 }
 
+/** The server's answer to a command_request (our own commands, matched by origin uuid). */
+export interface CommandOutputPacket {
+  origin: { type: string; uuid: string; request_id: string }
+  output_type: string
+  success_count: number
+  output: Array<{ message_id: string; success: boolean; parameters: string[] }>
+}
+
 export interface DisconnectPacket {
   reason: string
   hide_disconnect_reason: boolean

@@ -8,6 +8,7 @@ import { HailLog } from './HailLog'
 import { OllamaBrain, type BrainOptions } from './OllamaBrain'
 import type { ChatMessage, ChatModel } from './OllamaClient'
 import { CourtRules, OrderBook, type Reading } from './orders'
+import { Magic } from '../magic/Magic'
 
 const court = new CourtRoster({
   realm: 'Testland',
@@ -667,6 +668,72 @@ describe('OllamaBrain court behaviour', () => {
       )
       expect(reply).toEqual({ say: null, action: { type: 'follow', target: 'LittleOne42' } })
       expect(calls).toHaveLength(0)
+    })
+
+    it('casts a spell a royal asks for, and says when its magic is still gathering', async () => {
+      const magic = new Magic()
+      const { brain, calls, readings } = makeBrain('Behold!', {}, new HailLog(), { magic })
+      const sparkles = { spell: { id: 'sparkles', target: 'speaker' }, lasting: false }
+      readings.push(order('Cast sparkles on the Princess.', sparkles))
+      const reply = await brain.onChat(
+        chat('LittleOne42', 'merlin make sparkles'),
+        ctx('LittleOne42')
+      )
+      expect(reply?.action).toEqual({
+        type: 'cast',
+        spell: 'sparkles',
+        args: {},
+        target: 'LittleOne42',
+        requestedBy: 'LittleOne42',
+      })
+      expect(calls[0].at(-1)?.content).toContain('You cast Sparkles now')
+      expect(brain.systemPrompt(ctx('LittleOne42'))).toContain('- You work magic: Blink, Summoning')
+
+      const ok = async () => ({ ok: true, count: 1, output: [] })
+      const spell = magic.find('sparkles')!
+      const who = { requester: 'LittleOne42', target: 'LittleOne42', merlin: 'Merlin' }
+      await magic.cast(spell, {}, who, ok)
+      readings.push(order('Cast sparkles on the Princess.', sparkles))
+      const again = await brain.onChat(chat('LittleOne42', 'again!'), ctx('LittleOne42'))
+      expect(again?.action).toBeUndefined()
+      expect(calls[1].at(-1)?.content).toContain('still gathering')
+    })
+
+    it('will not work magic on a royal who outranks the one asking', async () => {
+      const { brain, calls, readings } = makeBrain('Alas.', {}, new HailLog(), {
+        magic: new Magic(),
+      })
+      readings.push(order('Make the King float.', { spell: { id: 'float', target: 'the King' } }))
+      const reply = await brain.onChat(
+        chat('LittleOne42', 'merlin make daddy float'),
+        ctx('LittleOne42')
+      )
+      expect(reply?.action).toBeUndefined()
+      expect(calls[0].at(-1)?.content).toContain('outranks them')
+    })
+
+    it('learns a spell the King teaches once he confirms it, and only from the King', async () => {
+      const magic = new Magic()
+      const { brain, calls, readings } = makeBrain('So be it.', {}, new HailLog(), { magic })
+      const teach = {
+        type: 'teach' as const,
+        teach: {
+          name: 'Starfall',
+          does: 'Fireworks rain around the one it is cast on.',
+          steps: [{ kind: 'summon', creature: 'fireworks_rocket', at: 'target', count: 3 }],
+        },
+      }
+      readings.push(teach)
+      await brain.onChat(chat('LittleOne42', 'merlin learn starfall'), ctx('LittleOne42'))
+      expect(calls[0].at(-1)?.content).toContain('Only the King may teach you')
+
+      readings.push(teach)
+      await brain.onChat(chat('BigDad', 'Merlin, a new spell: starfall'), ctx('BigDad'))
+      expect(calls[1].at(-1)?.content).toContain('ask the King to confirm before you learn it')
+      expect(magic.find('starfall')).toBeUndefined()
+      await brain.onChat(chat('BigDad', 'yes'), ctx('BigDad'))
+      expect(magic.find('starfall')?.learnedFrom).toBe('the King')
+      expect(calls[2].at(-1)?.content).toContain('You have learned the spell "Starfall"')
     })
 
     it('does not read lines for orders that are not meant for it', async () => {

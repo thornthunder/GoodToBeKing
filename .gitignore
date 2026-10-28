@@ -17,3 +17,6 @@ config/court.json
 .state/
 # Developer commands for a running app (see CLAUDE.md)
 .command
+
+# Copies of the Bedrock server's own files, edited here and uploaded by hand
+ServerFiles/

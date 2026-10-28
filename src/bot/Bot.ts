@@ -28,12 +28,15 @@ import { SEE_THROUGH } from '../build/sites'
 import { Vec3 as WorldVec } from 'vec3'
 import type { ChatFloor } from './ChatFloor'
 import { Movement } from './movement'
+import type { CommandResult, Magic } from '../magic/Magic'
+import type { SpellArgs } from '../magic/spells'
 import { loadSkin } from './skin'
 import {
   buildTextPacket,
   normalisePlayerList,
   parseTextPacket,
   type AddPlayerPacket,
+  type CommandOutputPacket,
   type DisconnectPacket,
   type MovePlayerPacket,
   type PlayerListPacket,
@@ -88,6 +91,8 @@ export interface BotOptions {
   court?: CourtRoster
   /** One line about the court's building works, for the brain's prompt. */
   works?: () => string | undefined
+  /** Spells this bot can cast (Merlin; needs operator rights and cheats on). */
+  magic?: Magic
 }
 
 export interface BotState {
@@ -133,6 +138,7 @@ export class Bot extends EventEmitter {
   private readonly buildLog: BuildLog
   private readonly floor?: ChatFloor
   private readonly court?: CourtRoster
+  private readonly magic?: Magic
   private dutyTimer?: NodeJS.Timeout
   /** The current follow comes from the bot's duty, not from someone asking. */
   private dutyFollowing = false
@@ -150,6 +156,7 @@ export class Bot extends EventEmitter {
     this.buildLog = opts.buildLog ?? new BuildLog()
     this.floor = opts.floor
     this.court = opts.court
+    this.magic = opts.magic
     this.worksSummary = opts.works
   }
 
@@ -215,6 +222,75 @@ export class Bot extends EventEmitter {
     this.performDuty()
     this.keepPost()
     this.deliverReports()
+    this.fadeGifts()
+  }
+
+  /** Work a spell a royal asked for; if the server refuses it, say so. */
+  private async castSpell(action: Extract<BotAction, { type: 'cast' }>): Promise<void> {
+    const magic = this.magic
+    const spell = magic?.find(action.spell)
+    if (!magic || !spell) return
+    this.log.info(`casting ${spell.name} on ${action.target} for ${action.requestedBy}`)
+    const result = await magic.cast(
+      spell,
+      action.args,
+      { requester: action.requestedBy, target: action.target, merlin: this.username },
+      (command) => this.command(command)
+    )
+    if (result.ok) return
+    this.log.warn(`${spell.name} failed: ${result.reason}`)
+    const who = this.court?.find(action.requestedBy)
+    await this.speak(
+      `Your spell ${spell.name} did not work (${result.reason}). Tell ${who ? `the ${who.title}` : action.requestedBy} ` +
+        'so in one short sentence, kindly and in character.',
+      `Alas, my ${spell.name} spell fizzled.`
+    )
+  }
+
+  /** Cast a spell from the command file (for testing), checking it like a royal's request. */
+  async castCommand(
+    id: string,
+    opts: { target: string; requestedBy: string; args: SpellArgs }
+  ): Promise<void> {
+    const spell = this.magic?.find(id)
+    if (!this.magic || !spell) return void this.log.warn(`no such spell: ${id}`)
+    const problem = this.magic.check(spell, opts.args)
+    if (problem) return void this.log.warn(`cannot cast ${spell.name}: ${problem}`)
+    await this.castSpell({ type: 'cast', spell: spell.id, ...opts })
+  }
+
+  /** Log the spells and places this bot knows (command file: "<bot> spells"). */
+  listSpells(): void {
+    if (!this.magic) return void this.log.info('this bot works no magic')
+    for (const s of this.magic.spells()) this.log.info(`spell ${s.id}: ${s.does}`)
+    for (const p of this.magic.places()) this.log.info(`place ${p.name} at ${p.x} ${p.y} ${p.z}`)
+    for (const g of this.magic.pendingGifts)
+      this.log.info(`gift ${g.what} to ${g.to} fades ${new Date(g.until).toISOString()}`)
+  }
+
+  private lastGiftCheck = 0
+
+  /** A magic gift fades after a day: take it back once its owner is online, and say so. */
+  private fadeGifts(): void {
+    const magic = this.magic
+    if (!magic || Date.now() - this.lastGiftCheck < 60_000) return
+    this.lastGiftCheck = Date.now()
+    const online = new Set([...this.state.players.values()].map((p) => p.name.toLowerCase()))
+    for (const gift of magic.due((name) => online.has(name.toLowerCase()))) {
+      void magic
+        .takeBack(gift, (command) => this.command(command))
+        .then((gone) => {
+          if (!gone) return
+          this.log.info(`the gift ${gift.what} to ${gift.to} has faded`)
+          const who = this.court?.find(gift.to)
+          void this.speak(
+            `Yesterday you gave ${who ? `the ${who.title}` : gift.to} a magic gift, ${gift.what}; ` +
+              'its day is over and it has faded back into magic, as magic gifts do. Tell them ' +
+              'kindly in one short sentence.',
+            `The magic of yesterday's gift has faded, as all magic gifts do.`
+          )
+        })
+    }
   }
 
   /** Keep following whom a standing order says to follow, whenever they are in sight. */
@@ -446,6 +522,9 @@ export class Bot extends EventEmitter {
         this.pauseWorks()
         void this.undoLastBuild(action.requestedBy)
         return
+      case 'cast':
+        void this.castSpell(action)
+        return
       case 'stay':
         // A standing order: no works and no escort while it stands (see post()).
         this.builder?.cancel()
@@ -644,7 +723,7 @@ export class Bot extends EventEmitter {
   }
 
   /** Run a slash command (e.g. "/tell Steve hi"). Field layout verified against 1.26.x only. */
-  runCommand(command: string): void {
+  runCommand(command: string, uuid: string = randomUUID()): void {
     const client = this.client
     if (!client || !this.connected) {
       this.log.warn(`not connected, dropping command: ${command}`)
@@ -656,12 +735,43 @@ export class Bot extends EventEmitter {
       command: text,
       origin: {
         type: 'player',
-        uuid: randomUUID(),
+        uuid,
         request_id: '',
         ...(modern ? { player_entity_id: 0n } : {}),
       },
       internal: false,
       version: modern ? 'latest' : 1,
+    })
+  }
+
+  /** Run a command and wait for the server's answer: did it work, and on how many targets. */
+  command(command: string, timeoutMs = 5_000): Promise<CommandResult> {
+    const client = this.client
+    if (!client || !this.connected) {
+      return Promise.resolve({ ok: false, count: 0, output: ['not connected'] })
+    }
+    const uuid = randomUUID()
+    return new Promise((resolve) => {
+      const done = (result: CommandResult) => {
+        clearTimeout(timer)
+        client.removeListener('command_output', onOutput)
+        this.log.info(`/${command} -> ${result.ok ? 'ok' : 'failed'} ${result.output.join('; ')}`)
+        resolve(result)
+      }
+      const onOutput = (p: CommandOutputPacket) => {
+        if (p.origin?.uuid !== uuid) return
+        done({
+          ok: p.success_count > 0,
+          count: p.success_count,
+          output: p.output.map((o) => [o.message_id, ...o.parameters].join(' ')),
+        })
+      }
+      const timer = setTimeout(
+        () => done({ ok: false, count: 0, output: ['no answer from the server'] }),
+        timeoutMs
+      )
+      client.on('command_output', onOutput)
+      this.runCommand(command, uuid)
     })
   }
 

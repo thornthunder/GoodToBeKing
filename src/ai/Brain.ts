@@ -1,3 +1,4 @@
+import type { SpellArgs } from '../magic/spells'
 import type { Post } from './orders'
 import type { BlueprintId, Palette } from '../build/blueprints'
 export type ChatKind = 'chat' | 'whisper' | 'announcement' | 'system'
@@ -45,6 +46,8 @@ export type BotAction =
   | { type: 'stop' }
   /** Stay where you are until released (a standing order). */
   | { type: 'stay' }
+  /** Work one of Merlin's spells (see magic/spells.ts). */
+  | { type: 'cast'; spell: string; args: SpellArgs; target: string; requestedBy: string }
   | { type: 'build'; blueprint: BlueprintId; palette: Palette; requestedBy: string }
   | { type: 'undo'; requestedBy: string }
 

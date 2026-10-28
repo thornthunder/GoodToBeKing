@@ -99,6 +99,8 @@ export interface BotConfig {
   duty?: Duty
   /** Takes part in the court's building works (the great castle). */
   works: boolean
+  /** Works magic (Merlin): needs operator rights on the server, and cheats on. */
+  magic?: boolean
 }
 
 /** "escort" = follow the first of `royals` who is online and in sight, unless told otherwise. */
