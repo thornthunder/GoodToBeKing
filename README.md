@@ -79,8 +79,9 @@ file by hand, even while the bots are running: they reload it when it changes.
 Real-world personal information (age, school, address, real names and the like) is never
 stored: the extraction prompt forbids it and a filter in code drops anything that slips through.
 `OLLAMA_MEMORY_MODEL` picks the extraction model (default: the chat model); it never delays a
-reply. With `OLLAMA_MEMORY_BORROW=true` it is used only while another program keeps it loaded on
-the Ollama server, and the chat model extracts otherwise, so the court never loads a second model.
+reply. The example uses gemma4:31b, the overlord's model, so the court only ever loads two models.
+It is shared with other programs: used with the context it is loaded with (or the server's
+default), never kept for less time than it already was, and the chat model steps in if it fails.
 
 ## Authentication
 

@@ -37,7 +37,7 @@ void main()
 
 async function main(): Promise<void> {
   const overlord = new Overlord(
-    await overlordClient(cfg.ai, model, log.child('ollama')),
+    overlordClient(cfg.ai, model, log.child('ollama')),
     model,
     log
   )

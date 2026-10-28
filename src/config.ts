@@ -55,11 +55,6 @@ export interface OllamaConfig {
   think?: boolean
   /** Model for background memory extraction; can be bigger and slower than the chat model. */
   memoryModel?: string
-  /**
-   * Use the memory model only while another program keeps it loaded, borrowing it as it is
-   * loaded; otherwise the chat model extracts. The court then never loads a model of its own.
-   */
-  memoryBorrow?: boolean
 }
 
 export interface ChatConfig {
@@ -186,7 +181,6 @@ export function defaultBotConfig(): BotConfig {
       numCtx: envOptionalNum('OLLAMA_NUM_CTX'),
       think: envOptionalBool('OLLAMA_THINK'),
       memoryModel: env('OLLAMA_MEMORY_MODEL'),
-      memoryBorrow: envBool('OLLAMA_MEMORY_BORROW', false),
     },
     chat: {
       respondToAll: envBool('BOT_RESPOND_TO_ALL', false),

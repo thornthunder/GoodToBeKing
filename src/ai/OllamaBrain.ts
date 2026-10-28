@@ -372,8 +372,11 @@ export class OllamaBrain implements Brain {
       {
         format: factSchema(subjects.map((s) => s.label)),
         temperature: 0.2,
-        model: this.cfg.ai.memoryModel,
-        borrow: this.cfg.ai.memoryBorrow,
+        // Shared with the overlord and other programs (see ChatOptions.shared). It may have to
+        // be loaded first, and nobody waits for the answer.
+        ...(this.cfg.ai.memoryModel
+          ? { model: this.cfg.ai.memoryModel, shared: true, timeoutMs: 10 * 60_000 }
+          : {}),
       }
     )
     const parsed = JSON.parse(response.message.content || '{}') as {

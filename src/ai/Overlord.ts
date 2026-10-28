@@ -304,25 +304,13 @@ export function placeOnSite(raw: CastleDesign, site: SiteOption): CastleDesign {
 }
 
 /**
- * A client for the overlord's model. Another program on the same server keeps that model loaded,
- * so the overlord borrows it as it is (same context, same keep-alive): asking for another context
- * makes the server load it again, partly on the CPU (gemma4:31b at 5 instead of 32 tokens/s), and
- * pushes the other program's copy out. Not loaded, it comes with the server's defaults and goes
- * two minutes after the overlord's last answer.
+ * A client for the overlord's model, which the court's memory and another program on the same
+ * server use too: the overlord asks for it as shared (ChatOptions.shared), so it is used as it is
+ * loaded. Asking for another context would load it again, partly on the CPU (gemma4:31b at 5
+ * instead of 32 tokens/s), and push the others' copy out. Its rounds take minutes.
  */
-export async function overlordClient(
-  cfg: OllamaConfig,
-  model: string,
-  log: Logger
-): Promise<OllamaClient> {
-  const settings = { ...cfg, model, timeoutMs: 60 * 60_000, numCtx: undefined, keepAlive: '2m' }
-  const loaded = await new OllamaClient(settings, log).loaded(model)
-  if (!loaded) return new OllamaClient(settings, log)
-  log.info(`${model} is loaded already (context ${loaded.contextLength ?? '?'}): borrowing it`)
-  return new OllamaClient(
-    { ...settings, numCtx: loaded.contextLength, keepAlive: loaded.keepAlive },
-    log
-  )
+export function overlordClient(cfg: OllamaConfig, model: string, log: Logger): OllamaClient {
+  return new OllamaClient({ ...cfg, model, timeoutMs: 60 * 60_000 }, log)
 }
 
 export class Overlord {
@@ -351,6 +339,7 @@ export class Overlord {
           think: true,
           temperature: 0.5,
           stream: true,
+          shared: true,
         })
         content = response.message.content
       } catch (err) {

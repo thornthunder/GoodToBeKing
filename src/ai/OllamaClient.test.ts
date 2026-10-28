@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { OllamaConfig } from '../config'
-import { OllamaClient } from './OllamaClient'
+import { keepAliveSeconds, OllamaClient } from './OllamaClient'
 
 const silent = {
   debug() {},
@@ -37,35 +37,59 @@ function client(loaded: Array<{ name: string; context_length: number; expires_at
   return { c, asked }
 }
 
-const forever = new Date(Date.now() + 10 * 365 * 86_400_000).toISOString()
+const inHours = (h: number) => new Date(Date.now() + h * 3_600_000).toISOString()
 
-describe('borrowing a model another program keeps loaded', () => {
-  it('uses it with the context and keep-alive it was loaded with', async () => {
-    const { c, asked } = client([{ name: 'big:31b', context_length: 262_144, expires_at: forever }])
-    const reply = await c.chat([], { model: 'big:31b', borrow: true })
+describe('a model shared with other programs on the server', () => {
+  it('is used with the context it is loaded with and keeps its longer stay', async () => {
+    const { c, asked } = client([
+      { name: 'big:31b', context_length: 262_144, expires_at: inHours(10 * 365 * 24) },
+    ])
+    const reply = await c.chat([], { model: 'big:31b', shared: true })
     expect(reply.message.content).toBe('big:31b')
     expect(asked[0].options?.num_ctx).toBe(262_144)
     expect(asked[0].keep_alive).toBe('-1m')
   })
 
-  it('leaves it alone when it is not loaded: the configured model answers', async () => {
-    const { c, asked } = client([])
-    const reply = await c.chat([], { model: 'big:31b', borrow: true })
-    expect(reply.message.content).toBe('small')
-    expect(asked).toHaveLength(1)
-    expect(asked[0]).toMatchObject({ keep_alive: '24h', options: { num_ctx: 8192 } })
+  it('stays at least as long as the court keeps its own models', async () => {
+    const { c, asked } = client([{ name: 'big:31b', context_length: 4096, expires_at: inHours(1) }])
+    await c.chat([], { model: 'big:31b', shared: true })
+    expect(asked[0].keep_alive).toBe('86400s')
   })
 
-  it('asks the configured model when the borrowed one does not answer', async () => {
-    const { c, asked } = client([{ name: 'down:31b', context_length: 4096, expires_at: forever }])
-    const reply = await c.chat([], { model: 'down:31b', borrow: true })
+  it('is loaded with the server defaults when it is not loaded, not with our context', async () => {
+    const { c, asked } = client([])
+    const reply = await c.chat([], { model: 'big:31b', shared: true })
+    expect(reply.message.content).toBe('big:31b')
+    expect(asked[0].options?.num_ctx).toBeUndefined()
+    expect(asked[0].keep_alive).toBe('86400s')
+  })
+
+  it('leaves the answer to the configured model when it does not answer', async () => {
+    const { c, asked } = client([])
+    const reply = await c.chat([], { model: 'down:31b', shared: true })
     expect(reply.message.content).toBe('small')
     expect(asked.map((r) => r.model)).toEqual(['down:31b', 'small'])
+    expect(asked[1]).toMatchObject({ keep_alive: '24h', options: { num_ctx: 8192 } })
   })
 
-  it('loads a model asked for without borrowing, as before', async () => {
+  it('a model not asked for as shared gets the configured settings, as before', async () => {
     const { c, asked } = client([])
     await c.chat([], { model: 'big:31b' })
-    expect(asked[0]).toMatchObject({ model: 'big:31b', keep_alive: '24h' })
+    expect(asked[0]).toMatchObject({
+      model: 'big:31b',
+      keep_alive: '24h',
+      options: { num_ctx: 8192 },
+    })
+  })
+})
+
+describe('keep-alive durations', () => {
+  it('reads them the way Ollama does', () => {
+    expect(keepAliveSeconds('24h')).toBe(86_400)
+    expect(keepAliveSeconds('1h30m')).toBe(5400)
+    expect(keepAliveSeconds('90s')).toBe(90)
+    expect(keepAliveSeconds('300')).toBe(300)
+    expect(keepAliveSeconds('-1m')).toBe(Infinity)
+    expect(keepAliveSeconds(undefined)).toBe(300)
   })
 })

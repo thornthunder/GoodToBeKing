@@ -96,9 +96,9 @@ Windows, killing a background `npx` shell does not kill its node children at all
 - `ai/CourtMemory.ts`: long-term facts per subject in `.state/memory.json`, shared by all bots.
   Only the first bot (`learns: true`) extracts facts, after each royal exchange, in the
   background, using `OLLAMA_MEMORY_MODEL` with a JSON schema. `isPersonalInfo` drops
-  real-world personal details in code regardless of what the model returns. With
-  `OLLAMA_MEMORY_BORROW` the memory model (gemma4:31b) is only borrowed while loaded
-  (`ChatOptions.borrow`); otherwise, or when it does not answer, the chat model extracts.
+  real-world personal details in code regardless of what the model returns. The memory model
+  is the overlord's gemma4:31b, asked for as shared (`ChatOptions.shared`), with a 10 minute
+  timeout for a cold load; if it does not answer, the chat model extracts.
 - `bot/language.ts`: Bedrock language strings from minecraft-data; translates notice keys and
   keys inside parameters ("%entity.zombie.name"). `OllamaBrain.onNotice` reacts to royal
   deaths, sleeping and achievements with a per-person cooldown.
@@ -139,7 +139,7 @@ Windows, killing a background `npx` shell does not kill its node children at all
   made), the overlord model (`OVERLORD_MODEL`, gemma4:31b) picks a site and writes a design,
   which is validated and sent back with every problem until sound (6 rounds). The design is
   saved in `.state/designs/` and `.state/court-works.json` records what was built and what is
-  current. The overlord streams its answers and borrows its model as loaded (`overlordClient`). Rooms it counts
+  current. The overlord streams its answers and asks for its model as shared (`overlordClient`). Rooms it counts
   from their building's own corner are read as meant (`normaliseRooms`); `courtProblems` adds
   a builder's review (rooms that fill their storeys, halls big enough, stables on the ground).
 
@@ -154,12 +154,13 @@ Windows, killing a background `npx` shell does not kill its node children at all
   Movement and building have to be done through player-level packets.
 - Building happens within `BUILD_RADIUS` (100) of `BUILD_CENTER` (105, 75, 122). The princess's
   house and the village paths lie south of the castle; never dig player-made blocks.
-- The court and the overlord share one Ollama server with a small GPU: the court's gemma4:e4b
-  must stay loaded (`keep_alive` 24h), and another program keeps gemma4:31b loaded while it
-  runs, with the server's defaults (context 262144, 20.5 GB, all on the GPU, 32 tokens/s). The
-  overlord and the memory extraction use that model and borrow it as it is: asking for another
-  `num_ctx` reloads it half on the CPU (5 tokens/s) and pushes the other program's copy out.
-  Never unload it. Only the overlord loads it when it is not there (for two minutes).
+- The court shares one Ollama server (48 GB of VRAM) with another program. The court loads only
+  two models: gemma4:e4b for chat (`keep_alive` 24h) and gemma4:31b for memory and the
+  overlord, which the other program uses now and then. gemma4:31b with the server's defaults
+  (context 262144) takes 20.5 GB, all on the GPU, 32 tokens/s. Shared requests use the context
+  it is loaded with (none when it is not loaded) and never shorten its keep-alive: another
+  `num_ctx` reloads it (once half on the CPU at 5 tokens/s) and pushes the other's copy out.
+  Never unload it, and do not add a third model.
 
 ## Protocol notes (bedrock-protocol 3.60, Bedrock 1.26.x)
 

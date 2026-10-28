@@ -158,7 +158,7 @@ export class BotManager {
       }
       for (const [i, s] of sites.entries()) this.log.info(`site ${i + 1}: ${JSON.stringify(s)}`)
       const model = process.env.OVERLORD_MODEL ?? 'gemma4:31b'
-      const ai = await overlordClient(this.bots[0].cfg.ai, model, this.log.child('overlord'))
+      const ai = overlordClient(this.bots[0].cfg.ai, model, this.log.child('overlord'))
       const overlord = new Overlord(ai, model, this.log.child('overlord'))
       let example: CastleDesign | undefined
       try {

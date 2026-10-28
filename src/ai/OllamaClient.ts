@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { Ollama, type ChatRequest, type ChatResponse, type Message, type Tool } from 'ollama'
 import type { OllamaConfig } from '../config'
 import type { Logger } from '../logger'
@@ -15,11 +16,14 @@ export interface ChatOptions {
   /** Overrides the configured model for this request. */
   model?: string
   /**
-   * Use `model` only while the server has it loaded already (another program keeps it), as it is
-   * loaded: same context and keep-alive, so it is neither reloaded nor kept longer. Otherwise, or
-   * when it does not answer, the configured model answers instead.
+   * The model is shared with other programs on the server (gemma4:31b): use it with the context it
+   * is loaded with, or the server's default context when it is not loaded (as the others load it),
+   * and never cut its stay short. Asking for another context makes the server load it again. When
+   * a shared `model` other than the configured one does not answer, the configured one does.
    */
-  borrow?: boolean
+  shared?: boolean
+  /** Overrides the configured timeout for this request (a cold big model takes a while). */
+  timeoutMs?: number
   /**
    * Stream the answer and join it up. Needed for answers that take minutes: without streaming,
    * Node's fetch gives up when no response headers arrive within five minutes.
@@ -39,13 +43,16 @@ export interface ChatModel {
   chat(messages: ChatMessage[], opts?: ChatOptions): Promise<ChatResponse>
 }
 
+/** Per request: a timeout overriding the configured one (ChatOptions.timeoutMs). */
+const requestTimeout = new AsyncLocalStorage<number>()
+
 /** Thin wrapper around the Ollama HTTP client with timeouts, defaults and logging. */
 export class OllamaClient implements ChatModel {
   private readonly ollama: Ollama
   /** Per model: the `think` value to send by default (see resolveThink). */
   private readonly thinkDefaults = new Map<string, Promise<boolean | undefined>>()
-  /** Per borrowed model: whether it was loaded when last asked (to log only the changes). */
-  private readonly borrowed = new Map<string, boolean>()
+  /** Per shared model: whether it was loaded when last asked (to log only the changes). */
+  private readonly sharedLoaded = new Map<string, boolean>()
 
   constructor(
     readonly cfg: OllamaConfig,
@@ -54,7 +61,11 @@ export class OllamaClient implements ChatModel {
     const timeoutMs = cfg.timeoutMs
     this.ollama = new Ollama({
       host: cfg.host,
-      fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(timeoutMs) }),
+      fetch: (input, init) =>
+        fetch(input, {
+          ...init,
+          signal: AbortSignal.timeout(requestTimeout.getStore() ?? timeoutMs),
+        }),
     })
   }
 
@@ -64,25 +75,36 @@ export class OllamaClient implements ChatModel {
 
   async chat(messages: ChatMessage[], opts: ChatOptions = {}): Promise<ChatResponse> {
     const model = opts.model ?? this.cfg.model
-    if (!opts.borrow || model === this.cfg.model) return this.send(messages, opts, model, this.cfg)
+    if (!opts.shared) return this.send(messages, opts, model, this.cfg)
+    const load = await this.sharedLoad(model)
+    if (model === this.cfg.model) return this.send(messages, opts, model, load)
+    try {
+      return await this.send(messages, opts, model, load)
+    } catch (err) {
+      this.log.info(`${model} did not answer (${errMsg(err)}): asking ${this.cfg.model}`)
+      return this.send(messages, { ...opts, timeoutMs: undefined }, this.cfg.model, this.cfg)
+    }
+  }
+
+  /**
+   * How to ask for a shared model: with the context it is loaded with (none when it is not loaded,
+   * so it comes with the server's default), and with the longer of our keep-alive and its own.
+   */
+  private async sharedLoad(model: string): Promise<{ numCtx?: number; keepAlive: string }> {
     const held = await this.loaded(model)
-    if (this.borrowed.get(model) !== !!held) {
-      this.borrowed.set(model, !!held)
+    if (this.sharedLoaded.get(model) !== !!held) {
+      this.sharedLoaded.set(model, !!held)
       this.log.info(
-        held ? `${model} is loaded: borrowing it` : `${model} is not loaded: ${this.cfg.model} answers`
+        held
+          ? `${model} is loaded (context ${held.contextLength ?? '?'}): using it as it is`
+          : `${model} is not loaded: loading it with the server's defaults`
       )
     }
-    if (held) {
-      try {
-        return await this.send(messages, opts, model, {
-          numCtx: held.contextLength,
-          keepAlive: held.keepAlive,
-        })
-      } catch (err) {
-        this.log.info(`${model} did not answer (${errMsg(err)}): asking ${this.cfg.model}`)
-      }
+    const stay = Math.max(keepAliveSeconds(this.cfg.keepAlive), held?.secondsLeft ?? 0)
+    return {
+      numCtx: held?.contextLength,
+      keepAlive: stay === Infinity ? '-1m' : `${Math.ceil(stay)}s`,
     }
-    return this.send(messages, opts, this.cfg.model, this.cfg)
   }
 
   private async send(
@@ -107,7 +129,8 @@ export class OllamaClient implements ChatModel {
     if (think !== undefined) request.think = think
 
     const started = Date.now()
-    const response = opts.stream ? await this.streamed(request) : await this.ollama.chat(request)
+    const call = () => (opts.stream ? this.streamed(request) : this.ollama.chat(request))
+    const response = opts.timeoutMs ? await requestTimeout.run(opts.timeoutMs, call) : await call()
     const ms = Date.now() - started
     this.log.debug(
       `chat(${model}) ${ms}ms, prompt=${response.prompt_eval_count ?? '?'} tokens, ` +
@@ -116,21 +139,19 @@ export class OllamaClient implements ChatModel {
     return response
   }
 
-  /**
-   * How the server holds a model right now, if it is loaded: its context length, and a keep-alive
-   * that leaves it loaded as long as it already was. A request with another context makes the
-   * server reload the model, and a shorter keep-alive cuts its stay short.
-   */
-  async loaded(model: string): Promise<{ contextLength?: number; keepAlive: string } | undefined> {
+  /** How the server holds a model right now, if it is loaded: its context and its time left. */
+  private async loaded(
+    model: string
+  ): Promise<{ contextLength?: number; secondsLeft: number } | undefined> {
     const name = model.includes(':') ? model : `${model}:latest`
     try {
       const { models } = await this.ollama.ps()
       const m = models.find((x) => x.name === name || x.model === name)
       if (!m) return undefined
-      const left = Math.round((new Date(m.expires_at).getTime() - Date.now()) / 1000)
+      const left = (new Date(m.expires_at).getTime() - Date.now()) / 1000
       return {
         contextLength: (m as { context_length?: number }).context_length,
-        keepAlive: left > 365 * 86_400 ? '-1m' : `${Math.max(120, left)}s`,
+        secondsLeft: left > 365 * 86_400 ? Infinity : Math.max(0, left),
       }
     } catch (err) {
       this.log.debug(`could not list loaded models: ${errMsg(err)}`)
@@ -195,4 +216,16 @@ export class OllamaClient implements ChatModel {
     const hasModel = models.some((m) => m === wanted || m === `${wanted}:latest`)
     return { version, models, hasModel }
   }
+}
+
+/** Seconds in an Ollama keep-alive ("24h", "90s", "1h30m", "300"); negative means forever. */
+export function keepAliveSeconds(value: string | undefined): number {
+  const v = value?.trim()
+  if (!v) return 300 // Ollama's default
+  if (v.startsWith('-')) return Infinity
+  if (/^\d+(\.\d+)?$/.test(v)) return Number(v)
+  const unit: Record<string, number> = { h: 3600, m: 60, s: 1, ms: 0.001 }
+  let total = 0
+  for (const [, n, u] of v.matchAll(/(\d+(?:\.\d+)?)(ms|h|m|s)/g)) total += Number(n) * unit[u]
+  return total
 }
