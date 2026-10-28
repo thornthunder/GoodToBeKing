@@ -253,8 +253,11 @@ Windows, killing a background `npx` shell does not kill its node children at all
 - nethernet's default WebRTC is werift, pure JS: DTLS and SCTP for every packet run on our one
   thread. Six bots kept it 94% busy (profile: crypto, buffers and GC about half); then chat
   arrives a minute late, `request_ability` answers miss bedboo's flight-confirm window ("flight
-  stopped") and the server pulls flying bots back. `MC_WEBRTC=wrtc|auto` selects the native
-  `@roamhq/wrtc` backend (an optional package, not installed yet).
+  stopped") and the server pulls flying bots back. `MC_WEBRTC=wrtc` selects the native
+  `@roamhq/wrtc` backend (a dependency now; `auto` falls back to werift when it will not load).
+- The next cost was mobs' `set_entity_data` (80 a second per bot around the village; protodef
+  builds an object of every flag): `Bot` drops it unread for anything but itself and players
+  (`metadataTarget`). With both, six idle bots leave the thread about 30% idle.
 - mineflayer-bedrock always asks for version `1.26.51`; `MC_VERSION` only matters for other
   clients.
 - `text` packet gained a `category` field (`message_only` | `authored` | `parameters`) in

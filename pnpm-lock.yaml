@@ -209,9 +209,12 @@ importers:
 
   .:
     dependencies:
+      '@roamhq/wrtc':
+        specifier: 0.10.0
+        version: 0.10.0
       bedrock-protocol:
         specifier: 3.60.1
-        version: 3.60.1(patch_hash=210a086d792ac39095e42352e11367547ed78674a220883a414d0497029ac922)(supports-color@8.1.1)
+        version: 3.60.1(patch_hash=210a086d792ac39095e42352e11367547ed78674a220883a414d0497029ac922)(@roamhq/wrtc@0.10.0)(supports-color@8.1.1)
       dotenv:
         specifier: ^18.0.9
         version: 18.0.9
@@ -328,7 +331,7 @@ importers:
         version: link:../bedrock-data
       bedrock-protocol:
         specifier: 3.60.1
-        version: 3.60.1(patch_hash=210a086d792ac39095e42352e11367547ed78674a220883a414d0497029ac922)(supports-color@8.1.1)
+        version: 3.60.1(patch_hash=210a086d792ac39095e42352e11367547ed78674a220883a414d0497029ac922)(@roamhq/wrtc@0.10.0)(supports-color@8.1.1)
       minecraft-data:
         specifier: 3.117.0
         version: 3.117.0(patch_hash=c57dc9c6f6ed0b5bf12cf6ddea06acb35adc0acad97f41d71954899ed131310a)
@@ -736,6 +739,34 @@ packages:
   '@peculiar/x509@1.14.3':
     resolution: {integrity: sha512-C2Xj8FZ0uHWeCXXqX5B4/gVFQmtSkiuOolzAgutjTfseNOHT3pUjljDZsTSxXFGgio54bCzVFqmEOUrIVk8RDA==}
     engines: {node: '>=20.0.0'}
+
+  '@roamhq/wrtc-darwin-arm64@0.10.0':
+    resolution: {integrity: sha512-vFdi79jWuPHcnUcnuOjTvyKtmY/RI2xRQo9Y6RsIjIlYePN/7LTy00c+Ivrz4prYAPbp0oHscl7PDV64VUqGTQ==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@roamhq/wrtc-darwin-x64@0.10.0':
+    resolution: {integrity: sha512-H6852g2xYCuaR+/TrthpdMafs4bMfAUEpvRDhsIguzrK7Dz+MKpNI8MkwdqJN8W65J+7w7k+YqXIkTHe7Fz/cg==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@roamhq/wrtc-linux-arm64@0.10.0':
+    resolution: {integrity: sha512-fEuJbNjprxQG6QlFd2iqBW9x028RDSho6izVg7gyt8irdPiXWOxzOxNnYMs/B2fohBTd1wD4Qxfivl07/dCR8A==}
+    cpu: [arm64]
+    os: [linux]
+
+  '@roamhq/wrtc-linux-x64@0.10.0':
+    resolution: {integrity: sha512-H32lK2eFg3sVb/9nkHIX5HIisxFoS82Gpesuea+zqAyRpRzSd5NpFXx28bVy9wQyRrNtj8k0bTUgEzWRzSbYCA==}
+    cpu: [x64]
+    os: [linux]
+
+  '@roamhq/wrtc-win32-x64@0.10.0':
+    resolution: {integrity: sha512-wEVXMvLrBizdLyrd+Zc7zb7zpwUuHUBXwrdIvI69e3i/AA8YsVYI2xo/sxk6GoQ+o8a14ONc4SStDS35TCjg+w==}
+    cpu: [x64]
+    os: [win32]
+
+  '@roamhq/wrtc@0.10.0':
+    resolution: {integrity: sha512-yFqQQ0EV1ZUHaphh3tmjoxPi2wzhW2vjmzoAVNRRLUjXYd2e1nvwi9TKfE2w4WNvNws/hBkouvOt23Xo9FkXkQ==}
 
   '@rolldown/binding-android-arm-eabi@1.2.15':
     resolution: {integrity: sha512-aLcgK9gIJ3YRvrrtfSBbRa27F5WrpiTaPulnFpsHPxpUHgFlSgnU4854MHwoRGEBhfRJDWCS2WQ7lIjskE9Olw==}
@@ -1334,6 +1365,11 @@ packages:
   dns-packet@5.6.1:
     resolution: {integrity: sha512-l4gcSouhcgIKRvyy99RNVOgxXiicE+2jZoNmaNmZ6JXiGajBOJAesk1OBlJuM5k2c+eudGdLxDqXuPCKIj6kpw==}
     engines: {node: '>=6'}
+
+  domexception@4.0.0:
+    resolution: {integrity: sha512-A2is4PLG+eeSfoTMA95/s4pvAoSo2mKtiM5jlHkAVewmiO8ISFTFKZjH7UAM1Atli/OT/7JHOrJRJiMKUZKYBw==}
+    engines: {node: '>=12'}
+    deprecated: Use your platform's native DOMException instead
 
   dotenv@18.0.9:
     resolution: {integrity: sha512-3fVOW4cB02R066PUSwn8O4TJyz9NckQl7F81blIbaq9jKBm2tSmOKky7ZHIXzGvkVPXCSn6jkpziBPZdGFs8Tw==}
@@ -2705,6 +2741,10 @@ packages:
   webidl-conversions@3.0.1:
     resolution: {integrity: sha512-2JAn3z8AR6rjK8Sm8orRC0h/bcl/DqL7tRPdGZ4I1CjdF+EaMLmYxBHyXuKL849eucPFhvBoxMsflfOb8kxaeQ==}
 
+  webidl-conversions@7.0.0:
+    resolution: {integrity: sha512-VwddBukDzu71offAQR975unBIGqfKZpM+8ZX6ySk8nYhVoo5CYaZyzt3YBvYtRtO+aoGlqxPg/B87NGVZ/fu6g==}
+    engines: {node: '>=12'}
+
   werift@0.24.4:
     resolution: {integrity: sha512-NoROZ11L/ZqAB5ombCB4VBuVNdIZfwI493zlxlIX7BlwfWRy55eDJdtWMC2VX35yBXFaWwA8NtYbmJ8qWtVk9Q==}
     engines: {node: '>=16'}
@@ -3081,6 +3121,30 @@ snapshots:
       tslib: 2.8.1
       tsyringe: 4.10.0
 
+  '@roamhq/wrtc-darwin-arm64@0.10.0':
+    optional: true
+
+  '@roamhq/wrtc-darwin-x64@0.10.0':
+    optional: true
+
+  '@roamhq/wrtc-linux-arm64@0.10.0':
+    optional: true
+
+  '@roamhq/wrtc-linux-x64@0.10.0':
+    optional: true
+
+  '@roamhq/wrtc-win32-x64@0.10.0':
+    optional: true
+
+  '@roamhq/wrtc@0.10.0':
+    optionalDependencies:
+      '@roamhq/wrtc-darwin-arm64': 0.10.0
+      '@roamhq/wrtc-darwin-x64': 0.10.0
+      '@roamhq/wrtc-linux-arm64': 0.10.0
+      '@roamhq/wrtc-linux-x64': 0.10.0
+      '@roamhq/wrtc-win32-x64': 0.10.0
+      domexception: 4.0.0
+
   '@rolldown/binding-android-arm-eabi@1.2.15':
     optional: true
 
@@ -3411,7 +3475,7 @@ snapshots:
 
   base64-js@1.5.1: {}
 
-  bedrock-protocol@3.60.1(patch_hash=210a086d792ac39095e42352e11367547ed78674a220883a414d0497029ac922)(supports-color@8.1.1):
+  bedrock-protocol@3.60.1(patch_hash=210a086d792ac39095e42352e11367547ed78674a220883a414d0497029ac922)(@roamhq/wrtc@0.10.0)(supports-color@8.1.1):
     dependencies:
       debug: 4.4.3(supports-color@8.1.1)
       json-bigint: 1.0.0
@@ -3419,7 +3483,7 @@ snapshots:
       jsp-raknet: 2.2.0(supports-color@8.1.1)
       minecraft-data: 3.117.0(patch_hash=c57dc9c6f6ed0b5bf12cf6ddea06acb35adc0acad97f41d71954899ed131310a)
       minecraft-folder-path: 1.2.0
-      nethernet: 1.1.2(patch_hash=52b72c4d012668748e6703b9bd90d12badb4c8334d7b40e4f836a0e52473f0b0)(supports-color@8.1.1)
+      nethernet: 1.1.2(patch_hash=52b72c4d012668748e6703b9bd90d12badb4c8334d7b40e4f836a0e52473f0b0)(@roamhq/wrtc@0.10.0)(supports-color@8.1.1)
       prismarine-auth: 3.1.1(supports-color@8.1.1)
       prismarine-nbt: 2.8.0
       prismarine-realms: 1.6.0(supports-color@8.1.1)
@@ -3625,6 +3689,11 @@ snapshots:
   dns-packet@5.6.1:
     dependencies:
       '@leichtgewicht/ip-codec': 2.0.5
+
+  domexception@4.0.0:
+    dependencies:
+      webidl-conversions: 7.0.0
+    optional: true
 
   dotenv@18.0.9: {}
 
@@ -4518,11 +4587,13 @@ snapshots:
       railroad-diagrams: 1.0.0
       randexp: 0.4.6
 
-  nethernet@1.1.2(patch_hash=52b72c4d012668748e6703b9bd90d12badb4c8334d7b40e4f836a0e52473f0b0)(supports-color@8.1.1):
+  nethernet@1.1.2(patch_hash=52b72c4d012668748e6703b9bd90d12badb4c8334d7b40e4f836a0e52473f0b0)(@roamhq/wrtc@0.10.0)(supports-color@8.1.1):
     dependencies:
       jsonwebtoken: 9.0.3
       protodef: 1.19.0
       werift: 0.24.4(supports-color@8.1.1)
+    optionalDependencies:
+      '@roamhq/wrtc': 0.10.0
     transitivePeerDependencies:
       - supports-color
 
@@ -5266,6 +5337,9 @@ snapshots:
       - msw
 
   webidl-conversions@3.0.1: {}
+
+  webidl-conversions@7.0.0:
+    optional: true
 
   werift@0.24.4(supports-color@8.1.1):
     dependencies:

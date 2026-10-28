@@ -29,6 +29,7 @@
   },
   "homepage": "https://github.com/thornthunder/GoodToBeKing#readme",
   "dependencies": {
+    "@roamhq/wrtc": "0.10.0",
     "bedrock-protocol": "3.60.1",
     "dotenv": "^18.0.9",
     "minecraft-data": "3.117.0",

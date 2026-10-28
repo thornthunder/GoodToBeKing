@@ -33,6 +33,7 @@ import type { SpellArgs } from '../magic/spells'
 import { loadSkin } from './skin'
 import {
   buildTextPacket,
+  metadataTarget,
   normalisePlayerList,
   parseTextPacket,
   type AddPlayerPacket,
@@ -112,6 +113,8 @@ interface BedrockClient extends Client {
   /** Resolved connection options; `version` is the negotiated Bedrock version. */
   options?: { version?: string }
   disconnect(reason?: string, hide?: boolean): void
+  /** Decodes one packet of a batch and emits it. */
+  readPacket(packet: Buffer): void
 }
 
 /**
@@ -439,6 +442,13 @@ export class Bot extends EventEmitter {
     return p ? { x: p.x, y: p.y, z: p.z } : undefined
   }
 
+  /** Metadata worth decoding: the bot's own (flight, air, beds) and other players'. */
+  private wantsMetadata(entity: bigint): boolean {
+    if (this.state.runtimeId === undefined || entity === this.state.runtimeId) return true
+    for (const p of this.state.players.values()) if (p.runtimeId === entity) return true
+    return false
+  }
+
   /** Where a player stands, if this bot can see them. */
   playerPosition(name: string): Point | undefined {
     const p = this.body?.players[name]?.entity?.position
@@ -516,6 +526,15 @@ export class Bot extends EventEmitter {
     // handling stays on its bedrock-protocol client.
     const body = createBot(options)
     const client = body._client as unknown as BedrockClient
+    // The court never looks at mobs' metadata, and around the village decoding it was the
+    // heaviest work of six bots (protodef builds an object of every flag for each update). Only
+    // the bot's own and other players' metadata are decoded.
+    const read = client.readPacket.bind(client)
+    client.readPacket = (packet: Buffer) => {
+      const target = metadataTarget(packet)
+      if (target !== undefined && !this.wantsMetadata(target)) return
+      read(packet)
+    }
     this.body = body
     this.client = client
     this.movement = new Movement(body, this.log.child('move'))

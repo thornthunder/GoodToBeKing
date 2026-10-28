@@ -159,6 +159,32 @@ export function parseTextPacket(packet: TextPacket): ChatEvent | null {
   }
 }
 
+/** Packet id of `set_entity_data` (1.26.x): the id varint, then `runtime_entity_id` (varint64). */
+const SET_ENTITY_DATA = 39
+
+/**
+ * The entity a `set_entity_data` packet is about, read from its first bytes without decoding the
+ * rest; undefined for any other packet.
+ */
+export function metadataTarget(packet: Buffer): bigint | undefined {
+  let offset = 0
+  let id = 0
+  for (let shift = 0; ; shift += 7) {
+    const byte = packet[offset++]
+    if (byte === undefined || shift > 28) return undefined
+    id |= (byte & 0x7f) << shift
+    if (!(byte & 0x80)) break
+  }
+  if (id !== SET_ENTITY_DATA) return undefined
+  let entity = 0n
+  for (let shift = 0n; ; shift += 7n) {
+    const byte = packet[offset++]
+    if (byte === undefined || shift > 63n) return undefined
+    entity |= BigInt(byte & 0x7f) << shift
+    if (!(byte & 0x80)) return entity
+  }
+}
+
 export function normalisePlayerList(
   packet: PlayerListPacket
 ): Array<{ type: string; record: PlayerRecord }> {

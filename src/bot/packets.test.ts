@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { buildTextPacket, normalisePlayerList, parseTextPacket, stripFormatting } from './packets'
+import {
+  buildTextPacket,
+  metadataTarget,
+  normalisePlayerList,
+  parseTextPacket,
+  stripFormatting,
+} from './packets'
 
 describe('stripFormatting', () => {
   it('removes section-sign colour codes', () => {
@@ -120,5 +126,30 @@ describe('normalisePlayerList', () => {
       records: { type: 'add', records: [{ uuid: 'a', username: 'Alex' }] },
     })
     expect(out).toEqual([{ type: 'add', record: { uuid: 'a', username: 'Alex' } }])
+  })
+})
+
+describe('metadataTarget', () => {
+  const varint = (n: bigint) => {
+    const out: number[] = []
+    do {
+      const low = Number(n & 0x7fn)
+      n >>= 7n
+      out.push(n ? low | 0x80 : low)
+    } while (n)
+    return out
+  }
+  const packet = (id: number, entity: bigint) =>
+    Buffer.from([...varint(BigInt(id)), ...varint(entity), 0, 0, 0])
+
+  it('reads the entity of a set_entity_data packet without decoding it', () => {
+    expect(metadataTarget(packet(39, 7833n))).toBe(7833n)
+    expect(metadataTarget(packet(39, 2n ** 40n + 5n))).toBe(2n ** 40n + 5n)
+  })
+
+  it('leaves every other packet alone', () => {
+    expect(metadataTarget(packet(111, 7833n))).toBeUndefined()
+    expect(metadataTarget(packet(39 + 128, 1n))).toBeUndefined()
+    expect(metadataTarget(Buffer.from([39]))).toBeUndefined()
   })
 })
