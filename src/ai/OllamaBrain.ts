@@ -516,6 +516,14 @@ export class OllamaBrain implements Brain {
       creature: request.creature,
       effect: request.effect,
     }
+    if (magic.available === false) {
+      return {
+        note:
+          `(Your magic is asleep: the realm has not granted you your wizard's powers since you ` +
+          `last arrived. Tell ${giver} kindly, in character, that the King must renew them by ` +
+          'speaking the words "op Merlin" at the heart of the server.)',
+      }
+    }
     const problem = magic.check(spell, args)
     if (problem)
       return { note: `(You cannot cast ${spell.name} like that: ${problem}. Say so kindly.)` }

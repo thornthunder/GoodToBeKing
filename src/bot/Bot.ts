@@ -223,6 +223,7 @@ export class Bot extends EventEmitter {
     this.keepPost()
     this.deliverReports()
     this.fadeGifts()
+    this.watchMagic()
   }
 
   /** Work a spell a royal asked for; if the server refuses it, say so. */
@@ -239,6 +240,11 @@ export class Bot extends EventEmitter {
     )
     if (result.ok) return
     this.log.warn(`${spell.name} failed: ${result.reason}`)
+    // Refused for want of rights: the magic sleeps until someone types "op Merlin" again.
+    if (result.reason?.includes('commands.generic.error.permissions')) {
+      this.magic!.available = false
+      this.lastMagicCheck = Date.now()
+    }
     const who = this.court?.find(action.requestedBy)
     await this.speak(
       `Your spell ${spell.name} did not work (${result.reason}). Tell ${who ? `the ${who.title}` : action.requestedBy} ` +
@@ -268,12 +274,47 @@ export class Bot extends EventEmitter {
       this.log.info(`gift ${g.what} to ${g.to} fades ${new Date(g.until).toISOString()}`)
   }
 
+  /** Take every gift back now (command file: "<bot> fade"), for testing. */
+  async fadeGiftsNow(): Promise<void> {
+    const magic = this.magic
+    if (!magic) return
+    const later = Date.now() + 25 * 3_600_000
+    for (const gift of magic.due(() => true, later)) {
+      const gone = await magic.takeBack(gift, (c) => this.command(c), later)
+      this.log.info(`took back ${gift.what} from ${gift.to}: ${gone ? 'gone' : 'not found'}`)
+    }
+  }
+
+  /** After spawning: may Merlin run commands? Without operator rights his magic sleeps. */
+  private async checkMagic(): Promise<void> {
+    const magic = this.magic
+    if (!magic) return
+    const result = await this.command('testfor @s')
+    if (magic.available === result.ok) return
+    magic.available = result.ok
+    if (result.ok) this.log.info('magic is awake: the server lets this bot run commands')
+    else
+      this.log.warn(
+        `magic is asleep (${result.output.join('; ')}): type "op ${this.username}" in the server console`
+      )
+  }
+
+  private lastMagicCheck = 0
+
+  /** While the magic sleeps (or is unknown), ask again every minute: someone may type "op". */
+  private watchMagic(): void {
+    const magic = this.magic
+    if (!magic || magic.available === true || Date.now() - this.lastMagicCheck < 60_000) return
+    this.lastMagicCheck = Date.now()
+    void this.checkMagic()
+  }
+
   private lastGiftCheck = 0
 
   /** A magic gift fades after a day: take it back once its owner is online, and say so. */
   private fadeGifts(): void {
     const magic = this.magic
-    if (!magic || Date.now() - this.lastGiftCheck < 60_000) return
+    if (!magic || magic.available === false || Date.now() - this.lastGiftCheck < 60_000) return
     this.lastGiftCheck = Date.now()
     const online = new Set([...this.state.players.values()].map((p) => p.name.toLowerCase()))
     for (const gift of magic.due((name) => online.has(name.toLowerCase()))) {
@@ -812,6 +853,11 @@ export class Bot extends EventEmitter {
       this.emit('spawn')
       clearInterval(this.dutyTimer)
       this.dutyTimer = setInterval(() => this.tick(), 3_000)
+      // A new session: the server forgets offline players' operator rights, so ask again.
+      if (this.magic) {
+        this.magic.available = undefined
+        this.lastMagicCheck = Date.now() - 50_000
+      }
       // Only the herald greets on arrival; the rest of the court just takes its place.
       if (!this.isHerald()) return
       this.brain

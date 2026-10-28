@@ -190,7 +190,12 @@ Windows, killing a background `npx` shell does not kill its node children at all
   Movement and building have to be done through player-level packets. The one exception, by the
   family's choice, is Merlin's magic (`magic: true`): Merlin is an operator by name (`op Merlin`
   in the server console; the world has `allow-cheats=true`), and only the spells in
-  `src/magic/spells.ts` ever run commands, built by code from allowlists.
+  `src/magic/spells.ts` ever run commands, built by code from allowlists. Offline players have
+  no account id, so the server cannot keep operator rights on disk ("Missing id, won't persist
+  permissions on disk") and Merlin loses them on every reconnect; a client-sent XUID is ignored.
+  `server/start-bds.cmd` (+ `.ps1`) runs the server and types `op Merlin` whenever he spawns.
+  Merlin checks his rights (`testfor @s`) after each spawn and every minute while they are
+  missing; until then his magic sleeps and he says so in character.
 - Building happens within `BUILD_RADIUS` (100) of `BUILD_CENTER` (105, 75, 122). The princess's
   house and the village paths lie south of the castle; never dig player-made blocks.
 - The court shares one Ollama server (48 GB of VRAM) with another program. The court loads only

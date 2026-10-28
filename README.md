@@ -98,7 +98,10 @@ gather again. The King can teach him new spells by describing them: Merlin repea
 back and learns it when the King says yes, as long as it is built from these same kinds of magic.
 Only the spells in his book ever run a command; the model never writes one.
 
-Server setup: `allow-cheats=true` in `server.properties`, and `op Merlin` in the server console.
+Server setup: `allow-cheats=true` in `server.properties`, and Merlin made an operator. The server
+runs in offline mode, where it cannot remember operator rights (players have no account id), so
+start it with `server/start-bds.cmd` (copy it and `start-bds.ps1` next to `bedrock_server.exe`):
+it runs the server as usual, passes on what you type, and types `op Merlin` whenever he joins.
 
 ### Orders and rules
 

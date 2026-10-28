@@ -60,6 +60,12 @@ export class Magic {
   private next = 1
   private readonly lastCast = new Map<string, number>()
   private readonly lastTry = new Map<string, number>()
+  /**
+   * Whether the server lets Merlin run commands right now (checked after each spawn). Offline
+   * players have no account id, so the server cannot keep operator rights on disk: after a
+   * server restart, or maybe a reconnect, "op Merlin" has to be typed in its console again.
+   */
+  available?: boolean
 
   constructor(
     private readonly opts: {

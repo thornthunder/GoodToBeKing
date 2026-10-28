@@ -462,6 +462,8 @@ export class BotManager {
         requestedBy,
         args: { place, item: after('item'), creature: after('creature'), effect: after('effect') },
       })
+    } else if (verb === 'fade') {
+      void bot.fadeGiftsNow()
     } else if (verb === 'spells') {
       bot.listSpells()
     } else if (verb === 'undo') {
