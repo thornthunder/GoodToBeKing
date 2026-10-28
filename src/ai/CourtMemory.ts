@@ -7,10 +7,12 @@ export interface Fact {
   at: number
   /** About real life outside the game: shown only while nobody but the royal family is online. */
   private?: boolean
+  /** Told to this bot in confidence: it never tells anyone. */
+  secret?: boolean
 }
 
-/** Something to remember, and whether the one who wrote it down thinks it is about real life. */
-export type NewFact = string | { text: string; private?: boolean }
+/** Something to remember, and whether it is about real life or was told in confidence. */
+export type NewFact = string | { text: string; private?: boolean; secret?: boolean }
 
 /**
  * Real-world personal details. The family runs the server on its own hardware and wants the court
@@ -41,8 +43,8 @@ function normalise(text: string): string {
 }
 
 /**
- * Long-term memory shared by every bot at court: short facts per subject (a player name or a
- * bot name). Backed by a JSON file so it survives restarts.
+ * One bot's long-term memory: short facts per subject (a player name or a bot name), only what
+ * that bot heard itself. Backed by a JSON file so it survives restarts.
  */
 export class CourtMemory {
   private data: Record<string, Fact[]> = {}
@@ -108,7 +110,13 @@ export class CourtMemory {
       if (!norm || seen.has(norm) || isSecret(text)) continue
       seen.add(norm)
       const realLife = (typeof item !== 'string' && item.private) || isPersonalInfo(text)
-      const fact: Fact = realLife ? { text, at, private: true } : { text, at }
+      const secret = typeof item !== 'string' && item.secret
+      const fact: Fact = {
+        text,
+        at,
+        ...(realLife ? { private: true } : {}),
+        ...(secret ? { secret: true } : {}),
+      }
       list.push(fact)
       added.push(fact)
     }

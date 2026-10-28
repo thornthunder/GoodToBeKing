@@ -70,13 +70,16 @@ real file is git-ignored because it holds family gamertags.
 
 ### Memory
 
-The first bot (the court's scribe) listens to every conversation with a royal, including what
-the other courtiers answer, and once it pauses asks a model, in the background, to write down
-everything new: favourite things, wishes, stories and the names in them, what was built, the roles
-the family gave the courtiers and what they promised. Facts are stored per person and per
-courtier in `.state/memory.json` (git-ignored), shared by every bot; each prompt shows the latest
-ones and older ones that fit the talk. You can read or edit that file by hand, even while the bots
-are running: they reload it when it changes.
+Each bot has a memory of its own and remembers only what it heard: lines whispered to it, lines
+it answered or that name it, and what is said within earshot (24 blocks), including what the other
+courtiers answer. Bots never read each other's memory, so news only travels by being said where
+another can hear it, and a bot can keep a secret: whisper it (`/tell Merlin ...`) or ask it to keep
+it secret. A whisper is answered by whisper. Once a conversation pauses, the bot asks a model, in
+the background, to write down everything new: favourite things, wishes, stories and the names in
+them, what was built, the roles the family gave the courtiers and what they promised. Facts are
+stored per person in `.state/memory-<bot>.json` (git-ignored); each prompt shows the latest ones
+and older ones that fit the talk. You can read or edit those files by hand, even while the bots are
+running: they reload them when they change.
 
 What the family tells about real life (age, school, family and the like) is kept too, marked
 `"private": true`, and only goes into a bot's prompt while nobody outside the royal family is

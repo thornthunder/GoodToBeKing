@@ -385,7 +385,7 @@ describe('OllamaBrain court behaviour', () => {
           : 'Magenta is a splendid choice, Your Highness.',
       {},
       new HailLog(),
-      { memory, learns: true }
+      { memory }
     )
     await brain.onChat(chat('LittleOne42', 'I love magenta and periwinkle'), ctx('LittleOne42'))
     await brain.settled()
@@ -418,15 +418,25 @@ describe('OllamaBrain court behaviour', () => {
         }),
       {},
       new HailLog(),
-      { memory, learns: true, staff: [{ name: 'Bruce', role: 'guard', canBuild: false }] }
+      {
+        memory,
+        staff: [
+          { name: 'Bruce', role: 'guard', canBuild: false },
+          { name: 'Dyke', role: 'guard', canBuild: false },
+        ],
+      }
     )
     const floorTaken = { ...ctx('LittleOne42'), mayReply: false }
     await brain.onChat(
       chat('LittleOne42', 'bruce you are the godfather of my baby luna'),
       floorTaken
     )
-    brain.onCourtLine(chat('Bruce', 'It would be my honour, Your Highness.'))
-    brain.onCourtLine(chat('Stranger', 'Not a courtier.'))
+    brain.onCourtLine(chat('Bruce', 'It would be my honour, Your Highness.'), ctx('LittleOne42'))
+    brain.onCourtLine(chat('Stranger', 'Not a courtier.'), ctx('LittleOne42'))
+    brain.onCourtLine(chat('Dyke', 'Too far away to be heard.'), {
+      ...ctx('LittleOne42'),
+      hears: false,
+    })
     await brain.settled()
 
     const extraction = calls.filter(isExtraction)
@@ -435,6 +445,7 @@ describe('OllamaBrain court behaviour', () => {
     expect(asked).toContain('LittleOne42 (the Princess): bruce you are the godfather')
     expect(asked).toContain('Bruce: It would be my honour')
     expect(asked).not.toContain('Not a courtier')
+    expect(asked).not.toContain('Too far away')
     expect(memory.facts('Bruce')).toEqual(["Bruce is the godfather of the Princess's baby, Luna."])
     // Merlin knows it too: his fellows' facts are in his prompt.
     expect(brain.systemPrompt(ctx('LittleOne42'))).toContain(
@@ -458,20 +469,53 @@ describe('OllamaBrain court behaviour', () => {
     expect(withGuest).not.toContain('(private)')
   })
 
-  it('does not learn when it is not the scribe, or from guests', async () => {
-    const memory = new CourtMemory()
-    const { brain: notScribe, model: m1 } = makeBrain('Hi.', {}, new HailLog(), { memory })
-    await notScribe.onChat(chat('LittleOne42', 'I love cats'), ctx('LittleOne42'))
-    await notScribe.settled()
-    expect(m1.chat).toHaveBeenCalledTimes(1)
+  it('does not learn what it did not hear, or from guests', async () => {
+    const { brain: farAway, model: m1 } = makeBrain('Hi.')
+    const unheard = { ...ctx('LittleOne42'), mayReply: false, hears: false }
+    await farAway.onChat(chat('LittleOne42', 'I love cats'), unheard)
+    await farAway.settled()
+    expect(m1.chat).not.toHaveBeenCalled()
 
-    const { brain: scribe, model: m2 } = makeBrain('Hi.', {}, new HailLog(), {
-      memory,
-      learns: true,
-    })
-    await scribe.onChat(chat('Stranger', 'Merlin, I love cats'), ctx('Stranger'))
-    await scribe.settled()
+    const { brain, model: m2 } = makeBrain('Hi.')
+    await brain.onChat(chat('Stranger', 'Merlin, I love cats'), ctx('Stranger'))
+    await brain.settled()
     expect(m2.chat).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a secret it was whispered, and is told to keep it', async () => {
+    const memory = new CourtMemory()
+    const isExtraction = (messages: ChatMessage[]) =>
+      messages[0].content.startsWith('You keep the long-term memory')
+    const { brain, calls } = makeBrain(
+      (messages) =>
+        isExtraction(messages)
+          ? JSON.stringify({
+              facts: [
+                {
+                  about: 'the Princess',
+                  fact: 'The Princess hid a diamond under the old oak.',
+                  private: false,
+                  secret: true,
+                },
+              ],
+            })
+          : 'Your secret is safe with me, Your Highness.',
+      {},
+      new HailLog(),
+      { memory }
+    )
+    const whisper = {
+      ...chat('LittleOne42', 'i hid a diamond under the old oak'),
+      kind: 'whisper' as const,
+    }
+    await brain.onChat(whisper, ctx('LittleOne42'))
+    await brain.settled()
+    const asked = calls.find(isExtraction)?.[1].content ?? ''
+    expect(asked).toContain('(whispered to Merlin alone) LittleOne42 (the Princess): i hid')
+    expect(calls.find(isExtraction)?.[0].content).toContain('Mark a fact secret')
+    const prompt = brain.systemPrompt(ctx('LittleOne42'))
+    expect(prompt).toContain('- The Princess hid a diamond under the old oak. (secret)')
+    expect(prompt).toContain('Never tell them to anyone')
   })
 
   it('puts the court and the safety rules in the system prompt', () => {

@@ -82,11 +82,11 @@ export class OllamaBrain implements Brain {
   private lastReplyAt = 0
   private readonly noticeCooldowns = new Map<string, number>()
   private readonly hails: HailLog
+  /** What this bot remembers: only what it heard itself. */
   private readonly memory: CourtMemory
-  private readonly learns: boolean
   private readonly staff: StaffMember[]
   private learning: Promise<void> = Promise.resolve()
-  /** The scribe's notes of the royal conversation going on, not yet written down. */
+  /** Notes of the royal conversation going on that this bot hears, not yet written down. */
   private heard: { lines: string[]; royals: Map<string, CourtMember>; since: number } | undefined
   private learnTimer?: NodeJS.Timeout
   /** The last lines written down: context for the next extraction. */
@@ -106,7 +106,6 @@ export class OllamaBrain implements Brain {
   ) {
     this.hails = opts.hails ?? new HailLog()
     this.memory = opts.memory ?? new CourtMemory()
-    this.learns = opts.learns ?? false
     this.staff = (opts.staff ?? []).filter((s) => s.name !== cfg.name)
   }
 
@@ -116,10 +115,11 @@ export class OllamaBrain implements Brain {
     return this.learning
   }
 
-  /** A fellow bot spoke: the scribe keeps it with the royal conversation it belongs to. */
-  onCourtLine(event: ChatEvent): void {
+  /** A fellow bot spoke: if this bot heard it, it belongs with the royal conversation going on. */
+  onCourtLine(event: ChatEvent, ctx: BrainContext): void {
     const court = [this.cfg.name, ...this.staff.map((s) => s.name)].map((n) => n.toLowerCase())
-    if (court.includes(event.from.toLowerCase())) this.hear(`${event.from}: ${event.message}`)
+    if (ctx.hears === false || !court.includes(event.from.toLowerCase())) return
+    this.hear(`${event.from}: ${event.message}`)
   }
 
   async onSpawn(ctx: BrainContext): Promise<string | null> {
@@ -179,8 +179,11 @@ export class OllamaBrain implements Brain {
     const member = this.court.find(event.from)
     this.remember({ role: 'user', content: `${this.court.label(event.from)}: ${event.message}` })
 
-    // As the scribe, note every royal conversation, whoever answers it.
-    this.hear(`${this.court.label(event.from)}: ${event.message}`, member)
+    // Remember what this bot hears, whoever answers it.
+    if (ctx.hears !== false) {
+      const whispered = event.kind === 'whisper' ? `(whispered to ${ctx.botName} alone) ` : ''
+      this.hear(`${whispered}${this.court.label(event.from)}: ${event.message}`, member)
+    }
     // Another bot of the court has the floor: listen, but stay quiet.
     if (ctx.mayReply === false) return null
     if (!this.shouldReply(event, member)) return null
@@ -224,12 +227,12 @@ export class OllamaBrain implements Brain {
   }
 
   /**
-   * As the court's scribe, note a line of a royal conversation (a royal's own, or anyone's while a
-   * royal is talking). It is written down once the talk pauses, so a whole exchange, with the
-   * answers of whichever courtier gave them, goes to the memory model at once.
+   * Note a line of a royal conversation this bot hears (a royal's own, or anyone's while a royal
+   * is talking). It is written down once the talk pauses, so a whole exchange, with the answers
+   * of whichever courtier gave them, goes to the memory model at once.
    */
   private hear(line: string, royal?: CourtMember): void {
-    if (!this.learns || (!royal && !this.heard)) return
+    if (!royal && !this.heard) return
     this.heard ??= { lines: [], royals: new Map(), since: Date.now() }
     this.heard.lines.push(line)
     if (royal) this.heard.royals.set(royal.player, royal)
@@ -373,9 +376,10 @@ export class OllamaBrain implements Brain {
     )
   }
 
-  /** Ask the model what the conversation told about the royals and the court, and store it. */
+  /** Ask the model what this bot learned about the royals and the court, and store it. */
   private async learn(royals: CourtMember[], lines: string[], earlier: string[]): Promise<void> {
-    const bots = [this.cfg.name, ...this.staff.map((s) => s.name)]
+    const me = this.cfg.name
+    const bots = [me, ...this.staff.map((s) => s.name)]
     const subjects = [
       ...this.court.members.map((m) => ({ label: `the ${m.title}`, key: m.player })),
       ...bots.map((name) => ({ label: name, key: name })),
@@ -397,6 +401,7 @@ export class OllamaBrain implements Brain {
         {
           role: 'system',
           content: learnPrompt(
+            me,
             this.court.members.map((m) => `the ${m.title}`),
             bots
           ),
@@ -420,17 +425,16 @@ export class OllamaBrain implements Brain {
       }
     )
     const parsed = JSON.parse(response.message.content || '{}') as {
-      facts?: Array<{ about?: string; fact?: string; private?: boolean }>
+      facts?: Array<{ about?: string; fact?: string; private?: boolean; secret?: boolean }>
     }
     for (const item of parsed.facts ?? []) {
       const subject = subjects.find((s) => s.label === item.about)
       if (!subject || !item.fact) continue
       for (const fact of this.memory.add(subject.key, [
-        { text: item.fact, private: item.private === true },
+        { text: item.fact, private: item.private === true, secret: item.secret === true },
       ])) {
-        this.log.info(
-          `remembered about ${subject.label}${fact.private ? ' (private)' : ''}: ${fact.text}`
-        )
+        const marks = `${fact.private ? ' (private)' : ''}${fact.secret ? ' (secret)' : ''}`
+        this.log.info(`remembered about ${subject.label}${marks}: ${fact.text}`)
       }
     }
   }
@@ -658,7 +662,7 @@ export class OllamaBrain implements Brain {
   }
 
   /**
-   * What the court remembers about each royal, this bot and its fellows: the latest facts and older
+   * What this bot remembers about each royal, itself and its fellows: the latest facts and older
    * ones the talk is about. Real-life facts only while nobody outside the royal family is online.
    */
   private memorySection(ctx: BrainContext): string {
@@ -691,7 +695,16 @@ export class OllamaBrain implements Brain {
     for (const g of groups) {
       lines.push(
         `About ${g.label}:`,
-        ...g.facts.map((f) => `- ${f.text}${f.private ? ' (private)' : ''}`)
+        ...g.facts.map(
+          (f) => `- ${f.text}${f.private ? ' (private)' : ''}${f.secret ? ' (secret)' : ''}`
+        )
+      )
+    }
+    if (groups.some((g) => g.facts.some((f) => f.secret))) {
+      lines.push(
+        'Facts marked (secret) were told to you in confidence. Never tell them to anyone, not ' +
+          'even the rest of the court; if the one who told you asks, show that you remember ' +
+          'and that their secret is safe with you.'
       )
     }
     if (groups.some((g) => g.facts.some((f) => f.private))) {
@@ -713,10 +726,8 @@ export class OllamaBrain implements Brain {
 export interface BrainOptions {
   /** When each royal was last hailed; pass a file-backed log to survive restarts. */
   hails?: HailLog
-  /** Long-term memory shared by the whole court. */
+  /** This bot's own long-term memory. */
   memory?: CourtMemory
-  /** This bot extracts new memories from conversations (one scribe per court avoids duplicates). */
-  learns?: boolean
   /** The other bots of the court, so each knows who the others are and what they do. */
   staff?: StaffMember[]
 }
@@ -758,11 +769,12 @@ interface GenerateOptions {
   insist?: string
 }
 
-function learnPrompt(royals: string[], bots: string[]): string {
+function learnPrompt(me: string, royals: string[], bots: string[]): string {
   return [
-    `You keep the long-term memory of a royal court on a family Minecraft server: the royal family (${listWords(royals)})`,
-    `and the characters of the court (${listWords(bots)}). The more the court remembers, the more`,
-    'personal its talks with the family become, so write down everything new the latest lines tell:',
+    `You keep the long-term memory of ${me}, one of the characters of a royal court on a family`,
+    `Minecraft server: the royal family (${listWords(royals)}) and the court (${listWords(bots)}).`,
+    `These are lines ${me} heard. The more ${me} remembers, the more personal the talks with the`,
+    'family become, so write down everything new the latest lines tell:',
     '- about each royal: likes, dislikes and favourite things; what they did, built, found or plan;',
     '  wishes and requests; names they gave to pets, places, things and characters; their pretend',
     '  stories and how they go on (once they settle on a name, keep it); games and jokes they liked;',
@@ -774,6 +786,8 @@ function learnPrompt(royals: string[], bots: string[]): string {
     '(a new favourite, a new name), write the new fact: it replaces the old one.',
     'Mark a fact private when it is about real life outside the game: real names, age, birthday,',
     'school, family, friends, where they live. Never write down passwords or login details.',
+    `Mark a fact secret when it was whispered to ${me} alone or ${me} was asked to keep it secret.`,
+    `A secret told to someone else that ${me} only overheard is not written down at all.`,
     'Players often use voice typing, so words get misheard. When a phrase sounds like a Minecraft',
     'block, item, mob or colour, write the real name: "Perry Winkle" is periwinkle, "flyer fly bush"',
     'is a firefly bush, "chords pillars" are quartz pillars. If unsure, keep their words.',
@@ -794,8 +808,9 @@ function factSchema(subjects: string[]): object {
             about: { type: 'string', enum: subjects },
             fact: { type: 'string' },
             private: { type: 'boolean' },
+            secret: { type: 'boolean' },
           },
-          required: ['about', 'fact', 'private'],
+          required: ['about', 'fact', 'private', 'secret'],
         },
       },
     },

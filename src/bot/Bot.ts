@@ -6,8 +6,8 @@ import {
   type Bot as MineflayerBot,
   type BotOptions as MineflayerBotOptions,
 } from 'mineflayer-bedrock'
-import type { BotAction, Brain, BrainContext, BuildOutcome } from '../ai/Brain'
-import { splitChatMessage } from '../ai/text'
+import type { BotAction, Brain, BrainContext, BuildOutcome, ChatEvent } from '../ai/Brain'
+import { mentionsName, splitChatMessage } from '../ai/text'
 import type { BotConfig, ServerConfig } from '../config'
 import type { CourtRoster } from '../court'
 import type { Logger } from '../logger'
@@ -71,6 +71,8 @@ export interface PlayerInfo {
 
 /** Wait this long after a join before hailing, so the newcomer has loaded in and sees chat. */
 const JOIN_GREET_DELAY_MS = 4_000
+/** A bot hears chat said within this many blocks (about across a great hall). */
+const EARSHOT = 24
 
 /** After a royal tells a bot on duty to stop, it leaves the duty alone this long. */
 const DUTY_PAUSE_MS = 10 * 60_000
@@ -558,6 +560,35 @@ export class Bot extends EventEmitter {
     }
   }
 
+  /** Say something to one player only (/tell needs no operator rights). */
+  whisper(player: string, message: string): void {
+    for (const part of splitChatMessage(message)) {
+      this.log.info(`<${this.username} to ${player}> ${part}`)
+      this.runCommand(`/tell "${player}" ${part}`)
+    }
+  }
+
+  /**
+   * Whether this bot hears a chat line: whispered to it, its turn to answer, named in it, or said
+   * within earshot. Chat reaches every player on the server, but a bot only remembers what it
+   * heard, so news travels through the court by being said where others can hear it.
+   */
+  private hears(event: ChatEvent, responder?: string | null): boolean {
+    if (event.kind === 'whisper' || responder === this.cfg.name) return true
+    if (mentionsName(event.message, this.cfg.name)) return true
+    const d = this.distanceTo(event.from)
+    return d !== undefined && d <= EARSHOT
+  }
+
+  /** How far a player (or fellow bot) stands from this bot, when both positions are known. */
+  private distanceTo(name: string): number | undefined {
+    const me = vec(this.body?.entity?.position) ?? this.state.position
+    const lower = name.toLowerCase()
+    const p = [...this.state.players.values()].find((x) => x.name.toLowerCase() === lower)
+    const pos = p && (vec(this.body?.players[p.name]?.entity?.position) ?? p.position)
+    return me && pos ? distance(me, pos) : undefined
+  }
+
   /** Run a slash command (e.g. "/tell Steve hi"). Field layout verified against 1.26.x only. */
   runCommand(command: string): void {
     const client = this.client
@@ -766,10 +797,10 @@ export class Bot extends EventEmitter {
     this.log.info(`<${event.from}> ${event.message}`)
     this.emit('chat', event)
     if (event.from === this.username) return
-    // Never talk to the rest of the court: bots answering bots would never stop. But listen, so
-    // the court's scribe knows what the others told the royals.
+    // Never talk to the rest of the court: bots answering bots would never stop. But listen:
+    // what a bot hears the others tell the royals, it remembers.
     if (this.isBot(event.from)) {
-      this.brain.onCourtLine?.(event)
+      this.brain.onCourtLine?.(event, { ...this.context(), hears: this.hears(event) })
       return
     }
 
@@ -779,12 +810,18 @@ export class Bot extends EventEmitter {
       event.kind === 'whisper' || !this.floor
         ? this.cfg.name
         : this.floor.responder(event, fromGuest)
-    const ctx = { ...this.context(), mayReply: responder === this.cfg.name }
+    const ctx = {
+      ...this.context(),
+      mayReply: responder === this.cfg.name,
+      hears: this.hears(event, responder),
+    }
     this.brain
       .onChat(event, ctx)
       .then((reply) => {
         if (reply?.say) {
-          this.chat(reply.say)
+          // A whisper is answered by whisper: what was told in secret stays between the two.
+          if (event.kind === 'whisper') this.whisper(event.from, reply.say)
+          else this.chat(reply.say)
           this.floor?.replied(this.cfg.name, event.from)
         }
         if (reply?.action) this.act(reply.action)

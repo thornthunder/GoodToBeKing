@@ -54,24 +54,27 @@ export class BotManager {
     )
     const floor = new ChatFloor(botNames, castellanFirst)
     const staff = cfg.bots.map((b) => ({ name: b.name, role: b.role, canBuild: b.canBuild }))
-    // One memory for the whole court, so every bot knows what the princess told any of them.
-    const memory = new CourtMemory(path.resolve(STATE_DIR, 'memory.json'))
     // What each bot built, so "take it down" removes only that bot's own blocks.
     const builds = new BuildLog(path.resolve(STATE_DIR, 'builds.json'))
-    for (const [i, botCfg] of cfg.bots.entries()) {
+    for (const botCfg of cfg.bots) {
       const botLog = log.child(botCfg.name)
       const ai = new OllamaClient(botCfg.ai, botLog.child('ollama'))
       const hails = new HailLog(path.resolve(STATE_DIR, `${botCfg.name}.hails.json`))
       const brain = new OllamaBrain(botCfg, ai, court, botLog.child('brain'), {
         hails,
-        memory,
-        // The first bot is the court's scribe; several scribes would store every fact twice.
-        learns: i === 0,
+        // Each bot remembers only what it heard itself, so one can keep a secret and news
+        // travels by being told.
+        memory: new CourtMemory(
+          path.resolve(STATE_DIR, `memory-${botCfg.name.toLowerCase()}.json`)
+        ),
         staff,
       })
       const bot = new Bot(botCfg, brain, botLog, {
         // Our own helper scripts' players (the surveyor) are ignored like fellow bots.
-        fellowBots: [...botNames, ...(process.env.IGNORE_PLAYERS ?? 'Surveyor').split(',').filter(Boolean)],
+        fellowBots: [
+          ...botNames,
+          ...(process.env.IGNORE_PLAYERS ?? 'Surveyor').split(',').filter(Boolean),
+        ],
         buildLog: builds,
         floor,
         court,
@@ -90,7 +93,10 @@ export class BotManager {
   /** Which designs the court has built and is building, kept in .state/court-works.json. */
   private courtWorks(): { current?: string; built: string[] } {
     try {
-      return JSON.parse(fs.readFileSync(path.resolve(STATE_DIR, 'court-works.json'), 'utf8')) as { current?: string; built: string[] }
+      return JSON.parse(fs.readFileSync(path.resolve(STATE_DIR, 'court-works.json'), 'utf8')) as {
+        current?: string
+        built: string[]
+      }
     } catch {
       return { built: [] }
     }
@@ -112,7 +118,8 @@ export class BotManager {
     try {
       const scout = this.bots.find((b) => b.state.status === 'spawned')
       const zone = this.bots.find((b) => b.cfg.buildZone)?.cfg.buildZone
-      if (!scout || !zone) return this.log.warn('cannot plan a castle: no bot in the world or no build zone')
+      if (!scout || !zone)
+        return this.log.warn('cannot plan a castle: no bot in the world or no build zone')
       await foreman?.speak(
         'Tell everyone that the master builder and you are now drawing up the plans for a second castle, ' +
           'which the court will choose and design all by itself. Ask them to rest a moment.',
@@ -162,13 +169,19 @@ export class BotManager {
       const overlord = new Overlord(ai, model, this.log.child('overlord'))
       let example: CastleDesign | undefined
       try {
-        example = this.cfg.worksDesign ? (JSON.parse(fs.readFileSync(path.resolve(this.cfg.worksDesign), 'utf8')) as CastleDesign) : undefined
+        example = this.cfg.worksDesign
+          ? (JSON.parse(
+              fs.readFileSync(path.resolve(this.cfg.worksDesign), 'utf8')
+            ) as CastleDesign)
+          : undefined
       } catch {
         example = undefined
       }
       const result = await overlord.planCastle({
         sites,
-        crew: this.bots.filter((b) => b.cfg.works).map((b) => ({ name: b.cfg.name, role: b.cfg.role })),
+        crew: this.bots
+          .filter((b) => b.cfg.works)
+          .map((b) => ({ name: b.cfg.name, role: b.cfg.role })),
         example,
         takenNames: [example?.name, this.works?.plan.title].filter(Boolean) as string[],
       })
@@ -182,7 +195,9 @@ export class BotManager {
       const file = path.join(STATE_DIR, 'designs', `${slug(result.design.name)}.json`)
       fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true })
       fs.writeFileSync(path.resolve(file), JSON.stringify(result.design, null, 2))
-      this.log.info(`overlord designed ${result.design.name} (${file}) on site ${JSON.stringify(result.site.area)}: ${result.summary}`)
+      this.log.info(
+        `overlord designed ${result.design.name} (${file}) on site ${JSON.stringify(result.site.area)}: ${result.summary}`
+      )
       const state = this.courtWorks()
       const finished = state.current ?? this.cfg.worksDesign
       if (finished && !state.built.includes(finished)) state.built.push(finished)
@@ -257,7 +272,8 @@ export class BotManager {
   /** Run some work talk unless the court talked a moment ago or a royal is talking. */
   private chatter(talk: () => Promise<void>, force = false): void {
     const now = Date.now()
-    const recent = now - this.lastChatter < CHATTER_GAP_MS || now - this.lastRoyalLine < ROYAL_QUIET_MS
+    const recent =
+      now - this.lastChatter < CHATTER_GAP_MS || now - this.lastRoyalLine < ROYAL_QUIET_MS
     if (!force && recent) return
     this.lastChatter = now
     talk().catch((err) => this.log.warn(`work talk failed: ${errMsg(err)}`))
@@ -431,7 +447,11 @@ export class BotManager {
     this.ready = true
     if (this.works) this.runWorks()
     // Finished before this start and nothing planned since: the court plans its next castle now.
-    if (this.works?.finished && process.env.WORKS_NEXT === 'overlord' && this.courtWorks().built.length === 0)
+    if (
+      this.works?.finished &&
+      process.env.WORKS_NEXT === 'overlord' &&
+      this.courtWorks().built.length === 0
+    )
       setTimeout(() => void this.planNextCastle(), 30_000)
   }
 
