@@ -315,7 +315,9 @@ export class Bot extends EventEmitter {
   /** While the magic sleeps (or is unknown), ask again every minute: someone may type "op". */
   private watchMagic(): void {
     const magic = this.magic
-    if (!magic || magic.available === true || Date.now() - this.lastMagicCheck < 60_000) return
+    // Unknown (just arrived, or the server did not answer yet): ask often; refused: once a minute.
+    const every = magic?.available === undefined ? 20_000 : 60_000
+    if (!magic || magic.available === true || Date.now() - this.lastMagicCheck < every) return
     this.lastMagicCheck = Date.now()
     void this.checkMagic()
   }
@@ -867,7 +869,7 @@ export class Bot extends EventEmitter {
       // A new session: the server forgets offline players' operator rights, so ask again.
       if (this.magic) {
         this.magic.available = undefined
-        this.lastMagicCheck = Date.now() - 50_000
+        this.lastMagicCheck = Date.now() - 15_000
       }
       // Only the herald greets on arrival; the rest of the court just takes its place.
       if (!this.isHerald()) return
