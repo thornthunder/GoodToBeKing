@@ -5,17 +5,31 @@ export interface Fact {
   text: string
   /** When the fact was learned (ms since epoch). */
   at: number
+  /** About real life outside the game: shown only while nobody but the royal family is online. */
+  private?: boolean
 }
 
+/** Something to remember, and whether the one who wrote it down thinks it is about real life. */
+export type NewFact = string | { text: string; private?: boolean }
+
 /**
- * Real-world personal details that must never be stored, whatever the model extracts.
- * The princess is a child; this list errs on the side of dropping a fact.
+ * Real-world personal details. The family runs the server on its own hardware and wants the court
+ * to remember them, so they are kept, but private (see Fact.private): a guest must never read the
+ * princess's age or school in chat. The list errs on the side of marking a fact private.
  */
 const PERSONAL_INFO =
-  /\b(\d+\s*(years?|yrs?)\s*old|age[ds]?\b|birthday|born (on|in) (the )?(\d+\w*|(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)|school|teacher|class(mate)?|address|street|lives? (in|at|on)|phone|e-?mail|password|real name|surname|last name|full name)\b/i
+  /\b(\d+\s*(years?|yrs?)\s*old|age[ds]?\b|birthday|born (on|in) (the )?(\d+\w*|(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)|school|teacher|class(mate)?|address|street|lives? (in|at|on)|phone|e-?mail|real name|surname|last name|full name)\b/i
+
+/** Secrets are never stored, whoever tells them: passwords, PINs, login details, card numbers. */
+const SECRET =
+  /\b(pass(word|code)s?|pin (code|number)s?|log-?ins?|login details|(credit|bank|debit) cards?|card numbers?)\b/i
 
 export function isPersonalInfo(fact: string): boolean {
   return PERSONAL_INFO.test(fact)
+}
+
+export function isSecret(fact: string): boolean {
+  return SECRET.test(fact)
 }
 
 function normalise(text: string): string {
@@ -37,7 +51,7 @@ export class CourtMemory {
 
   constructor(
     private readonly file?: string,
-    private readonly maxPerSubject = 40
+    private readonly maxPerSubject = 400
   ) {
     this.refresh()
   }
@@ -60,26 +74,43 @@ export class CourtMemory {
     }
   }
 
-  /** Facts about a subject, oldest first. */
-  facts(subject: string): string[] {
-    this.refresh()
-    return (this.data[subject.toLowerCase()] ?? []).map((f) => f.text)
+  /** Facts about a subject, oldest first; real-life ones only when asked for. */
+  facts(subject: string, opts: { withPrivate?: boolean } = {}): string[] {
+    return this.entries(subject)
+      .filter((f) => opts.withPrivate || !f.private)
+      .map((f) => f.text)
   }
 
-  /** Store new facts; duplicates and personal information are dropped. Returns what was kept. */
-  add(subject: string, texts: string[], at = Date.now()): string[] {
+  /** Everything known about a subject, oldest first. */
+  entries(subject: string): Fact[] {
+    this.refresh()
+    return (this.data[subject.toLowerCase()] ?? []).map((f) => ({ ...f }))
+  }
+
+  /**
+   * Store new facts; duplicates and secrets are dropped, real-life details are marked private.
+   * Returns what was kept.
+   */
+  add(subject: string, facts: NewFact[], at = Date.now()): Fact[] {
     this.refresh()
     const key = subject.toLowerCase()
     const list = (this.data[key] ??= [])
     const seen = new Set(list.map((f) => normalise(f.text)))
-    const added: string[] = []
-    for (const raw of texts) {
-      const text = raw.replace(/\s+/g, ' ').trim()
+    const added: Fact[] = []
+    for (const item of facts) {
+      const raw = typeof item === 'string' ? item : item.text
+      // The prompt marks private facts itself; a model that copies the mark into the text is undone.
+      const text = raw
+        .replace(/\s+/g, ' ')
+        .replace(/\s*\(private\)\.?\s*$/i, '')
+        .trim()
       const norm = normalise(text)
-      if (!norm || seen.has(norm) || isPersonalInfo(text)) continue
+      if (!norm || seen.has(norm) || isSecret(text)) continue
       seen.add(norm)
-      list.push({ text, at })
-      added.push(text)
+      const realLife = (typeof item !== 'string' && item.private) || isPersonalInfo(text)
+      const fact: Fact = realLife ? { text, at, private: true } : { text, at }
+      list.push(fact)
+      added.push(fact)
     }
     while (list.length > this.maxPerSubject) list.shift()
     if (added.length) this.save()
@@ -92,4 +123,48 @@ export class CourtMemory {
     fs.writeFileSync(this.file, JSON.stringify(this.data, null, 2))
     this.loadedMtimeMs = fs.statSync(this.file).mtimeMs
   }
+}
+
+/** Words too common in facts and chat to tell which old facts the talk is about. */
+const COMMON = new Set(
+  (
+    'that this with have from they them their there what when where which will would about like ' +
+    'likes love loves wants want called named name your yours just very more some also into ' +
+    'been were said says told asked made make build built does should could highness majesty ' +
+    'king queen prince princess royal lord lady merlin court castle'
+  ).split(' ')
+)
+
+function keywords(text: string, ignore: Set<string>): string[] {
+  return (text.toLowerCase().match(/[a-z]{4,}/g) ?? []).filter(
+    (w) => !COMMON.has(w) && !ignore.has(w)
+  )
+}
+
+/**
+ * The facts to show for one subject: the most recent ones, plus older ones that share words with
+ * the talk (the princess mentions her horse, the horse's name comes back). In the order learned.
+ */
+export function recall(
+  facts: Fact[],
+  talk: string,
+  recent: number,
+  relevant: number,
+  ignore: Iterable<string> = []
+): Fact[] {
+  const skip = new Set([...ignore].map((w) => w.toLowerCase()))
+  const cut = Math.max(0, facts.length - recent)
+  const words = new Set(keywords(talk, skip))
+  const older = facts
+    .slice(0, cut)
+    .map((fact, i) => ({
+      fact,
+      i,
+      score: keywords(fact.text, skip).filter((w) => words.has(w)).length,
+    }))
+    .filter((o) => o.score > 0)
+    .sort((a, b) => b.score - a.score || b.i - a.i)
+    .slice(0, relevant)
+    .sort((a, b) => a.i - b.i)
+  return [...older.map((o) => o.fact), ...facts.slice(cut)]
 }

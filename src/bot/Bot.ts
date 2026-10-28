@@ -766,8 +766,12 @@ export class Bot extends EventEmitter {
     this.log.info(`<${event.from}> ${event.message}`)
     this.emit('chat', event)
     if (event.from === this.username) return
-    // Never talk to the rest of the court: bots answering bots would never stop.
-    if (this.isBot(event.from)) return
+    // Never talk to the rest of the court: bots answering bots would never stop. But listen, so
+    // the court's scribe knows what the others told the royals.
+    if (this.isBot(event.from)) {
+      this.brain.onCourtLine?.(event)
+      return
+    }
 
     // One bot answers a line: the one named, the one already talking with them, or the herald.
     const fromGuest = !this.court?.find(event.from)

@@ -70,14 +70,18 @@ real file is git-ignored because it holds family gamertags.
 
 ### Memory
 
-After each exchange with a royal, the first bot (the court's scribe) asks a model, in the
-background, which lasting facts the exchange revealed: favourite things, wishes, names given to
-pets and places, what the bot promised. Facts are stored per person in `.state/memory.json`
-(git-ignored), shared by every bot, and shown in each bot's prompt. You can read or edit that
-file by hand, even while the bots are running: they reload it when it changes.
+The first bot (the court's scribe) listens to every conversation with a royal, including what
+the other courtiers answer, and once it pauses asks a model, in the background, to write down
+everything new: favourite things, wishes, stories and the names in them, what was built, the roles
+the family gave the courtiers and what they promised. Facts are stored per person and per
+courtier in `.state/memory.json` (git-ignored), shared by every bot; each prompt shows the latest
+ones and older ones that fit the talk. You can read or edit that file by hand, even while the bots
+are running: they reload it when it changes.
 
-Real-world personal information (age, school, address, real names and the like) is never
-stored: the extraction prompt forbids it and a filter in code drops anything that slips through.
+What the family tells about real life (age, school, family and the like) is kept too, marked
+`"private": true`, and only goes into a bot's prompt while nobody outside the royal family is
+online, so a visiting player never reads it in chat. Passwords and login details are never
+stored. The bots never ask for personal information.
 `OLLAMA_MEMORY_MODEL` picks the extraction model (default: the chat model); it never delays a
 reply. The example uses gemma4:31b, the overlord's model, so the court only ever loads two models.
 It is shared with other programs: used with the context it is loaded with (or the server's

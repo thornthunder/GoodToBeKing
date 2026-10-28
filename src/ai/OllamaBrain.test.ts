@@ -400,6 +400,64 @@ describe('OllamaBrain court behaviour', () => {
     expect(prompt).toContain("About yourself:\n- Merlin's bed should be purple.")
   })
 
+  it('writes down a whole exchange, with the answer another courtier gave', async () => {
+    const memory = new CourtMemory()
+    const isExtraction = (messages: ChatMessage[]) =>
+      messages[0].content.startsWith('You keep the long-term memory')
+    const { brain, calls } = makeBrain(
+      () =>
+        JSON.stringify({
+          facts: [
+            {
+              about: 'Bruce',
+              fact: "Bruce is the godfather of the Princess's baby, Luna.",
+              private: false,
+            },
+            { about: 'the Princess', fact: "The Princess's baby is called Luna.", private: false },
+          ],
+        }),
+      {},
+      new HailLog(),
+      { memory, learns: true, staff: [{ name: 'Bruce', role: 'guard', canBuild: false }] }
+    )
+    const floorTaken = { ...ctx('LittleOne42'), mayReply: false }
+    await brain.onChat(
+      chat('LittleOne42', 'bruce you are the godfather of my baby luna'),
+      floorTaken
+    )
+    brain.onCourtLine(chat('Bruce', 'It would be my honour, Your Highness.'))
+    brain.onCourtLine(chat('Stranger', 'Not a courtier.'))
+    await brain.settled()
+
+    const extraction = calls.filter(isExtraction)
+    expect(extraction).toHaveLength(1)
+    const asked = extraction[0][1].content ?? ''
+    expect(asked).toContain('LittleOne42 (the Princess): bruce you are the godfather')
+    expect(asked).toContain('Bruce: It would be my honour')
+    expect(asked).not.toContain('Not a courtier')
+    expect(memory.facts('Bruce')).toEqual(["Bruce is the godfather of the Princess's baby, Luna."])
+    // Merlin knows it too: his fellows' facts are in his prompt.
+    expect(brain.systemPrompt(ctx('LittleOne42'))).toContain(
+      "About Bruce:\n- Bruce is the godfather of the Princess's baby, Luna."
+    )
+  })
+
+  it('keeps real-life facts out of the prompt while a guest is online', () => {
+    const memory = new CourtMemory()
+    memory.add('LittleOne42', [
+      { text: 'The Princess has a big brother called Sam.', private: true },
+      'The Princess loves magenta.',
+    ])
+    const { brain } = makeBrain('unused', {}, new HailLog(), { memory })
+    const family = brain.systemPrompt(ctx('LittleOne42', 'BigDad'))
+    expect(family).toContain('- The Princess has a big brother called Sam. (private)')
+    expect(family).toContain('Facts marked (private) are about real life')
+    const withGuest = brain.systemPrompt(ctx('LittleOne42', 'Stranger'))
+    expect(withGuest).toContain('- The Princess loves magenta.')
+    expect(withGuest).not.toContain('Sam')
+    expect(withGuest).not.toContain('(private)')
+  })
+
   it('does not learn when it is not the scribe, or from guests', async () => {
     const memory = new CourtMemory()
     const { brain: notScribe, model: m1 } = makeBrain('Hi.', {}, new HailLog(), { memory })
@@ -428,7 +486,7 @@ describe('OllamaBrain court behaviour', () => {
     expect(prompt).toContain('LittleOne42 is the Princess')
     expect(prompt).toContain('the Princess (LittleOne42), 12 blocks away')
     expect(prompt).toContain('suitable for a young child')
-    expect(prompt).toContain('Never ask for or repeat personal information')
+    expect(prompt).toContain('Never ask anyone for personal information')
     expect(prompt).not.toMatch(/\n\n\n/)
   })
 })

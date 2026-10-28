@@ -69,6 +69,8 @@ export interface Brain {
   onPlayerJoin(player: string, ctx: BrainContext): Promise<string | null>
   /** Called for every player chat line the bot did not author itself. */
   onChat(event: ChatEvent, ctx: BrainContext): Promise<BrainReply | null>
+  /** Called when a fellow bot of the court says something (never answered: only listened to). */
+  onCourtLine?(event: ChatEvent): void
   /** Called for translated server notices (deaths, sleeping, achievements, ...). */
   onNotice(event: ChatEvent, ctx: BrainContext): Promise<string | null>
   /** Called once when the bot cannot find a way to the player it is following or walking to. */

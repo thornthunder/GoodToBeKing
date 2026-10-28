@@ -93,10 +93,15 @@ Windows, killing a background `npx` shell does not kill its node children at all
   adds a one-off note next to the request, and replaces replies that promise them anyway.
   Remove an ability from this file when it becomes real.
 - `ai/HailLog.ts`: last hail time per player, file-backed in `.state/<bot>.hails.json`.
-- `ai/CourtMemory.ts`: long-term facts per subject in `.state/memory.json`, shared by all bots.
-  Only the first bot (`learns: true`) extracts facts, after each royal exchange, in the
-  background, using `OLLAMA_MEMORY_MODEL` with a JSON schema. `isPersonalInfo` drops
-  real-world personal details in code regardless of what the model returns. The memory model
+- `ai/CourtMemory.ts`: long-term facts per subject (royals and every courtier) in
+  `.state/memory.json`, shared by all bots, up to 400 each. Only the first bot (`learns: true`),
+  the scribe, extracts them: it hears royal lines and, while a royal is talking, the other
+  courtiers' lines (`Brain.onCourtLine`), and writes each conversation down once it pauses for
+  15 s (at most 90 s), in the background, with `OLLAMA_MEMORY_MODEL` and a JSON schema. The family
+  asked for as much as possible, real life included: real-life facts are kept as `private`
+  (model flag or `isPersonalInfo`) and go into a prompt only while nobody but the royal family is
+  online; `isSecret` (passwords, PINs, logins) is never stored. Prompts show each subject's
+  latest facts plus older ones sharing words with the talk (`recall`). The memory model
   is the overlord's gemma4:31b, asked for as shared (`ChatOptions.shared`), with a 10 minute
   timeout for a cold load; if it does not answer, the chat model extracts.
 - `bot/language.ts`: Bedrock language strings from minecraft-data; translates notice keys and
