@@ -3,7 +3,14 @@ import { describe, expect, it } from 'vitest'
 import type { CastleDesign } from '../build/design'
 import { Magic, type CommandResult } from './Magic'
 import { castlePlaces } from './places'
-import { BUILTIN_SPELLS, commandsFor, cooldownOf, spellProblems, type Spell } from './spells'
+import {
+  BUILTIN_SPELLS,
+  commandsFor,
+  cooldownOf,
+  spellProblems,
+  tidySteps,
+  type Spell,
+} from './spells'
 
 const spell = (id: string): Spell => BUILTIN_SPELLS.find((s) => s.id === id)!
 const ctx = {
@@ -57,9 +64,10 @@ describe('spells', () => {
       undo: ['clear "LittleOne42" cake -1 1'],
     })
     const [find, saddle] = commandsFor(spell('saddle'), ctx)
-    expect(find.command).toContain('quantity=0}] add merlin_gift_7')
+    expect(find.command).toContain('hasitem={item=saddle,quantity=0}] add merlin_gift_7')
     expect(saddle.undo).toEqual([
-      'replaceitem entity @e[tag=merlin_gift_7] slot.saddle 0 air',
+      'replaceitem entity @e[tag=merlin_gift_7] slot.inventory 0 air',
+      'event entity @e[tag=merlin_gift_7] minecraft:horse_unsaddled',
       'tag @e[tag=merlin_gift_7] remove merlin_gift_7',
     ])
   })
@@ -70,6 +78,26 @@ describe('spells', () => {
     expect(cooldownOf(spell('heal'))).toBe(2 * 60_000)
     expect(cooldownOf(spell('gift'))).toBe(10 * 60_000)
     expect(cooldownOf(spell('fireworks'))).toBe(30_000)
+  })
+
+  it('tidies a spell the model squeezed into one step', () => {
+    // As gemma4:31b wrote Starfall: three fireworks with a twinkle, all in one summon step.
+    const steps = tidySteps([
+      {
+        kind: 'summon',
+        creature: 'fireworks_rocket',
+        count: 3,
+        particle: 'minecraft:heart_particle',
+        sound: 'firework.twinkle',
+        item: 'firework_rocket',
+      },
+    ])
+    expect(steps).toEqual([
+      { kind: 'summon', at: 'target', count: 3, creature: 'fireworks_rocket' },
+      { kind: 'particle', particle: 'minecraft:heart_particle', at: 'target' },
+      { kind: 'sound', sound: 'firework.twinkle', at: 'target' },
+    ])
+    expect(spellProblems(steps)).toEqual([])
   })
 
   it('checks a taught spell against the allowlists', () => {
@@ -124,6 +152,22 @@ describe('the magic keeper', () => {
     expect(result.reason).toContain('commands.generic.disabled')
     const saddle = await magic.cast(spell('saddle'), {}, who, refused)
     expect(saddle.reason).toContain('no horse without a saddle')
+
+    // The horse was found and marked, but would not take the saddle (a wild horse).
+    const ran: string[] = []
+    const wild = async (command: string): Promise<CommandResult> => {
+      ran.push(command)
+      return {
+        ok:
+          !command.startsWith('replaceitem entity @e[tag=merlin_gift_') || command.endsWith('air'),
+        count: 1,
+        output: [],
+      }
+    }
+    const untamed = await magic.cast(spell('saddle'), {}, who, wild)
+    expect(untamed.reason).toBe('the horse next to LittleOne42 is not tame yet')
+    expect(ran.at(-1)).toMatch(/^tag @e\[tag=merlin_gift_\d+\] remove/)
+    expect(magic.pendingGifts).toHaveLength(0)
   })
 
   it('learns a spell with a fixed place, under a name of its own', () => {

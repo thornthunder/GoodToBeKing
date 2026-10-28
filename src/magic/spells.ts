@@ -482,12 +482,15 @@ export function commandsFor(spell: Spell, ctx: CastContext): Cast[] {
         for (const who of whom(step.who)) {
           const find =
             `execute at ${q(who)} run tag @e[type=horse,r=8,c=1,` +
-            `hasitem={item=saddle,location=slot.saddle,quantity=0}] add ${tag}`
+            `hasitem={item=saddle,quantity=0}] add ${tag}`
           out.push({ command: find, mustFind: tag })
           out.push({
             command: `replaceitem entity @e[tag=${tag}] slot.saddle 0 saddle`,
             undo: [
-              `replaceitem entity @e[tag=${tag}] slot.saddle 0 air`,
+              // A horse keeps its saddle in slot 0 of its own inventory, and stays saddled until
+              // the game's own event says otherwise (emptying "slot.saddle" does neither).
+              `replaceitem entity @e[tag=${tag}] slot.inventory 0 air`,
+              `event entity @e[tag=${tag}] minecraft:horse_unsaddled`,
               `tag @e[tag=${tag}] remove ${tag}`,
             ],
           })
@@ -513,4 +516,53 @@ export function stepGuide(): string[] {
     '- saddle {who}: a magic saddle on their horse, fading after a day',
     '"target" is the one the spell is cast on, "requester" the one who asks for it.',
   ]
+}
+
+/**
+ * Tidy the steps of a spell the King describes, as the model wrote them: one thing per step (a
+ * sound or a sparkle written onto another step becomes a step of its own), only the fields each
+ * kind has, and "the one it is cast on" wherever whom or where was left out.
+ */
+export function tidySteps(raw: unknown): unknown[] {
+  if (!Array.isArray(raw)) return []
+  const out: unknown[] = []
+  for (const r of raw) {
+    if (typeof r !== 'object' || r === null) continue
+    const s = r as Record<string, unknown>
+    const who = typeof s.who === 'string' ? s.who : typeof s.at === 'string' ? s.at : 'target'
+    const pick = (keys: string[]) =>
+      Object.fromEntries(keys.filter((k) => s[k] !== undefined).map((k) => [k, s[k]]))
+    switch (s.kind) {
+      case 'teleport':
+        out.push({ kind: 'teleport', who, to: s.to ?? 'requester' })
+        break
+      case 'effect':
+        out.push({ kind: 'effect', who, ...pick(['effect', 'seconds', 'amplifier']) })
+        break
+      case 'weather':
+        out.push({ kind: 'weather', ...pick(['weather']) })
+        break
+      case 'time':
+        out.push({ kind: 'time', ...pick(['time']) })
+        break
+      case 'summon':
+        out.push({ kind: 'summon', at: who, count: s.count ?? 1, ...pick(['creature']) })
+        break
+      case 'give':
+        out.push({ kind: 'give', who, count: s.count ?? 1, ...pick(['item']) })
+        break
+      case 'saddle':
+        out.push({ kind: 'saddle', who })
+        break
+      case 'particle':
+      case 'sound':
+        break // added below, from their own fields
+      default:
+        out.push({ kind: s.kind })
+    }
+    if (typeof s.particle === 'string')
+      out.push({ kind: 'particle', particle: s.particle, at: who })
+    if (typeof s.sound === 'string') out.push({ kind: 'sound', sound: s.sound, at: who })
+  }
+  return out
 }

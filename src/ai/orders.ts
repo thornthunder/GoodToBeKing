@@ -238,8 +238,8 @@ export interface Reading {
   clashes: string[]
   /** For a release: the ids of the standing orders it ends. */
   releases: string[]
-  /** For a request for magic: which spell, on whom, and what it needs. */
-  spell?: SpellRequest
+  /** For a request for magic: which spells, in order, on whom, and what each needs. */
+  spells?: SpellRequest[]
   /** For a spell the King teaches: its name, what it does, and its steps. */
   teach?: { name: string; does: string; steps: unknown[] }
 }
@@ -254,17 +254,21 @@ export function readingSchema(magic?: MagicInfo): object {
     properties: {
       ...READING_SCHEMA.properties,
       type: { type: 'string', enum: ['order', 'rule', 'release', 'teach', 'none'] },
-      spell: {
-        type: 'object',
-        properties: {
-          id: { type: 'string', enum: [...magic.spells.map((s) => s.id), 'unknown'] },
-          target: text,
-          place: text,
-          item: text,
-          creature: text,
-          effect: text,
+      spells: {
+        type: 'array',
+        maxItems: 3,
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', enum: [...magic.spells.map((s) => s.id), 'unknown'] },
+            target: text,
+            place: text,
+            item: text,
+            creature: text,
+            effect: text,
+          },
+          required: ['id'],
         },
-        required: ['id'],
       },
       teach: {
         type: 'object',
@@ -352,16 +356,19 @@ export function readingPrompt(bot: string, role: string, magic?: MagicInfo): str
   ]
   if (magic) {
     lines.push(
-      `${bot} works magic. A request for one of these spells is an "order" that is not lasting,`,
-      'with "spell" filled in:',
+      `${bot} works magic. A request for one or more of these spells is an "order" that is not`,
+      'lasting, with "spells" listing each spell to cast in the order asked (at most three). To',
+      'send two people somewhere, list the spell once for each of them:',
       ...magic.spells.map(
         (s) => `- ${s.id}: ${s.does}${s.needs.length ? ` [needs: ${s.needs.join(', ')}]` : ''}`
       ),
-      'spell.target: whom it is cast on: "speaker" when that is the one speaking or nobody else is',
-      '  named; otherwise the name or title of the one named, such as "the King" or "Bruce".',
-      `spell.place, for a spell that needs one, exactly as written here: ${magic.places.join('; ')}.`,
-      'spell.item, spell.creature, spell.effect: for a spell that needs them, as its line lists.',
-      'A request for magic that is none of these spells is an "order" with spell.id "unknown".',
+      'target: whom the spell is cast on: "speaker" for the one speaking (also when nobody else is',
+      `  named), "${bot}" for ${bot} himself, otherwise the name or title of the one named, such as`,
+      '  "the King" or "Bruce".',
+      `place, for a spell that needs one, exactly as written here: ${magic.places.join('; ')}.`,
+      'item, creature, effect: for a spell that needs them, as its line lists.',
+      'A request for magic that none of these spells can do is an "order" with one spell of id',
+      '"unknown".',
       `The King may teach ${bot} a new spell by describing it. Then the type is "teach", and`,
       '"teach" holds its name, what it does, and its steps, built only from these kinds:',
       ...magic.guide

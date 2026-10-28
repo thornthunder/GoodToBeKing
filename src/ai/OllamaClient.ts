@@ -25,6 +25,12 @@ export interface ChatOptions {
   /** Overrides the configured timeout for this request (a cold big model takes a while). */
   timeoutMs?: number
   /**
+   * Place in this program's queue for a shared model (default "normal"): "urgent" (someone is
+   * waiting for the answer) goes first and cuts a "background" request short, which then starts
+   * again from the back of the queue.
+   */
+  priority?: Priority
+  /**
    * Stream the answer and join it up. Needed for answers that take minutes: without streaming,
    * Node's fetch gives up when no response headers arrive within five minutes.
    */
@@ -43,8 +49,59 @@ export interface ChatModel {
   chat(messages: ChatMessage[], opts?: ChatOptions): Promise<ChatResponse>
 }
 
-/** Per request: a timeout overriding the configured one (ChatOptions.timeoutMs). */
-const requestTimeout = new AsyncLocalStorage<number>()
+export type Priority = 'urgent' | 'normal' | 'background'
+
+/** Per request: a timeout overriding the configured one, and a signal that cuts it short. */
+const requestContext = new AsyncLocalStorage<{ timeoutMs?: number; signal?: AbortSignal }>()
+
+const RANK: Record<Priority, number> = { urgent: 0, normal: 1, background: 2 }
+
+/**
+ * This program's requests to one shared model, one at a time and the most urgent first. Ollama
+ * serves its own queue in order of arrival, so without this a royal's line waited behind every
+ * memory extraction the court had started; now it waits for at most one other urgent request,
+ * and a background request in its way is stopped and run again afterwards.
+ */
+export class ModelQueue {
+  private running?: { priority: Priority; abort: AbortController }
+  private waiting: Array<{ priority: Priority; start: () => void }> = []
+
+  async run<T>(priority: Priority, task: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    for (;;) {
+      await this.turn(priority)
+      const abort = new AbortController()
+      this.running = { priority, abort }
+      try {
+        return await task(abort.signal)
+      } catch (err) {
+        if (!(priority === 'background' && abort.signal.aborted)) throw err
+        // Cut short for something urgent: queue again.
+      } finally {
+        this.running = undefined
+        this.waiting.shift()?.start()
+      }
+    }
+  }
+
+  private turn(priority: Priority): Promise<void> {
+    if (!this.running && this.waiting.length === 0) return Promise.resolve()
+    if (priority === 'urgent' && this.running?.priority === 'background') this.running.abort.abort()
+    return new Promise((start) => {
+      const entry = { priority, start }
+      const before = this.waiting.findIndex((w) => RANK[w.priority] > RANK[priority])
+      if (before < 0) this.waiting.push(entry)
+      else this.waiting.splice(before, 0, entry)
+    })
+  }
+}
+
+/** One queue per shared model on a server, for the whole program (every bot's client). */
+const queues = new Map<string, ModelQueue>()
+function queueFor(key: string): ModelQueue {
+  let queue = queues.get(key)
+  if (!queue) queues.set(key, (queue = new ModelQueue()))
+  return queue
+}
 
 /** Thin wrapper around the Ollama HTTP client with timeouts, defaults and logging. */
 export class OllamaClient implements ChatModel {
@@ -61,11 +118,14 @@ export class OllamaClient implements ChatModel {
     const timeoutMs = cfg.timeoutMs
     this.ollama = new Ollama({
       host: cfg.host,
-      fetch: (input, init) =>
-        fetch(input, {
+      fetch: (input, init) => {
+        const ctx = requestContext.getStore()
+        const timeout = AbortSignal.timeout(ctx?.timeoutMs ?? timeoutMs)
+        return fetch(input, {
           ...init,
-          signal: AbortSignal.timeout(requestTimeout.getStore() ?? timeoutMs),
-        }),
+          signal: ctx?.signal ? AbortSignal.any([timeout, ctx.signal]) : timeout,
+        })
+      },
     })
   }
 
@@ -82,7 +142,12 @@ export class OllamaClient implements ChatModel {
       return await this.send(messages, opts, model, load)
     } catch (err) {
       this.log.info(`${model} did not answer (${errMsg(err)}): asking ${this.cfg.model}`)
-      return this.send(messages, { ...opts, timeoutMs: undefined }, this.cfg.model, this.cfg)
+      return this.send(
+        messages,
+        { ...opts, timeoutMs: undefined, shared: false },
+        this.cfg.model,
+        this.cfg
+      )
     }
   }
 
@@ -130,7 +195,12 @@ export class OllamaClient implements ChatModel {
 
     const started = Date.now()
     const call = () => (opts.stream ? this.streamed(request) : this.ollama.chat(request))
-    const response = opts.timeoutMs ? await requestTimeout.run(opts.timeoutMs, call) : await call()
+    const attempt = (signal?: AbortSignal) =>
+      requestContext.run({ timeoutMs: opts.timeoutMs, signal }, call)
+    // Our requests to a shared model take turns, the most urgent first (see ModelQueue).
+    const response = opts.shared
+      ? await queueFor(`${this.cfg.host}|${model}`).run(opts.priority ?? 'normal', attempt)
+      : await attempt()
     const ms = Date.now() - started
     this.log.debug(
       `chat(${model}) ${ms}ms, prompt=${response.prompt_eval_count ?? '?'} tokens, ` +

@@ -51,8 +51,10 @@ Write a line to a file named `.command` in the project root (checked every secon
 `<bot> build <blueprint> x y z [for <player>]`, `<bot> resume <blueprint> x y z [turns N]`,
 `<bot> undo`, and for the court's building works `works status|pause|resume`,
 `works start <design.json>` and `works plan` (the overlord designs the next castle now). For
-magic: `Merlin cast <spell> [on <who>] [to <place>] [item <x>] [creature <x>] [for <player>]` and
-`Merlin spells` (logs spells, places and gifts still to fade).
+magic: `Merlin cast <spell> [on <who>] [to <place>] [item <x>] [creature <x>] [for <player>]`,
+`Merlin spells` (logs spells, places and gifts still to fade), `Merlin fade` (takes every gift
+back now) and, as a developer tool, `Merlin run <command>` (a raw command as Merlin; only this
+machine writes the command file).
 
 ### Stopping a running app
 
@@ -137,6 +139,15 @@ Windows, killing a background `npx` shell does not kill its node children at all
   room of the castles built and being built. Spells only for royals and courtiers, never on a
   royal who outranks the one asking; only the King teaches a spell, and Merlin learns it after
   repeating it back and a "yes". `Bot.command` sends a command and waits for `command_output`.
+  One request can hold up to three spells, cast in order ("take us both to the castle and gather
+  the court" = portal, portal, gather). A taught spell is tidied first (`tidySteps`: one thing per
+  step, missing whom = the target).
+- Bedrock horses: a saddle can only go on a tame horse ("commands.generic.exception" otherwise);
+  `replaceitem ... slot.saddle 0 saddle` puts it on, but the saddle then lives in
+  `slot.inventory 0`, and the horse stays saddled until `event entity ... minecraft:horse_unsaddled`.
+  Emptying `slot.saddle` reports success and changes nothing; `hasitem` with
+  `location=slot.saddle` is unreliable, `hasitem={item=saddle,quantity=0}` works. Check a
+  horse's real state from a client: the `saddled` and `tamed` flags in its entity metadata.
 - `bot/ChatFloor.ts`: one bot answers each line (the one named, the one already talking with that
   player, or the herald: the first bot online, the Castellan first for guests). Only the herald
   hails and reacts to notices. Guards with `duty: escort` follow their royal when one is in sight.
@@ -198,6 +209,10 @@ Windows, killing a background `npx` shell does not kill its node children at all
   missing; until then his magic sleeps and he says so in character.
 - Building happens within `BUILD_RADIUS` (100) of `BUILD_CENTER` (105, 75, 122). The princess's
   house and the village paths lie south of the castle; never dig player-made blocks.
+- Requests to a shared model take turns inside this program (`ModelQueue` in OllamaClient):
+  reading a royal's line is urgent and cuts a memory extraction short (it reruns afterwards), the
+  overlord is normal. Ollama serves its own queue in arrival order, so without this a royal waited
+  behind every extraction the court had started.
 - The court shares one Ollama server (48 GB of VRAM) with another program. The court loads only
   two models: gemma4:e4b for chat (`keep_alive` 24h) and gemma4:31b for memory and the
   overlord, which the other program uses now and then. gemma4:31b with the server's defaults

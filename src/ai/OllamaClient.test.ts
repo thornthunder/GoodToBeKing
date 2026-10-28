@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { OllamaConfig } from '../config'
-import { keepAliveSeconds, OllamaClient } from './OllamaClient'
+import { keepAliveSeconds, ModelQueue, OllamaClient } from './OllamaClient'
 
 const silent = {
   debug() {},
@@ -91,5 +91,50 @@ describe('keep-alive durations', () => {
     expect(keepAliveSeconds('300')).toBe(300)
     expect(keepAliveSeconds('-1m')).toBe(Infinity)
     expect(keepAliveSeconds(undefined)).toBe(300)
+  })
+})
+
+describe('the queue for a shared model', () => {
+  /** A task that takes `ms` and can be cut short. */
+  const task = (log: string[], name: string, ms: number) => (signal: AbortSignal) =>
+    new Promise<string>((resolve, reject) => {
+      log.push(`start ${name}`)
+      const timer = setTimeout(() => resolve(name), ms)
+      signal.addEventListener('abort', () => {
+        clearTimeout(timer)
+        log.push(`cut ${name}`)
+        reject(new Error('aborted'))
+      })
+    })
+
+  it('serves urgent requests first and cuts a background one short, then runs it again', async () => {
+    const queue = new ModelQueue()
+    const log: string[] = []
+    const memory = queue.run('background', task(log, 'memory', 50))
+    await new Promise((r) => setTimeout(r, 5))
+    const overlord = queue.run('normal', task(log, 'overlord', 10))
+    const reading = queue.run('urgent', task(log, 'reading', 10))
+    expect(await Promise.all([memory, overlord, reading])).toEqual([
+      'memory',
+      'overlord',
+      'reading',
+    ])
+    expect(log).toEqual([
+      'start memory',
+      'cut memory',
+      'start reading',
+      'start overlord',
+      'start memory',
+    ])
+  })
+
+  it('never cuts a normal request short', async () => {
+    const queue = new ModelQueue()
+    const log: string[] = []
+    const overlord = queue.run('normal', task(log, 'overlord', 30))
+    await new Promise((r) => setTimeout(r, 5))
+    const reading = queue.run('urgent', task(log, 'reading', 5))
+    await Promise.all([overlord, reading])
+    expect(log).toEqual(['start overlord', 'start reading'])
   })
 })

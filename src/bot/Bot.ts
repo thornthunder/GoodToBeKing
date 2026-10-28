@@ -226,32 +226,36 @@ export class Bot extends EventEmitter {
     this.watchMagic()
   }
 
-  /** Work a spell a royal asked for; if the server refuses it, say so. */
+  /** Work the spells a royal asked for, in order; if the server refuses one, say so and stop. */
   private async castSpell(action: Extract<BotAction, { type: 'cast' }>): Promise<void> {
     const magic = this.magic
-    const spell = magic?.find(action.spell)
-    if (!magic || !spell) return
-    this.log.info(`casting ${spell.name} on ${action.target} for ${action.requestedBy}`)
-    const result = await magic.cast(
-      spell,
-      action.args,
-      { requester: action.requestedBy, target: action.target, merlin: this.username },
-      (command) => this.command(command)
-    )
-    if (result.ok) return
-    this.log.warn(`${spell.name} failed: ${result.reason}`)
-    // Refused for want of rights: the magic sleeps until someone types "op Merlin" again.
-    if (result.reason?.includes('commands.generic.error.permissions')) {
-      this.log.warn(`magic is asleep: type "op ${this.username}" in the server console`)
-      this.magic!.available = false
-      this.lastMagicCheck = Date.now()
+    if (!magic) return
+    for (const one of action.casts) {
+      const spell = magic.find(one.spell)
+      if (!spell) continue
+      this.log.info(`casting ${spell.name} on ${one.target} for ${action.requestedBy}`)
+      const result = await magic.cast(
+        spell,
+        one.args,
+        { requester: action.requestedBy, target: one.target, merlin: this.username },
+        (command) => this.command(command)
+      )
+      if (result.ok) continue
+      this.log.warn(`${spell.name} failed: ${result.reason}`)
+      // Refused for want of rights: the magic sleeps until someone types "op Merlin" again.
+      if (result.reason?.includes('commands.generic.error.permissions')) {
+        this.log.warn(`magic is asleep: type "op ${this.username}" in the server console`)
+        magic.available = false
+        this.lastMagicCheck = Date.now()
+      }
+      const who = this.court?.find(action.requestedBy)
+      await this.speak(
+        `Your spell ${spell.name} did not work (${result.reason}). Tell ${who ? `the ${who.title}` : action.requestedBy} ` +
+          'so in one short sentence, kindly and in character.',
+        `Alas, my ${spell.name} spell fizzled.`
+      )
+      return
     }
-    const who = this.court?.find(action.requestedBy)
-    await this.speak(
-      `Your spell ${spell.name} did not work (${result.reason}). Tell ${who ? `the ${who.title}` : action.requestedBy} ` +
-        'so in one short sentence, kindly and in character.',
-      `Alas, my ${spell.name} spell fizzled.`
-    )
   }
 
   /** Cast a spell from the command file (for testing), checking it like a royal's request. */
@@ -263,7 +267,11 @@ export class Bot extends EventEmitter {
     if (!this.magic || !spell) return void this.log.warn(`no such spell: ${id}`)
     const problem = this.magic.check(spell, opts.args)
     if (problem) return void this.log.warn(`cannot cast ${spell.name}: ${problem}`)
-    await this.castSpell({ type: 'cast', spell: spell.id, ...opts })
+    await this.castSpell({
+      type: 'cast',
+      casts: [{ spell: spell.id, args: opts.args, target: opts.target }],
+      requestedBy: opts.requestedBy,
+    })
   }
 
   /** Log the spells and places this bot knows (command file: "<bot> spells"). */

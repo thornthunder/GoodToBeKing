@@ -187,6 +187,10 @@ export class Magic {
       if (!result.ok) {
         if (cast.mustFind)
           return { ok: false, reason: `there is no horse without a saddle near ${who.target}` }
+        // Undo what this step began (the mark on the horse), as far as it went.
+        for (const undo of cast.undo ?? []) await run(undo)
+        if (cast.command.includes('slot.saddle'))
+          return { ok: false, reason: `the horse next to ${who.target} is not tame yet` }
         return {
           ok: false,
           reason: `the server refused "${cast.command}": ${result.output.join('; ')}`,

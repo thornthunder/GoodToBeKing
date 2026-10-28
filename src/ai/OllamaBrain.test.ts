@@ -673,7 +673,7 @@ describe('OllamaBrain court behaviour', () => {
     it('casts a spell a royal asks for, and says when its magic is still gathering', async () => {
       const magic = new Magic()
       const { brain, calls, readings } = makeBrain('Behold!', {}, new HailLog(), { magic })
-      const sparkles = { spell: { id: 'sparkles', target: 'speaker' }, lasting: false }
+      const sparkles = { spells: [{ id: 'sparkles', target: 'speaker' }], lasting: false }
       readings.push(order('Cast sparkles on the Princess.', sparkles))
       const reply = await brain.onChat(
         chat('LittleOne42', 'merlin make sparkles'),
@@ -681,12 +681,12 @@ describe('OllamaBrain court behaviour', () => {
       )
       expect(reply?.action).toEqual({
         type: 'cast',
-        spell: 'sparkles',
-        args: {},
-        target: 'LittleOne42',
+        casts: [{ spell: 'sparkles', args: {}, target: 'LittleOne42' }],
         requestedBy: 'LittleOne42',
       })
-      expect(calls[0].at(-1)?.content).toContain('You cast Sparkles now')
+      expect(calls[0].at(-1)?.content).toContain(
+        'You cast now, in this order: Sparkles on the Princess'
+      )
       expect(brain.systemPrompt(ctx('LittleOne42'))).toContain('- You work magic: Blink, Summoning')
 
       const ok = async () => ({ ok: true, count: 1, output: [] })
@@ -699,17 +699,54 @@ describe('OllamaBrain court behaviour', () => {
       expect(calls[1].at(-1)?.content).toContain('still gathering')
     })
 
+    it('casts several spells in the order asked: both of us to the castle, then the court', async () => {
+      const { brain, calls, readings } = makeBrain('Hold on!', {}, new HailLog(), {
+        magic: new Magic({
+          places: () => [{ name: 'the great hall of the Great Castle', x: 1, y: 2, z: 3 }],
+        }),
+      })
+      const hall = 'the great hall of the Great Castle'
+      readings.push(
+        order('Take the King and Merlin to the castle, then gather the court.', {
+          lasting: false,
+          spells: [
+            { id: 'portal', target: 'speaker', place: hall },
+            { id: 'portal', target: 'Merlin', place: hall },
+            { id: 'gather', target: 'speaker' },
+          ],
+        })
+      )
+      const reply = await brain.onChat(
+        chat('BigDad', 'take us both to the castle and summon the court'),
+        ctx('BigDad')
+      )
+      expect(reply?.action).toEqual({
+        type: 'cast',
+        casts: [
+          { spell: 'portal', args: { place: hall }, target: 'BigDad' },
+          { spell: 'portal', args: { place: hall }, target: 'Merlin' },
+          { spell: 'gather', args: {}, target: 'BigDad' },
+        ],
+        requestedBy: 'BigDad',
+      })
+      const note = calls[0].at(-1)?.content ?? ''
+      expect(note).toContain('Portal on the King (to the great hall of the Great Castle)')
+      expect(note).toContain('Portal on yourself')
+    })
+
     it('will not work magic on a royal who outranks the one asking', async () => {
       const { brain, calls, readings } = makeBrain('Alas.', {}, new HailLog(), {
         magic: new Magic(),
       })
-      readings.push(order('Make the King float.', { spell: { id: 'float', target: 'the King' } }))
+      readings.push(
+        order('Make the King float.', { spells: [{ id: 'float', target: 'the King' }] })
+      )
       const reply = await brain.onChat(
         chat('LittleOne42', 'merlin make daddy float'),
         ctx('LittleOne42')
       )
       expect(reply?.action).toBeUndefined()
-      expect(calls[0].at(-1)?.content).toContain('outranks them')
+      expect(calls[0].at(-1)?.content).toContain('outranks the Princess, and needs their own wish')
     })
 
     it('learns a spell the King teaches once he confirms it, and only from the King', async () => {

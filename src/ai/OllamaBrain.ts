@@ -41,7 +41,7 @@ import {
   type Reading,
 } from './orders'
 import type { Magic } from '../magic/Magic'
-import { needs, stepGuide, type Step } from '../magic/spells'
+import { needs, stepGuide, tidySteps, type SpellArgs, type Step } from '../magic/spells'
 import { guessedRiddle, pickRiddle, wantsRiddle, type Riddle } from './riddles'
 import { HailLog } from './HailLog'
 import type { ChatMessage, ChatModel } from './OllamaClient'
@@ -461,6 +461,7 @@ export class OllamaBrain implements Brain {
       }
     }
     const teach = reading.teach
+    if (teach) teach.steps = tidySteps(teach.steps)
     const problems = teach?.name ? magic.problems(teach.steps) : ['no spell was described']
     if (!teach || problems.length) {
       return {
@@ -480,42 +481,16 @@ export class OllamaBrain implements Brain {
   }
 
   /** A royal asks for a spell: check whom it is for, what it needs and whether it is ready. */
+  /**
+   * A royal asks for one or more spells (cast in the order asked): check whom each is for, what
+   * it needs and whether it is ready. Those that can be cast are; the note says what was cast and
+   * why the others were not.
+   */
   private spellTurn(member: CourtMember, reading: Reading): Turn {
     const magic = this.magic
-    const request = reading.spell
-    if (!magic || !request) return { note: '' }
+    const requests = reading.spells ?? []
+    if (!magic || requests.length === 0) return { note: '' }
     const giver = `the ${member.title}`
-    const spell = request.id === 'unknown' ? undefined : magic.find(request.id)
-    if (!spell) {
-      return {
-        note:
-          `(You know no such spell. Say so kindly and offer one you know: ` +
-          `${magic
-            .spells()
-            .map((s) => s.name)
-            .join(', ')}. The King can teach you new spells.)`,
-      }
-    }
-    const target = this.spellTarget(request.target, member)
-    if (!target) {
-      return {
-        note: `(You cannot tell whom to cast ${spell.name} on; you work magic only on the royal family and the court. Ask kindly.)`,
-      }
-    }
-    const onTarget = spell.steps.some(
-      (s) => ('who' in s && s.who === 'target') || ('at' in s && s.at === 'target')
-    )
-    if (onTarget && target !== member.player && this.rankOfGiver(target) > rankOf(member.role)) {
-      return {
-        note: `(${giver} asks you to cast ${spell.name} on someone who outranks them. Kindly decline: that needs their own wish.)`,
-      }
-    }
-    const args = {
-      place: request.place,
-      item: request.item,
-      creature: request.creature,
-      effect: request.effect,
-    }
     if (magic.available === false) {
       return {
         note:
@@ -524,26 +499,91 @@ export class OllamaBrain implements Brain {
           'speaking the words "op Merlin" at the heart of the server.)',
       }
     }
-    const problem = magic.check(spell, args)
-    if (problem)
-      return { note: `(You cannot cast ${spell.name} like that: ${problem}. Say so kindly.)` }
-    const wait = magic.wait(spell)
-    if (wait > 0) {
-      const minutes = Math.ceil(wait / 60_000)
-      return {
-        note: `(Your magic for ${spell.name} is still gathering: it is ready again in ${minutes} minute${minutes > 1 ? 's' : ''}. Say so kindly, in character.)`,
+    const casts: Array<{ spell: string; args: SpellArgs; target: string }> = []
+    const cast: string[] = []
+    const refused: string[] = []
+    for (const request of requests) {
+      const spell = request.id === 'unknown' ? undefined : magic.find(request.id)
+      if (!spell) {
+        refused.push(
+          `you know no such spell (you know: ${magic
+            .spells()
+            .map((s) => s.name)
+            .join(', ')}; the King can teach you new ones)`
+        )
+        continue
       }
+      const target = this.spellTarget(request.target, member)
+      if (!target) {
+        refused.push(
+          `${spell.name}: you cannot tell on whom; you work magic only on the royal family and the court`
+        )
+        continue
+      }
+      const onTarget = spell.steps.some(
+        (s) => ('who' in s && s.who === 'target') || ('at' in s && s.at === 'target')
+      )
+      if (onTarget && target !== member.player && this.rankOfGiver(target) > rankOf(member.role)) {
+        refused.push(
+          `${spell.name}: it is for someone who outranks ${giver}, and needs their own wish`
+        )
+        continue
+      }
+      const args: SpellArgs = {
+        place: request.place,
+        item: request.item,
+        creature: request.creature,
+        effect: request.effect,
+      }
+      const problem = magic.check(spell, args)
+      if (problem) {
+        refused.push(`${spell.name}: ${problem}`)
+        continue
+      }
+      const wait = magic.wait(spell)
+      if (wait > 0) {
+        const minutes = Math.ceil(wait / 60_000)
+        refused.push(
+          `${spell.name}: its magic is still gathering, ready again in ${minutes} minute${minutes > 1 ? 's' : ''}`
+        )
+        continue
+      }
+      casts.push({ spell: spell.id, args, target })
+      const on =
+        target === member.player
+          ? giver
+          : target === this.cfg.name
+            ? 'yourself'
+            : this.labelOf(target)
+      cast.push(`${spell.name} on ${on}${args.place ? ` (to ${args.place})` : ''}: ${spell.does}`)
     }
+    const notes = [
+      cast.length
+        ? `(You cast now, in this order: ${cast.join('; ')} Say so in one or two short, magical sentences, saying truly who goes where.)`
+        : '',
+      refused.length
+        ? `(You cannot cast ${cast.length ? 'the rest' : 'it'}: ${refused.join('; ')}. Say so kindly, in character.)`
+        : '',
+    ]
     return {
-      action: { type: 'cast', spell: spell.id, args, target, requestedBy: member.player },
-      note: `(You cast ${spell.name} now: ${spell.does} Say so in one short, magical sentence.)`,
+      ...(casts.length
+        ? { action: { type: 'cast' as const, casts, requestedBy: member.player } }
+        : {}),
+      note: join(...notes),
     }
+  }
+
+  /** "the King", or a courtier's name. */
+  private labelOf(player: string): string {
+    const member = this.court.find(player)
+    return member ? `the ${member.title}` : player
   }
 
   /** Whom a spell is for: the speaker, a royal by title or name, or a courtier. Never a guest. */
   private spellTarget(name: string | undefined, member: CourtMember): string | undefined {
     const raw = (name ?? '').trim()
-    if (!raw || /^(speaker|requester|me|myself|her|him|them|you)$/i.test(raw)) return member.player
+    if (!raw || /^(speaker|requester|me|myself|her|him|them|us)$/i.test(raw)) return member.player
+    if (/^(you|yourself)$/i.test(raw)) return this.cfg.name
     const key = raw.replace(/^the /i, '').toLowerCase()
     const royal = this.court.members.find(
       (m) => m.title.toLowerCase() === key || m.player.toLowerCase() === key
@@ -588,7 +628,7 @@ export class OllamaBrain implements Brain {
       }
     }
     // A spell is cast at once, never kept as a standing order.
-    if (reading.spell && this.magic) return this.spellTurn(member, reading)
+    if (reading.spells?.length && this.magic) return this.spellTurn(member, reading)
     const replaced = replaces.length ? `(It replaces ${this.describe(replaces)}.)` : ''
     this.orders.remove(replaces.filter((id) => id.startsWith('O')))
     if (reading.type === 'rule') {
@@ -659,7 +699,7 @@ export class OllamaBrain implements Brain {
           format: readingSchema(this.magicInfo()),
           temperature: 0,
           // A royal waits for the answer: if the big model is busy or cold, the chat model reads.
-          ...(model ? { model, shared: true, timeoutMs: 15_000 } : {}),
+          ...(model ? { model, shared: true, timeoutMs: 15_000, priority: 'urgent' as const } : {}),
         }
       )
       const reading = JSON.parse(response.message.content || '{}') as Reading
@@ -670,7 +710,7 @@ export class OllamaBrain implements Brain {
           : Boolean(this.orders.find(id) ?? this.rules.find(id))
       reading.clashes = (reading.clashes ?? []).filter(known)
       reading.releases = (reading.releases ?? []).filter(known)
-      if (reading.spell && typeof reading.spell.id !== 'string') delete reading.spell
+      reading.spells = (reading.spells ?? []).filter((r) => typeof r?.id === 'string').slice(0, 3)
       this.log.debug(`reading: ${JSON.stringify(reading)}`)
       return reading
     } catch (err) {
@@ -892,7 +932,12 @@ export class OllamaBrain implements Brain {
         // Shared with the overlord and other programs (see ChatOptions.shared). It may have to
         // be loaded first, and nobody waits for the answer.
         ...(this.cfg.ai.memoryModel
-          ? { model: this.cfg.ai.memoryModel, shared: true, timeoutMs: 10 * 60_000 }
+          ? {
+              model: this.cfg.ai.memoryModel,
+              shared: true,
+              timeoutMs: 10 * 60_000,
+              priority: 'background' as const,
+            }
           : {}),
       }
     )

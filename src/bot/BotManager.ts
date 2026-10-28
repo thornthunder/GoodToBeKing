@@ -462,6 +462,10 @@ export class BotManager {
         requestedBy,
         args: { place, item: after('item'), creature: after('creature'), effect: after('effect') },
       })
+    } else if (verb === 'run') {
+      // Developer tool: a raw server command as this bot. Only this machine writes the command
+      // file; the royals and the model never reach it.
+      void bot.command(words.slice(2).join(' '))
     } else if (verb === 'fade') {
       void bot.fadeGiftsNow()
     } else if (verb === 'spells') {
