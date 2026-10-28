@@ -78,7 +78,9 @@ file by hand, even while the bots are running: they reload it when it changes.
 
 Real-world personal information (age, school, address, real names and the like) is never
 stored: the extraction prompt forbids it and a filter in code drops anything that slips through.
-`OLLAMA_MEMORY_MODEL` picks the extraction model (default `gemma4:12b`); it never delays a reply.
+`OLLAMA_MEMORY_MODEL` picks the extraction model (default: the chat model); it never delays a
+reply. With `OLLAMA_MEMORY_BORROW=true` it is used only while another program keeps it loaded on
+the Ollama server, and the chat model extracts otherwise, so the court never loads a second model.
 
 ## Authentication
 

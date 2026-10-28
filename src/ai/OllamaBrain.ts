@@ -373,6 +373,7 @@ export class OllamaBrain implements Brain {
         format: factSchema(subjects.map((s) => s.label)),
         temperature: 0.2,
         model: this.cfg.ai.memoryModel,
+        borrow: this.cfg.ai.memoryBorrow,
       }
     )
     const parsed = JSON.parse(response.message.content || '{}') as {

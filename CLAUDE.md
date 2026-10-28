@@ -96,7 +96,9 @@ Windows, killing a background `npx` shell does not kill its node children at all
 - `ai/CourtMemory.ts`: long-term facts per subject in `.state/memory.json`, shared by all bots.
   Only the first bot (`learns: true`) extracts facts, after each royal exchange, in the
   background, using `OLLAMA_MEMORY_MODEL` with a JSON schema. `isPersonalInfo` drops
-  real-world personal details in code regardless of what the model returns.
+  real-world personal details in code regardless of what the model returns. With
+  `OLLAMA_MEMORY_BORROW` the memory model (gemma4:31b) is only borrowed while loaded
+  (`ChatOptions.borrow`); otherwise, or when it does not answer, the chat model extracts.
 - `bot/language.ts`: Bedrock language strings from minecraft-data; translates notice keys and
   keys inside parameters ("%entity.zombie.name"). `OllamaBrain.onNotice` reacts to royal
   deaths, sleeping and achievements with a per-person cooldown.
@@ -153,10 +155,11 @@ Windows, killing a background `npx` shell does not kill its node children at all
 - Building happens within `BUILD_RADIUS` (100) of `BUILD_CENTER` (105, 75, 122). The princess's
   house and the village paths lie south of the castle; never dig player-made blocks.
 - The court and the overlord share one Ollama server with a small GPU: the court's gemma4:e4b
-  must stay loaded (`keep_alive` 24h), and another program keeps gemma4:31b loaded with the
-  server's defaults (context 262144, 20.5 GB, all on the GPU, 32 tokens/s). The overlord uses
-  that model and borrows it as it is: asking for another `num_ctx` reloads it half on the CPU
-  (5 tokens/s) and pushes the other program's copy out. Never unload it.
+  must stay loaded (`keep_alive` 24h), and another program keeps gemma4:31b loaded while it
+  runs, with the server's defaults (context 262144, 20.5 GB, all on the GPU, 32 tokens/s). The
+  overlord and the memory extraction use that model and borrow it as it is: asking for another
+  `num_ctx` reloads it half on the CPU (5 tokens/s) and pushes the other program's copy out.
+  Never unload it. Only the overlord loads it when it is not there (for two minutes).
 
 ## Protocol notes (bedrock-protocol 3.60, Bedrock 1.26.x)
 

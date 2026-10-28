@@ -15,6 +15,12 @@ export interface ChatOptions {
   /** Overrides the configured model for this request. */
   model?: string
   /**
+   * Use `model` only while the server has it loaded already (another program keeps it), as it is
+   * loaded: same context and keep-alive, so it is neither reloaded nor kept longer. Otherwise, or
+   * when it does not answer, the configured model answers instead.
+   */
+  borrow?: boolean
+  /**
    * Stream the answer and join it up. Needed for answers that take minutes: without streaming,
    * Node's fetch gives up when no response headers arrive within five minutes.
    */
@@ -38,6 +44,8 @@ export class OllamaClient implements ChatModel {
   private readonly ollama: Ollama
   /** Per model: the `think` value to send by default (see resolveThink). */
   private readonly thinkDefaults = new Map<string, Promise<boolean | undefined>>()
+  /** Per borrowed model: whether it was loaded when last asked (to log only the changes). */
+  private readonly borrowed = new Map<string, boolean>()
 
   constructor(
     readonly cfg: OllamaConfig,
@@ -56,16 +64,43 @@ export class OllamaClient implements ChatModel {
 
   async chat(messages: ChatMessage[], opts: ChatOptions = {}): Promise<ChatResponse> {
     const model = opts.model ?? this.cfg.model
+    if (!opts.borrow || model === this.cfg.model) return this.send(messages, opts, model, this.cfg)
+    const held = await this.loaded(model)
+    if (this.borrowed.get(model) !== !!held) {
+      this.borrowed.set(model, !!held)
+      this.log.info(
+        held ? `${model} is loaded: borrowing it` : `${model} is not loaded: ${this.cfg.model} answers`
+      )
+    }
+    if (held) {
+      try {
+        return await this.send(messages, opts, model, {
+          numCtx: held.contextLength,
+          keepAlive: held.keepAlive,
+        })
+      } catch (err) {
+        this.log.info(`${model} did not answer (${errMsg(err)}): asking ${this.cfg.model}`)
+      }
+    }
+    return this.send(messages, opts, this.cfg.model, this.cfg)
+  }
+
+  private async send(
+    messages: ChatMessage[],
+    opts: ChatOptions,
+    model: string,
+    load: { numCtx?: number; keepAlive?: string }
+  ): Promise<ChatResponse> {
     const request: ChatRequest & { stream: false } = {
       model,
       messages,
       stream: false,
       options: {
         temperature: opts.temperature ?? this.cfg.temperature,
-        ...(this.cfg.numCtx !== undefined ? { num_ctx: this.cfg.numCtx } : {}),
+        ...(load.numCtx !== undefined ? { num_ctx: load.numCtx } : {}),
       },
     }
-    if (this.cfg.keepAlive) request.keep_alive = this.cfg.keepAlive
+    if (load.keepAlive) request.keep_alive = load.keepAlive
     if (opts.tools?.length) request.tools = opts.tools
     if (opts.format !== undefined) request.format = opts.format
     const think = opts.think ?? (await this.resolveThink(model))
