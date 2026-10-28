@@ -167,9 +167,16 @@ export class BotManager {
   /** Which designs the court has built and is building, kept in .state/court-works.json. */
   private courtWorks(): CourtWorks {
     try {
-      return JSON.parse(
+      const state = JSON.parse(
         fs.readFileSync(path.resolve(STATE_DIR, 'court-works.json'), 'utf8')
       ) as CourtWorks
+      // Written on Windows with backslashes; the court also runs on Linux (Docker on Ava).
+      const portable = (f: string) => f.replace(/\\/g, '/')
+      return {
+        ...state,
+        built: (state.built ?? []).map(portable),
+        current: state.current && portable(state.current),
+      }
     } catch {
       return { built: [] }
     }
@@ -343,7 +350,7 @@ export class BotManager {
         )
         return
       }
-      const file = path.join(STATE_DIR, 'designs', `${slug(result.design.name)}.json`)
+      const file = path.posix.join(STATE_DIR, 'designs', `${slug(result.design.name)}.json`)
       fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true })
       fs.writeFileSync(path.resolve(file), JSON.stringify(result.design, null, 2))
       this.log.info(

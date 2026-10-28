@@ -32,6 +32,28 @@ pinned versions and dependency patches in `pnpm-workspace.yaml`.
 Once a bot is in the world, say its name in chat (for example "hey Merlin") or whisper to it and
 it will answer. Set `BOT_RESPOND_TO_ALL=true` to make it react to every chat line.
 
+## Running in Docker (on the Ollama server)
+
+The court can run as a container on a Linux machine, next to Ollama. It uses the host's network:
+Nethernet is WebRTC over UDP, so there is no NAT between the bots and the game server, and Ollama
+answers at `http://localhost:11434`.
+
+```bash
+git clone --recurse-submodules <this repo> goodtobeking && cd goodtobeking
+# not in git: copy these over from the machine the court ran on before
+#   .env                (set OLLAMA_HOST=http://localhost:11434 there)
+#   config/court.json   (the royal family's player names)
+#   .state/             (memories, orders, works, magic; owned by uid 1000, the image's user)
+docker compose up -d --build     # build and start; it starts again after a reboot
+docker compose logs -f           # watch the court
+echo "works status" > .state/.command   # developer commands, as with the .command file
+docker compose stop              # every bot disconnects properly first
+```
+
+Stop the court anywhere else before starting it here: two courts with the same bot names kick
+each other off the server (`server_id_conflict`). The building tools run inside the container,
+for example `docker compose exec court node_modules/.bin/tsx scripts/survey-terrain.ts ...`.
+
 ## Walking
 
 The bots' bodies come from [mineflayer-bedrock](https://github.com/LiteLDev/bedboo) (the

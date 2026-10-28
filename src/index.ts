@@ -76,8 +76,9 @@ async function main(): Promise<void> {
   await manager.startAll()
 }
 
-const STOP_FILE = '.stop'
-const COMMAND_FILE = '.command'
+const STOP_FILE = process.env.STOP_FILE || '.stop'
+/** In Docker this lives in the mounted state folder, so the host can drop commands in. */
+const COMMAND_FILE = process.env.COMMAND_FILE || '.command'
 
 main().catch((err) => {
   console.error('fatal:', err)

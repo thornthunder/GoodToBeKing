@@ -1,0 +1,23 @@
+# The royal court on Ava. Copy .env, config/court.json and .state here first, then:
+#   docker compose up -d --build        start (or rebuild after a git pull)
+#   docker compose logs -f              watch the court
+#   docker compose stop                 every bot says goodbye properly
+services:
+  court:
+    build: .
+    image: goodtobeking-court
+    container_name: goodtobeking-court
+    restart: unless-stopped
+    # Nethernet is WebRTC over UDP: on the host's own network nothing stands between the bots and
+    # the game server, and Ollama answers at localhost.
+    network_mode: host
+    env_file: .env
+    environment:
+      # Developer commands: write a line to ./.state/.command on the host.
+      COMMAND_FILE: .state/.command
+    volumes:
+      - ./.state:/app/.state
+      - ./config/court.json:/app/config/court.json:ro
+      - /etc/localtime:/etc/localtime:ro
+    # Six bots disconnect one by one; a hard kill would leave their sessions on the server.
+    stop_grace_period: 60s

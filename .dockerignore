@@ -1,0 +1,12 @@
+# Never in the image: secrets, the royal family's names, runtime state, the server's files.
+**/.git
+**/node_modules
+dist
+.state
+.env
+.auth-cache
+config/court.json
+ServerFiles
+.command
+.stop
+*.log

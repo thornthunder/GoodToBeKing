@@ -57,6 +57,14 @@ magic: `Merlin cast <spell> [on <who>] [to <place>] [item <x>] [creature <x>] [f
 back now) and, as a developer tool, `Merlin run <command>` (a raw command as Merlin; only this
 machine writes the command file).
 
+### Docker (Ava)
+
+`Dockerfile` + `compose.yaml` run the court on a Linux host next to Ollama: host networking,
+`.env` as env file, `.state` and `config/court.json` mounted, `COMMAND_FILE=.state/.command`,
+`docker compose stop` sends SIGTERM (handled like `.stop`; grace 60 s). Paths stored in `.state`
+must be portable: `court-works.json` written on Windows had backslashes (`courtWorks()` turns
+them into `/`).
+
 ### Stopping a running app
 
 Create a file named `.stop` in the project root. The app checks for it every second, sends
