@@ -132,10 +132,10 @@ Windows, killing a background `npx` shell does not kill its node children at all
   worker answers (at most one exchange per 40 s, none within 90 s of a royal speaking).
 - `build/sites.ts` + `ai/Overlord.ts`: when the castle is finished and `WORKS_NEXT=overlord`, the
   bots survey what they can see for open natural ground (8 blocks clear of anything players
-  made), the overlord model (`OVERLORD_MODEL`, gemma4:26b) picks a site and writes a design,
+  made), the overlord model (`OVERLORD_MODEL`, gemma4:31b) picks a site and writes a design,
   which is validated and sent back with every problem until sound (6 rounds). The design is
   saved in `.state/designs/` and `.state/court-works.json` records what was built and what is
-  current. The overlord streams its answers and unloads its model afterwards. Rooms it counts
+  current. The overlord streams its answers and borrows its model as loaded (`overlordClient`). Rooms it counts
   from their building's own corner are read as meant (`normaliseRooms`); `courtProblems` adds
   a builder's review (rooms that fill their storeys, halls big enough, stables on the ground).
 
@@ -151,9 +151,10 @@ Windows, killing a background `npx` shell does not kill its node children at all
 - Building happens within `BUILD_RADIUS` (100) of `BUILD_CENTER` (105, 75, 122). The princess's
   house and the village paths lie south of the castle; never dig player-made blocks.
 - The court and the overlord share one Ollama server with a small GPU: the court's gemma4:e4b
-  must stay loaded (`keep_alive` 24h). A big model evicts it and the court's replies time out
-  (they fall back to fixed lines), so the overlord only runs between castles and unloads itself.
-  gemma4:31b runs half on the CPU there (5 tokens/s); gemma4:26b manages about 27.
+  must stay loaded (`keep_alive` 24h), and another program keeps gemma4:31b loaded with the
+  server's defaults (context 262144, 20.5 GB, all on the GPU, 32 tokens/s). The overlord uses
+  that model and borrows it as it is: asking for another `num_ctx` reloads it half on the CPU
+  (5 tokens/s) and pushes the other program's copy out. Never unload it.
 
 ## Protocol notes (bedrock-protocol 3.60, Bedrock 1.26.x)
 

@@ -132,5 +132,5 @@ describe('finding castle sites', () => {
       expect(clear).toBe(true)
       expect(s.area.z + s.area.depth + 8).toBeLessThanOrEqual(161)
     }
-  })
+  }, 30_000) // searching the whole zone takes about five seconds
 })

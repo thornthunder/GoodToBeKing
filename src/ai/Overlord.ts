@@ -16,7 +16,8 @@ import {
 import type { SiteOption } from '../build/sites'
 import type { Logger } from '../logger'
 import { errMsg } from '../util'
-import type { ChatMessage, ChatModel } from './OllamaClient'
+import type { OllamaConfig } from '../config'
+import { OllamaClient, type ChatMessage, type ChatModel } from './OllamaClient'
 
 export interface CrewMember {
   name: string
@@ -302,23 +303,36 @@ export function placeOnSite(raw: CastleDesign, site: SiteOption): CastleDesign {
   }
 }
 
+/**
+ * A client for the overlord's model. Another program on the same server keeps that model loaded,
+ * so the overlord borrows it as it is (same context, same keep-alive): asking for another context
+ * makes the server load it again, partly on the CPU (gemma4:31b at 5 instead of 32 tokens/s), and
+ * pushes the other program's copy out. Not loaded, it comes with the server's defaults and goes
+ * two minutes after the overlord's last answer.
+ */
+export async function overlordClient(
+  cfg: OllamaConfig,
+  model: string,
+  log: Logger
+): Promise<OllamaClient> {
+  const settings = { ...cfg, model, timeoutMs: 60 * 60_000, numCtx: undefined, keepAlive: '2m' }
+  const loaded = await new OllamaClient(settings, log).loaded(model)
+  if (!loaded) return new OllamaClient(settings, log)
+  log.info(`${model} is loaded already (context ${loaded.contextLength ?? '?'}): borrowing it`)
+  return new OllamaClient(
+    { ...settings, numCtx: loaded.contextLength, keepAlive: loaded.keepAlive },
+    log
+  )
+}
+
 export class Overlord {
   constructor(
-    private readonly ai: ChatModel & { unload?(model: string): Promise<void> },
+    private readonly ai: ChatModel,
     private readonly model: string,
     private readonly log: Logger
   ) {}
 
   async planCastle(brief: Brief): Promise<OverlordResult | null> {
-    try {
-      return await this.plan(brief)
-    } finally {
-      // The big model and the court's small one share the server: give the memory back.
-      await this.ai.unload?.(this.model)
-    }
-  }
-
-  private async plan(brief: Brief): Promise<OverlordResult | null> {
     if (!brief.sites.length) {
       this.log.warn('no building sites to choose from')
       return null

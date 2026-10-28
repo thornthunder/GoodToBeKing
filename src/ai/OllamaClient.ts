@@ -81,12 +81,25 @@ export class OllamaClient implements ChatModel {
     return response
   }
 
-  /** Free the server's memory of a model now (the overlord's big model, so the court's comes back). */
-  async unload(model: string): Promise<void> {
+  /**
+   * How the server holds a model right now, if it is loaded: its context length, and a keep-alive
+   * that leaves it loaded as long as it already was. A request with another context makes the
+   * server reload the model, and a shorter keep-alive cuts its stay short.
+   */
+  async loaded(model: string): Promise<{ contextLength?: number; keepAlive: string } | undefined> {
+    const name = model.includes(':') ? model : `${model}:latest`
     try {
-      await this.ollama.generate({ model, prompt: '', keep_alive: 0, stream: false })
+      const { models } = await this.ollama.ps()
+      const m = models.find((x) => x.name === name || x.model === name)
+      if (!m) return undefined
+      const left = Math.round((new Date(m.expires_at).getTime() - Date.now()) / 1000)
+      return {
+        contextLength: (m as { context_length?: number }).context_length,
+        keepAlive: left > 365 * 86_400 ? '-1m' : `${Math.max(120, left)}s`,
+      }
     } catch (err) {
-      this.log.debug(`could not unload ${model}: ${errMsg(err)}`)
+      this.log.debug(`could not list loaded models: ${errMsg(err)}`)
+      return undefined
     }
   }
 
@@ -101,7 +114,10 @@ export class OllamaClient implements ChatModel {
       last = part
     }
     if (!last) throw new Error('empty answer')
-    return { ...last, message: { ...last.message, role: 'assistant', content, ...(thinking ? { thinking } : {}) } }
+    return {
+      ...last,
+      message: { ...last.message, role: 'assistant', content, ...(thinking ? { thinking } : {}) },
+    }
   }
 
   /**

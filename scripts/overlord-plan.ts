@@ -5,15 +5,14 @@
  *   tsx scripts/overlord-plan.ts <terrain.json> <out.json> [model]
  */
 import fs from 'node:fs'
-import { Overlord } from '../src/ai/Overlord'
-import { OllamaClient } from '../src/ai/OllamaClient'
+import { Overlord, overlordClient } from '../src/ai/Overlord'
 import { compileDesign } from '../src/build/compile'
 import type { CastleDesign } from '../src/build/design'
 import { findCastleSites } from '../src/build/sites'
 import { defaultBotConfig } from '../src/config'
 import { createLogger, setLogLevel } from '../src/logger'
 
-const [terrainFile, outFile, model = 'gemma4:26b'] = process.argv.slice(2)
+const [terrainFile, outFile, model = 'gemma4:31b'] = process.argv.slice(2)
 setLogLevel('info')
 const log = createLogger('overlord')
 const cfg = defaultBotConfig()
@@ -34,14 +33,14 @@ const great = JSON.parse(
 const zone = cfg.buildZone ?? { center: { x: 105, y: 75, z: 122 }, radius: 100 }
 const sites = findCastleSites(topAt, zone, { avoid: [great.area] })
 for (const [i, s] of sites.entries()) log.info(`site ${i + 1}: ${JSON.stringify(s)}`)
-const ai = new OllamaClient(
-  { ...cfg.ai, timeoutMs: 20 * 60_000, numCtx: 32_768, keepAlive: '2m' },
-  log.child('ollama')
-)
-const overlord = new Overlord(ai, model, log)
 void main()
 
 async function main(): Promise<void> {
+  const overlord = new Overlord(
+    await overlordClient(cfg.ai, model, log.child('ollama')),
+    model,
+    log
+  )
   const started = Date.now()
   const result = await overlord.planCastle({
     sites,

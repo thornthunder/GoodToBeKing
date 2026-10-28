@@ -11,7 +11,7 @@ import { compileDesign } from '../build/compile'
 import { validateDesign, type CastleDesign } from '../build/design'
 import { Works, type Worker, type WorksEvent } from '../build/Works'
 import { findCastleSites } from '../build/sites'
-import { Overlord } from '../ai/Overlord'
+import { Overlord, overlordClient } from '../ai/Overlord'
 import type { Rect } from '../build/design'
 import type { AppConfig } from '../config'
 import { CourtRoster } from '../court'
@@ -157,11 +157,8 @@ export class BotManager {
         sites = findCastleSites(topAt, zone, { avoid })
       }
       for (const [i, s] of sites.entries()) this.log.info(`site ${i + 1}: ${JSON.stringify(s)}`)
-      const model = process.env.OVERLORD_MODEL ?? 'gemma4:26b'
-      const ai = new OllamaClient(
-        { ...this.bots[0].cfg.ai, timeoutMs: 30 * 60_000, numCtx: 32_768, keepAlive: '2m' },
-        this.log.child('overlord')
-      )
+      const model = process.env.OVERLORD_MODEL ?? 'gemma4:31b'
+      const ai = await overlordClient(this.bots[0].cfg.ai, model, this.log.child('overlord'))
       const overlord = new Overlord(ai, model, this.log.child('overlord'))
       let example: CastleDesign | undefined
       try {
