@@ -55,6 +55,8 @@ export interface OllamaConfig {
   think?: boolean
   /** Model for background memory extraction; can be bigger and slower than the chat model. */
   memoryModel?: string
+  /** Model that reads royal lines for orders; undefined = the chat model. */
+  orderModel?: string
 }
 
 export interface ChatConfig {
@@ -186,6 +188,7 @@ export function defaultBotConfig(): BotConfig {
       numCtx: envOptionalNum('OLLAMA_NUM_CTX'),
       think: envOptionalBool('OLLAMA_THINK'),
       memoryModel: env('OLLAMA_MEMORY_MODEL'),
+      orderModel: env('OLLAMA_ORDER_MODEL'),
     },
     chat: {
       respondToAll: envBool('BOT_RESPOND_TO_ALL', false),

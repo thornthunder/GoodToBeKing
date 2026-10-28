@@ -3,8 +3,11 @@ import { mentionsNameLoosely } from '../ai/text'
 
 /** A bot keeps the conversation with a player for this long after its last reply to them. */
 const PARTNER_MS = 3 * 60_000
-/** Chat lines arriving at the bots within this window are the same line. */
-const SAME_LINE_MS = 3_000
+/**
+ * Chat lines arriving at the bots within this window are the same line. Over Nethernet one line
+ * reaches the six bots up to three seconds apart; a shorter window let a second bot answer it.
+ */
+const SAME_LINE_MS = 10_000
 
 /**
  * Decides which bot speaks, so a court of several bots answers a line once, not in chorus.

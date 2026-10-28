@@ -115,6 +115,16 @@ Windows, killing a background `npx` shell does not kill its node children at all
 - `ai/riddles.ts`: the riddle book. Small models invent riddles whose hints and answers do
   not fit, so bots only tell riddles from this list; the open riddle and its answer sit in the
   system prompt until it is guessed, given up or 15 minutes pass.
+- `ai/orders.ts`: the court's laws (`COURT_LAWS`, above every order), each bot's standing
+  orders (`OrderBook`, `.state/orders-<bot>.json`) and the royals' rules for the whole court
+  (`CourtRules`, `.state/rules.json`). `OllamaBrain.orderTurn` reads every royal line meant for
+  the bot (it answers, it is named, or a call to everyone) with `OLLAMA_ORDER_MODEL` (gemma4:31b,
+  15 s, else the chat model) into a `Reading`: order, rule, release or none, and what it clashes
+  with. `judge`: a law clash is declined; the King is asked to confirm a clash ("yes"/"no" within
+  5 min); a clash with an order from someone higher is declined with the reason; otherwise the
+  newest wins. Follow and stay orders are posts: no building works or escort duty while they
+  stand; `Bot.tick` keeps following, and a follow order ends when its target leaves. A bot with
+  `reportsTo` owes a report on every royal order and gives it when its superior is within earshot.
 - `bot/ChatFloor.ts`: one bot answers each line (the one named, the one already talking with that
   player, or the herald: the first bot online, the Castellan first for guests). Only the herald
   hails and reacts to notices. Guards with `duty: escort` follow their royal when one is in sight.

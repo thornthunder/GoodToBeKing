@@ -24,6 +24,21 @@ import {
   type MissingAbility,
 } from './abilities'
 import { CourtMemory, recall } from './CourtMemory'
+import {
+  COURT_LAWS,
+  CourtRules,
+  OrderBook,
+  READING_SCHEMA,
+  confirmation,
+  judge,
+  rankOf,
+  readingInput,
+  readingPrompt,
+  type Clash,
+  type Order,
+  type Post,
+  type Reading,
+} from './orders'
 import { guessedRiddle, pickRiddle, wantsRiddle, type Riddle } from './riddles'
 import { HailLog } from './HailLog'
 import type { ChatMessage, ChatModel } from './OllamaClient'
@@ -44,6 +59,17 @@ const FACTS_IN_PROMPT = {
   self: { recent: 10, relevant: 5 },
   fellow: { recent: 3, relevant: 2 },
 }
+
+/** The King has this long to answer "shall I do it anyway?". */
+const CONFIRM_MS = 5 * 60_000
+
+/** A line meant for the whole court, or a group in it: every bot that hears it reads it for orders. */
+const CALLS_ALL =
+  /\b(every(one|body)|all of you|you all|y'?all|guards|apprentices|the court|whole court|staff)\b/i
+
+/** "Stay here", "wait there", "don't move", "guard this door": keep to this spot. */
+const STAY =
+  /\b((stay|wait|remain|stand)( right)? (here|there|put|where you are)|don'?t move|hold (your )?position|keep watch here|guard (this|that) (spot|place|door|gate|entrance))\b/i
 
 /** The scribe writes a royal conversation down once it has been quiet this long... */
 const LEARN_QUIET_MS = 15_000
@@ -96,6 +122,19 @@ export class OllamaBrain implements Brain {
   /** Set when this turn solves or gives up the active riddle; cleared after the reply. */
   private riddleDone = false
   private readonly toldRiddles = new Set<string>()
+  /** This bot's standing orders, and what it owes its superior. */
+  private readonly orders: OrderBook
+  /** The rules the royal family laid down for the whole court. */
+  private readonly rules: CourtRules
+  /** An order or rule from the King that clashes with others, waiting for "yes" or "no". */
+  private pendingOrder?: {
+    member: CourtMember
+    reading: Reading
+    turn: Turn
+    clashes: string[]
+    message: string
+    at: number
+  }
 
   constructor(
     private readonly cfg: BotConfig,
@@ -107,6 +146,8 @@ export class OllamaBrain implements Brain {
     this.hails = opts.hails ?? new HailLog()
     this.memory = opts.memory ?? new CourtMemory()
     this.staff = (opts.staff ?? []).filter((s) => s.name !== cfg.name)
+    this.orders = opts.orders ?? new OrderBook()
+    this.rules = opts.rules ?? new CourtRules()
   }
 
   /** Writes down what was heard now and resolves once every extraction has finished (for tests). */
@@ -119,7 +160,27 @@ export class OllamaBrain implements Brain {
   onCourtLine(event: ChatEvent, ctx: BrainContext): void {
     const court = [this.cfg.name, ...this.staff.map((s) => s.name)].map((n) => n.toLowerCase())
     if (ctx.hears === false || !court.includes(event.from.toLowerCase())) return
-    this.hear(`${event.from}: ${event.message}`)
+    // A courtier talking to this bot (a report, say) is worth remembering even without a royal.
+    const toMe = mentionsName(event.message, ctx.botName)
+    this.hear(`${event.from}: ${event.message}`, undefined, toMe)
+  }
+
+  onPlayerLeave(player: string): void {
+    const lower = player.toLowerCase()
+    // Following someone ends when they leave the realm.
+    this.orders.remove((o) => o.post?.type === 'follow' && o.post.target.toLowerCase() === lower)
+  }
+
+  post(): Post | undefined {
+    return this.orders.post()?.post
+  }
+
+  pendingReports(): string[] {
+    return this.orders.reports
+  }
+
+  reported(): void {
+    this.orders.reported()
   }
 
   async onSpawn(ctx: BrainContext): Promise<string | null> {
@@ -184,8 +245,24 @@ export class OllamaBrain implements Brain {
       const whispered = event.kind === 'whisper' ? `(whispered to ${ctx.botName} alone) ` : ''
       this.hear(`${whispered}${this.court.label(event.from)}: ${event.message}`, member)
     }
-    // Another bot of the court has the floor: listen, but stay quiet.
-    if (ctx.mayReply === false) return null
+    // Royal orders are read by the bot that answers, by every bot named, and by everyone who
+    // hears a call to the whole court.
+    const reads =
+      member !== undefined &&
+      ctx.hears !== false &&
+      (ctx.mayReply !== false ||
+        mentionsNameLoosely(event.message, ctx.botName) ||
+        CALLS_ALL.test(event.message))
+    // Another bot of the court has the floor: listen, but stay quiet, unless an order for this
+    // bot must be declined or queried.
+    if (ctx.mayReply === false) {
+      if (!reads) return null
+      const quiet = await this.orderTurn(event, member, ctx, this.actionTurn(event, member, ctx))
+      if (!quiet.speak) return quiet.action ? { say: null, action: quiet.action } : null
+      const say = await this.generate(ctx, { note: quiet.note })
+      if (say) this.hear(`${ctx.botName}: ${say}`)
+      return quiet.action ? { say, action: quiet.action } : say ? { say } : null
+    }
     if (!this.shouldReply(event, member)) return null
     // Royals always get an answer (queued); for everyone else a busy brain just skips.
     if (!member && this.pending > 0) {
@@ -200,8 +277,8 @@ export class OllamaBrain implements Brain {
     const speaker = member ? `The ${member.title}` : event.from
     // The line just before this one (already in history) was ours: they are answering us.
     const answeringUs = this.history.at(-2)?.role === 'assistant'
-    // Building takes precedence over walking ("come and build a tower"); the rest is guarded.
-    const turn = this.buildTurn(event, member) ?? this.moveTurn(event, member, ctx)
+    const plain = this.actionTurn(event, member, ctx)
+    const turn = reads && member ? await this.orderTurn(event, member, ctx, plain) : plain
     const ability = turn.action ? undefined : (turn.ability ?? detectMissingAbility(event.message))
     const riddleNote = this.riddleTurn(event.message)
     const notes = [turn.note, ability ? abilityNote(ability, ctx.botName) : '', riddleNote].filter(
@@ -231,8 +308,8 @@ export class OllamaBrain implements Brain {
    * is talking). It is written down once the talk pauses, so a whole exchange, with the answers
    * of whichever courtier gave them, goes to the memory model at once.
    */
-  private hear(line: string, royal?: CourtMember): void {
-    if (!royal && !this.heard) return
+  private hear(line: string, royal?: CourtMember, open = false): void {
+    if (!royal && !open && !this.heard) return
     this.heard ??= { lines: [], royals: new Map(), since: Date.now() }
     this.heard.lines.push(line)
     if (royal) this.heard.royals.set(royal.player, royal)
@@ -256,6 +333,255 @@ export class OllamaBrain implements Brain {
     this.learning = this.learning
       .then(() => this.learn([...heard.royals.values()], heard.lines, earlier))
       .catch((err) => this.log.warn(`memory extraction failed: ${errMsg(err)}`))
+  }
+
+  /** What the line asks of the body. Building takes precedence over walking ("come and build"). */
+  private actionTurn(event: ChatEvent, member: CourtMember | undefined, ctx: BrainContext): Turn {
+    return this.buildTurn(event, member) ?? this.moveTurn(event, member, ctx)
+  }
+
+  /**
+   * Royal orders. Reads the line for an order, a rule or a release, weighs it against the court's
+   * laws and rules and this bot's standing orders (see `judge`), and keeps, declines or queries
+   * it. Returns the turn with its action and note adjusted; `speak` when the bot must answer even
+   * though another has the floor (to decline, or to ask the King).
+   */
+  private async orderTurn(
+    event: ChatEvent,
+    member: CourtMember,
+    ctx: BrainContext,
+    turn: Turn
+  ): Promise<Turn & { speak?: boolean }> {
+    const giver = `the ${member.title}`
+    const rank = rankOf(member.role)
+    const pending = this.pendingOrder
+    if (pending && Date.now() - pending.at > CONFIRM_MS) this.pendingOrder = undefined
+    if (this.pendingOrder && pending?.member.player === member.player) {
+      const answer = confirmation(event.message)
+      if (answer === 'no') {
+        this.pendingOrder = undefined
+        return {
+          note: `(${giver} decided against it: everything stays as it was. Say so in one short sentence.)`,
+          speak: true,
+        }
+      }
+      if (answer === 'yes') {
+        this.pendingOrder = undefined
+        const kept = this.keep(
+          pending.member,
+          pending.reading,
+          pending.turn,
+          pending.clashes,
+          pending.message
+        )
+        return { ...kept, note: join(`(${giver} confirmed it.)`, kept.note), speak: true }
+      }
+    }
+
+    const reading = await this.read(event, member, ctx)
+    if (!reading || reading.type === 'none') return turn
+    if (reading.type !== 'rule' && !reading.forMe) return turn
+
+    if (reading.type === 'release') {
+      const mine = reading.releases.filter((id) => this.orders.find(id))
+      const above = mine.filter((id) => this.rankOfGiver(this.orders.find(id)?.from) > rank)
+      if (above.length) {
+        return {
+          note: `(${giver} wants to end ${this.describe(above)}. That is not theirs to end: politely decline and explain whose order it is.)`,
+          speak: true,
+        }
+      }
+      const gone = this.orders.remove(mine)
+      this.log.info(`released: ${gone.map((o) => o.text).join(' ') || 'nothing'}`)
+      return gone.length
+        ? {
+            ...turn,
+            note: join(turn.note, `(You are released from: ${gone.map((o) => o.text).join(' ')})`),
+          }
+        : turn
+    }
+
+    // A rule binds the whole court: the bot that answers the line keeps it, the others listen.
+    if (reading.type === 'rule' && ctx.mayReply === false) return turn
+    const clashes = this.clashesOf(reading.clashes)
+    const verdict = judge(rank, this.topRank(), clashes)
+    if (verdict.kind === 'decline') {
+      const law = verdict.clashes.some((id) => id.startsWith('L'))
+      return {
+        note:
+          `(${giver} asks: "${reading.summary}" But that clashes with ${this.describe(verdict.clashes)}. ` +
+          (law
+            ? 'Politely decline and explain that the laws of the court come before every order.)'
+            : 'Politely decline and explain that the higher order comes first; do not do it.)'),
+        speak: true,
+      }
+    }
+    if (verdict.kind === 'confirm') {
+      this.pendingOrder = {
+        member,
+        reading,
+        turn,
+        clashes: verdict.clashes,
+        message: event.message,
+        at: Date.now(),
+      }
+      return {
+        note:
+          `(${giver} asks: "${reading.summary}" But that clashes with ${this.describe(verdict.clashes)}. ` +
+          `Do not do it yet: kindly point out the clash and ask ${giver} to confirm.)`,
+        speak: true,
+      }
+    }
+    return this.keep(member, reading, turn, verdict.replaces, event.message)
+  }
+
+  /** Take an order or rule: it replaces what it clashed with, and the body carries it out. */
+  private keep(
+    member: CourtMember,
+    reading: Reading,
+    turn: Turn,
+    replaces: string[],
+    message: string
+  ): Turn {
+    const giver = `the ${member.title}`
+    const replaced = replaces.length ? `(It replaces ${this.describe(replaces)}.)` : ''
+    this.orders.remove(replaces.filter((id) => id.startsWith('O')))
+    if (reading.type === 'rule') {
+      this.rules.remove(replaces.filter((id) => id.startsWith('R')))
+      const rule = this.rules.add({ from: member.player, by: giver, text: reading.summary })
+      this.log.info(`new rule ${rule.id} from ${giver}: ${rule.text}`)
+      return {
+        ...turn,
+        note: join(
+          turn.note,
+          `(${giver} laid down a rule for the whole court: "${rule.text}" Acknowledge it in one short sentence.)`,
+          replaced
+        ),
+      }
+    }
+    let action = turn.action
+    if (!action && reading.lasting && (STAY.test(message) || STAY.test(reading.summary))) {
+      action = { type: 'stay' }
+    }
+    if (action?.type === 'stop') this.orders.remove((o) => o.post !== undefined)
+    const post: Post | undefined =
+      action?.type === 'follow'
+        ? { type: 'follow', target: action.target }
+        : action?.type === 'stay'
+          ? { type: 'stay' }
+          : undefined
+    if (reading.lasting || post) {
+      // A new post replaces the old one: the body can only be in one place.
+      if (post) this.orders.remove((o) => o.post !== undefined)
+      const order = this.orders.add({ from: member.player, by: giver, text: reading.summary, post })
+      this.log.info(`order ${order.id} from ${giver}: ${order.text}`)
+    }
+    if (this.cfg.reportsTo) this.orders.addReport(`${giver} gave me an order: ${reading.summary}`)
+    const stays =
+      action?.type === 'stay' && !turn.action
+        ? '(You stay right here until you are released. Say so in one short sentence.)'
+        : ''
+    return { ...turn, action, note: join(turn.note, stays, replaced) }
+  }
+
+  /** Ask the model what a royal's line is: an order, a rule, a release, or none of these. */
+  private async read(
+    event: ChatEvent,
+    member: CourtMember,
+    ctx: BrainContext
+  ): Promise<Reading | null> {
+    const earlier = this.history
+      .slice(-5, -1)
+      .map((m) => (m.role === 'assistant' ? `${ctx.botName}: ${m.content}` : m.content))
+      .join('\n')
+    try {
+      const model = this.cfg.ai.orderModel
+      const response = await this.ai.chat(
+        [
+          { role: 'system', content: readingPrompt(ctx.botName, this.cfg.role) },
+          {
+            role: 'user',
+            content: readingInput({
+              rules: this.rules.rules,
+              orders: this.orders.orders,
+              earlier,
+              speaker: `the ${member.title}`,
+              line: event.message,
+            }),
+          },
+        ],
+        {
+          format: READING_SCHEMA,
+          temperature: 0,
+          // A royal waits for the answer: if the big model is busy or cold, the chat model reads.
+          ...(model ? { model, shared: true, timeoutMs: 15_000 } : {}),
+        }
+      )
+      const reading = JSON.parse(response.message.content || '{}') as Reading
+      if (!reading.type) return null
+      const known = (id: string) =>
+        /^L\d+$/.test(id)
+          ? Number(id.slice(1)) <= COURT_LAWS.length
+          : Boolean(this.orders.find(id) ?? this.rules.find(id))
+      reading.clashes = (reading.clashes ?? []).filter(known)
+      reading.releases = (reading.releases ?? []).filter(known)
+      this.log.debug(`reading: ${JSON.stringify(reading)}`)
+      return reading
+    } catch (err) {
+      this.log.warn(`could not read the line for orders: ${errMsg(err)}`)
+      return null
+    }
+  }
+
+  /** The laws, rules and orders behind clash ids, with who gave them. */
+  private clashesOf(ids: string[]): Clash[] {
+    return ids.map((id) => {
+      if (id.startsWith('L')) return { id, rank: Infinity, law: true }
+      const source = this.orders.find(id) ?? this.rules.find(id)
+      return { id, rank: this.rankOfGiver(source?.from) }
+    })
+  }
+
+  private describe(ids: string[]): string {
+    return listWords(
+      ids.map((id) => {
+        if (id.startsWith('L'))
+          return `the law of the court "${COURT_LAWS[Number(id.slice(1)) - 1]}"`
+        const order = this.orders.find(id)
+        if (order) return `your standing order from ${order.by}: "${order.text}"`
+        const rule = this.rules.find(id)
+        return rule ? `the rule ${rule.by} laid down: "${rule.text}"` : id
+      })
+    )
+  }
+
+  private rankOfGiver(from: string | undefined): number {
+    return from ? rankOf(this.court.find(from)?.role) : 0
+  }
+
+  /** The highest royal rank at court (the King's). */
+  private topRank(): number {
+    return Math.max(1, ...this.court.members.map((m) => rankOf(m.role)))
+  }
+
+  /** The laws, the court's rules and this bot's standing orders, for the system prompt. */
+  private ordersSection(): string {
+    const lines = ['Laws of the court, above every order:', ...COURT_LAWS.map((l) => `- ${l}`)]
+    const rules = this.rules.rules
+    if (rules.length) {
+      lines.push(
+        'Rules the royal family laid down for the whole court:',
+        ...rules.map((r) => `- ${r.text} (${r.by})`)
+      )
+    }
+    const orders: Order[] = this.orders.orders
+    if (orders.length) {
+      lines.push('Your standing orders:', ...orders.map((o) => `- ${o.text} (from ${o.by})`))
+    }
+    lines.push(
+      "The King's orders come first, then the Princess's; your own superior's after theirs."
+    )
+    return lines.join('\n')
   }
 
   /**
@@ -657,7 +983,14 @@ export class OllamaBrain implements Brain {
     ]
       .filter(Boolean)
       .join('\n')
-    return [identity, this.court.describe(), this.memorySection(ctx), SAFETY_RULES, rules]
+    return [
+      identity,
+      this.court.describe(),
+      this.memorySection(ctx),
+      this.ordersSection(),
+      SAFETY_RULES,
+      rules,
+    ]
       .filter(Boolean)
       .join('\n\n')
   }
@@ -747,6 +1080,10 @@ export interface BrainOptions {
   memory?: CourtMemory
   /** The other bots of the court, so each knows who the others are and what they do. */
   staff?: StaffMember[]
+  /** This bot's standing orders; pass a file-backed book to survive restarts. */
+  orders?: OrderBook
+  /** The court's rules, shared by every bot. */
+  rules?: CourtRules
 }
 
 export interface StaffMember {
@@ -847,4 +1184,9 @@ function fallbackHail(members: CourtMember[]): string {
 function listWords(names: string[]): string {
   if (names.length <= 1) return names[0] ?? ''
   return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
+}
+
+/** Notes for the model, one per line, skipping empty ones. */
+function join(...notes: Array<string | undefined>): string {
+  return notes.filter(Boolean).join('\n')
 }

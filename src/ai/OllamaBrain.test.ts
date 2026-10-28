@@ -7,6 +7,7 @@ import { CourtMemory } from './CourtMemory'
 import { HailLog } from './HailLog'
 import { OllamaBrain, type BrainOptions } from './OllamaBrain'
 import type { ChatMessage, ChatModel } from './OllamaClient'
+import { CourtRules, OrderBook, type Reading } from './orders'
 
 const court = new CourtRoster({
   realm: 'Testland',
@@ -19,6 +20,15 @@ const court = new CourtRoster({
 
 type FakeReply = string | Error | ((messages: ChatMessage[]) => string)
 
+const NO_ORDER: Reading = {
+  type: 'none',
+  forMe: false,
+  summary: '',
+  lasting: false,
+  clashes: [],
+  releases: [],
+}
+
 function makeBrain(
   reply: FakeReply,
   overrides: Partial<BotConfig['chat']> = {},
@@ -26,13 +36,23 @@ function makeBrain(
   extra: Omit<BrainOptions, 'hails'> = {}
 ) {
   const calls: ChatMessage[][] = []
-  const model: ChatModel = {
-    chat: vi.fn(async (messages: ChatMessage[]) => {
-      calls.push(messages)
-      if (reply instanceof Error) throw reply
-      const content = typeof reply === 'function' ? reply(messages) : reply
-      return { message: { role: 'assistant', content } } as Awaited<ReturnType<ChatModel['chat']>>
-    }),
+  const chat = vi.fn(async (messages: ChatMessage[]) => {
+    calls.push(messages)
+    if (reply instanceof Error) throw reply
+    const content = typeof reply === 'function' ? reply(messages) : reply
+    return { message: { role: 'assistant', content } } as Awaited<ReturnType<ChatModel['chat']>>
+  })
+  // Reading a royal's line for orders is its own call: answered from `readings` (none by default).
+  const readings: Array<Partial<Reading>> = []
+  const reads: ChatMessage[][] = []
+  const model = { chat }
+  const routed: ChatModel = {
+    chat: async (messages) => {
+      if (!messages[0].content.startsWith('You help')) return chat(messages)
+      reads.push(messages)
+      const reading = { ...NO_ORDER, ...readings.shift() }
+      return { message: { role: 'assistant', content: JSON.stringify(reading) } } as never
+    },
   }
   const base = defaultBotConfig()
   const cfg: BotConfig = {
@@ -40,8 +60,8 @@ function makeBrain(
     name: 'Merlin',
     chat: { ...base.chat, greeting: 'Hello all', ...overrides },
   }
-  const brain = new OllamaBrain(cfg, model, court, createLogger('test'), { hails, ...extra })
-  return { brain, calls, model }
+  const brain = new OllamaBrain(cfg, routed, court, createLogger('test'), { hails, ...extra })
+  return { brain, calls, model, readings, reads }
 }
 
 const ctx = (...names: string[]): BrainContext => ({
@@ -516,6 +536,147 @@ describe('OllamaBrain court behaviour', () => {
     const prompt = brain.systemPrompt(ctx('LittleOne42'))
     expect(prompt).toContain('- The Princess hid a diamond under the old oak. (secret)')
     expect(prompt).toContain('Never tell them to anyone')
+  })
+
+  describe('orders', () => {
+    const order = (summary: string, extra: Partial<Reading> = {}): Partial<Reading> => ({
+      type: 'order',
+      forMe: true,
+      summary,
+      lasting: true,
+      ...extra,
+    })
+
+    it("declines the Princess's order when it clashes with the King's, and says why", async () => {
+      const orders = new OrderBook()
+      orders.add({
+        from: 'BigDad',
+        by: 'the King',
+        text: 'Stay by the gate.',
+        post: { type: 'stay' },
+      })
+      const { brain, calls, readings } = makeBrain(
+        'I must stay, Your Highness.',
+        {},
+        new HailLog(),
+        {
+          orders,
+        }
+      )
+      readings.push(order('Follow the Princess.', { clashes: ['O1'] }))
+      const reply = await brain.onChat(chat('LittleOne42', 'Merlin follow me'), seen('LittleOne42'))
+      expect(reply).toEqual({ say: 'I must stay, Your Highness.' })
+      const note = calls[0].at(-1)?.content ?? ''
+      expect(note).toContain('your standing order from the King: "Stay by the gate."')
+      expect(note).toContain('Politely decline')
+      expect(orders.orders.map((o) => o.text)).toEqual(['Stay by the gate.'])
+    })
+
+    it('asks the King to confirm a clashing order, and carries it out on "yes"', async () => {
+      const orders = new OrderBook()
+      orders.add({
+        from: 'LittleOne42',
+        by: 'the Princess',
+        text: 'Follow the Princess.',
+        post: { type: 'follow', target: 'LittleOne42' },
+      })
+      const { brain, calls, readings } = makeBrain('Very well, Your Majesty.', {}, new HailLog(), {
+        orders,
+      })
+      readings.push(order('Follow the King.', { clashes: ['O1'] }))
+      const asked = await brain.onChat(
+        chat('BigDad', 'Merlin follow me'),
+        seen('BigDad', 'LittleOne42')
+      )
+      expect(asked?.action).toBeUndefined()
+      expect(calls[0].at(-1)?.content).toContain('ask the King to confirm')
+
+      const confirmed = await brain.onChat(chat('BigDad', 'yes'), seen('BigDad', 'LittleOne42'))
+      expect(confirmed?.action).toEqual({ type: 'follow', target: 'BigDad' })
+      expect(calls[1].at(-1)?.content).toContain('the King confirmed it')
+      expect(orders.orders.map((o) => o.text)).toEqual(['Follow the King.'])
+      expect(brain.post()).toEqual({ type: 'follow', target: 'BigDad' })
+    })
+
+    it('keeps a rule for the whole court and shows it in every prompt', async () => {
+      const rules = new CourtRules()
+      const { brain, readings } = makeBrain('So it shall be.', {}, new HailLog(), { rules })
+      readings.push({ type: 'rule', summary: "Nobody may enter the Princess's bedchamber." })
+      await brain.onChat(chat('BigDad', 'from now on nobody goes into her bedroom'), ctx('BigDad'))
+      expect(rules.rules.map((r) => r.text)).toEqual([
+        "Nobody may enter the Princess's bedchamber.",
+      ])
+      const other = makeBrain('unused', {}, new HailLog(), { rules }).brain
+      expect(other.systemPrompt(ctx('BigDad'))).toContain(
+        "- Nobody may enter the Princess's bedchamber. (the King)"
+      )
+    })
+
+    it('lets the King release an order, but not the Princess', async () => {
+      const orders = new OrderBook()
+      orders.add({
+        from: 'BigDad',
+        by: 'the King',
+        text: 'Stay by the gate.',
+        post: { type: 'stay' },
+      })
+      const { brain, calls, readings } = makeBrain('Hm.', {}, new HailLog(), { orders })
+      readings.push({ type: 'release', forMe: true, releases: ['O1'] })
+      await brain.onChat(chat('LittleOne42', 'merlin you can go now'), ctx('LittleOne42'))
+      expect(calls[0].at(-1)?.content).toContain('That is not theirs to end')
+      expect(orders.orders).toHaveLength(1)
+
+      readings.push({ type: 'release', forMe: true, releases: ['O1'] })
+      await brain.onChat(chat('BigDad', 'merlin you can go now'), ctx('BigDad'))
+      expect(orders.orders).toHaveLength(0)
+      expect(brain.post()).toBeUndefined()
+    })
+
+    it('stays put on "stay here", and owes its superior a report', async () => {
+      const orders = new OrderBook()
+      const base = defaultBotConfig()
+      const cfg = { ...base, name: 'Henry', role: 'apprentice', reportsTo: 'Festaris' }
+      const model: ChatModel = {
+        chat: async (messages) =>
+          ({
+            message: {
+              role: 'assistant',
+              content: messages[0].content.startsWith('You help')
+                ? JSON.stringify({ ...NO_ORDER, ...order('Stay here.') })
+                : 'I shall not move, Your Majesty.',
+            },
+          }) as never,
+      }
+      const brain = new OllamaBrain(cfg, model, court, createLogger('test'), { orders })
+      const reply = await brain.onChat(chat('BigDad', 'Henry stay here'), {
+        ...ctx('BigDad'),
+        botName: 'Henry',
+      })
+      expect(reply?.action).toEqual({ type: 'stay' })
+      expect(brain.post()).toEqual({ type: 'stay' })
+      expect(brain.pendingReports()).toEqual(['the King gave me an order: Stay here.'])
+    })
+
+    it('a bot named alongside the one who answers takes the order quietly', async () => {
+      const { brain, calls, readings } = makeBrain('unused')
+      readings.push(order('Follow the Princess.'))
+      const floorTaken = { ...seen('LittleOne42'), mayReply: false }
+      const reply = await brain.onChat(
+        chat('LittleOne42', 'Bruce and Merlin follow me'),
+        floorTaken
+      )
+      expect(reply).toEqual({ say: null, action: { type: 'follow', target: 'LittleOne42' } })
+      expect(calls).toHaveLength(0)
+    })
+
+    it('does not read lines for orders that are not meant for it', async () => {
+      const { brain, reads } = makeBrain('unused')
+      await brain.onChat(chat('LittleOne42', 'Bruce follow me'), {
+        ...ctx('LittleOne42'),
+        mayReply: false,
+      })
+      expect(reads).toHaveLength(0)
+    })
   })
 
   it('knows the chain of command: who reports to whom', () => {

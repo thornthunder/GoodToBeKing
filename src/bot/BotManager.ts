@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { CourtMemory } from '../ai/CourtMemory'
+import { CourtRules, OrderBook } from '../ai/orders'
 import { HailLog } from '../ai/HailLog'
 import { OllamaBrain } from '../ai/OllamaBrain'
 import { OllamaClient } from '../ai/OllamaClient'
@@ -59,6 +60,8 @@ export class BotManager {
       canBuild: b.canBuild,
       reportsTo: b.reportsTo,
     }))
+    // The rules the royal family lays down bind the whole court.
+    const rules = new CourtRules(path.resolve(STATE_DIR, 'rules.json'))
     // What each bot built, so "take it down" removes only that bot's own blocks.
     const builds = new BuildLog(path.resolve(STATE_DIR, 'builds.json'))
     for (const botCfg of cfg.bots) {
@@ -73,6 +76,8 @@ export class BotManager {
           path.resolve(STATE_DIR, `memory-${botCfg.name.toLowerCase()}.json`)
         ),
         staff,
+        orders: new OrderBook(path.resolve(STATE_DIR, `orders-${botCfg.name.toLowerCase()}.json`)),
+        rules,
       })
       const bot = new Bot(botCfg, brain, botLog, {
         // Our own helper scripts' players (the surveyor) are ignored like fellow bots.

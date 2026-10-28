@@ -1,3 +1,4 @@
+import type { Post } from './orders'
 import type { BlueprintId, Palette } from '../build/blueprints'
 export type ChatKind = 'chat' | 'whisper' | 'announcement' | 'system'
 
@@ -42,6 +43,8 @@ export interface BrainContext {
 export type BotAction =
   | { type: 'follow' | 'come'; target: string }
   | { type: 'stop' }
+  /** Stay where you are until released (a standing order). */
+  | { type: 'stay' }
   | { type: 'build'; blueprint: BlueprintId; palette: Palette; requestedBy: string }
   | { type: 'undo'; requestedBy: string }
 
@@ -76,6 +79,14 @@ export interface Brain {
   onChat(event: ChatEvent, ctx: BrainContext): Promise<BrainReply | null>
   /** Called when a fellow bot of the court says something (never answered: only listened to). */
   onCourtLine?(event: ChatEvent, ctx: BrainContext): void
+  /** Called when a player leaves the server. */
+  onPlayerLeave?(player: string): void
+  /** The standing order that keeps the body busy (following someone, staying put), if any. */
+  post?(): Post | undefined
+  /** What the bot still has to tell its superior, oldest first. */
+  pendingReports?(): string[]
+  /** The pending reports were given. */
+  reported?(): void
   /** Called for translated server notices (deaths, sleeping, achievements, ...). */
   onNotice(event: ChatEvent, ctx: BrainContext): Promise<string | null>
   /** Called once when the bot cannot find a way to the player it is following or walking to. */

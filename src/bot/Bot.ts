@@ -180,6 +180,7 @@ export class Bot extends EventEmitter {
     const movement = this.movement
     if (this.cfg.duty?.kind !== 'escort' || !movement || this.state.status !== 'spawned') return
     if (this.builder?.busy || Date.now() < this.dutyPausedUntil) return
+    if (this.brain.post?.()) return // a royal's standing order comes before the duty
     const target = this.dutyTarget()
     const current = movement.current()
     if (current && !this.dutyFollowing) return // doing what someone asked
@@ -204,7 +205,53 @@ export class Bot extends EventEmitter {
     if (Date.now() < this.worksPausedUntil) return false
     if (this.movement?.current() && !this.dutyFollowing) return false
     if (this.dutyTarget() && Date.now() >= this.dutyPausedUntil) return false
+    if (this.brain.post?.()) return false // on a royal's orders
     return true
+  }
+
+  /** Every few seconds: the escort duty, standing orders, and reports owed to the superior. */
+  private tick(): void {
+    if (this.state.status !== 'spawned') return
+    this.performDuty()
+    this.keepPost()
+    this.deliverReports()
+  }
+
+  /** Keep following whom a standing order says to follow, whenever they are in sight. */
+  private keepPost(): void {
+    const post = this.brain.post?.()
+    const movement = this.movement
+    if (post?.type !== 'follow' || !movement || this.builder?.busy) return
+    const current = movement.current()
+    if (current?.kind === 'following' && current.target === post.target) return
+    if (!this.body?.players[post.target]?.entity) return
+    this.mason?.cancel()
+    if (movement.follow(post.target, { quiet: true }) === 'ok') {
+      this.dutyFollowing = false
+      this.log.info(`on orders: following ${post.target}`)
+    }
+  }
+
+  private lastReportAt = 0
+
+  /**
+   * Tell the superior about orders taken straight from a royal, once he is within earshot: now,
+   * or the next time they meet.
+   */
+  private deliverReports(): void {
+    const boss = this.cfg.reportsTo
+    const reports = this.brain.pendingReports?.() ?? []
+    if (!boss || reports.length === 0 || Date.now() - this.lastReportAt < 20_000) return
+    const d = this.distanceTo(boss)
+    if (d === undefined || d > EARSHOT) return
+    this.lastReportAt = Date.now()
+    this.brain.reported?.()
+    this.log.info(`reporting to ${boss}: ${reports.join(' ')}`)
+    void this.speak(
+      `${boss}, whom you report to, is close by. Tell ${boss} by name, in one or two short ` +
+        `sentences: ${reports.join(' ')}`,
+      `${boss}, ${reports.join(' ')}`
+    )
   }
 
   /** Fly a survey over the land (see Mason.survey). */
@@ -398,6 +445,13 @@ export class Bot extends EventEmitter {
       case 'undo':
         this.pauseWorks()
         void this.undoLastBuild(action.requestedBy)
+        return
+      case 'stay':
+        // A standing order: no works and no escort while it stands (see post()).
+        this.builder?.cancel()
+        this.mason?.cancel()
+        movement.stop()
+        this.dutyFollowing = false
         return
       case 'stop':
         this.builder?.cancel()
@@ -646,10 +700,8 @@ export class Bot extends EventEmitter {
       this.log.info(`spawned${this.state.position ? ` at ${fmtVec(this.state.position)}` : ''}`)
       this.floor?.setOnline(this.cfg.name, true)
       this.emit('spawn')
-      if (this.cfg.duty) {
-        clearInterval(this.dutyTimer)
-        this.dutyTimer = setInterval(() => this.performDuty(), 3_000)
-      }
+      clearInterval(this.dutyTimer)
+      this.dutyTimer = setInterval(() => this.tick(), 3_000)
       // Only the herald greets on arrival; the rest of the court just takes its place.
       if (!this.isHerald()) return
       this.brain
@@ -700,7 +752,10 @@ export class Bot extends EventEmitter {
         if (type === 'remove') {
           const gone = this.state.players.get(record.uuid)
           this.state.players.delete(record.uuid)
-          if (gone && !this.isBot(gone.name)) this.log.info(`${gone.name} left`)
+          if (gone && !this.isBot(gone.name)) {
+            this.log.info(`${gone.name} left`)
+            this.brain.onPlayerLeave?.(gone.name)
+          }
           if (gone) this.movement?.forget(gone.name)
           continue
         }

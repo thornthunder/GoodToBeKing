@@ -85,6 +85,19 @@ What the family tells about real life (age, school, family and the like) is kept
 `"private": true`, and only goes into a bot's prompt while nobody outside the royal family is
 online, so a visiting player never reads it in chat. Passwords and login details are never
 stored. The bots never ask for personal information.
+
+### Orders and rules
+
+The court keeps a chain of command: the King outranks everyone, then the Princess; Merlin and
+Festaris answer to the royal family alone, and the guards and apprentices report to Festaris. A
+royal's order is kept until it is ended ("Bruce, stay here", "Dyke, follow me", "be kind to the
+guests"); a rule laid down for everyone ("from now on nobody digs in my garden") binds the whole
+court. Above them all stand the court's laws: keep it kind, never break what players made,
+never hurt anyone, never cheat. An order that clashes with an earlier one is weighed: the King is
+asked to confirm, the Princess is told kindly why the King's order comes first, and otherwise the
+newest order wins. A member of Festaris's staff who takes an order straight from a royal tells
+Festaris when he is near, or the next time they meet. Orders live in `.state/orders-<bot>.json`
+and rules in `.state/rules.json`; both can be edited by hand while the court is stopped.
 `OLLAMA_MEMORY_MODEL` picks the extraction model (default: the chat model); it never delays a
 reply. The example uses gemma4:31b, the overlord's model, so the court only ever loads two models.
 It is shared with other programs: used with the context it is loaded with (or the server's
