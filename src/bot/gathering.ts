@@ -316,14 +316,20 @@ export class Gatherer {
     work: (window: Chest) => Promise<number>
   ): Promise<number> {
     const pos = new Vec3(chest.x, chest.y, chest.z)
-    try {
-      await withTimeout(
-        this.bot.pathfinder.goto(new goals.GoalNear(pos.x, pos.y, pos.z, 2)),
-        60_000
-      )
-    } catch (err) {
-      this.log.info(`could not walk to the storehouse: ${errMsg(err)}`)
-      this.bot.pathfinder.setGoal(null)
+    // A chest opens from four blocks: the hall is crowded (beds, bots), so do not insist on two.
+    for (const range of [3, 4]) {
+      const eyes = this.bot.entity.position.offset(0, 1.62, 0)
+      if (eyes.distanceTo(pos.offset(0.5, 0.5, 0.5)) <= 4.5) break
+      try {
+        await withTimeout(
+          this.bot.pathfinder.goto(new goals.GoalNear(pos.x, pos.y, pos.z, range)),
+          60_000
+        )
+        break
+      } catch (err) {
+        this.log.info(`could not walk to the storehouse (within ${range}): ${errMsg(err)}`)
+        this.bot.pathfinder.setGoal(null)
+      }
     }
     const block = this.bot.blockAt(pos)
     if (!block || !CONTAINER.test(block.name)) {
