@@ -272,6 +272,8 @@ export class Bot extends EventEmitter {
     const movement = this.movement
     if (this.cfg.duty?.kind !== 'escort' || !movement || this.state.status !== 'spawned') return
     if (this.building || Date.now() < this.dutyPausedUntil) return
+    // An errand (hunting, fetching, building by hand) is finished first.
+    if (this.gathering || this.handbuilder?.busy) return
     if (this.brain.post?.()) return // a royal's standing order comes before the duty
     const target = this.dutyTarget()
     const current = movement.current()
