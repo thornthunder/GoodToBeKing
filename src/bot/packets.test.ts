@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildTextPacket,
+  fixOutgoing,
   metadataTarget,
   normalisePlayerList,
   parseTextPacket,
@@ -151,5 +152,28 @@ describe('metadataTarget', () => {
     expect(metadataTarget(packet(111, 7833n))).toBeUndefined()
     expect(metadataTarget(packet(39 + 128, 1n))).toBeUndefined()
     expect(metadataTarget(Buffer.from([39]))).toBeUndefined()
+  })
+})
+
+describe('fixOutgoing (Bedrock 1.26.60 item stack actions)', () => {
+  it('moves the legacy bytes that craft_reserved pushed up, and leaves the rest', () => {
+    const craft = {
+      requests: [
+        {
+          actions: [
+            { type_id: 'craft_recipe', legacy_type_id: 12 },
+            { type_id: 'results_deprecated', legacy_type_id: 19 },
+            { type_id: 'take', legacy_type_id: 0 },
+          ],
+        },
+      ],
+    }
+    fixOutgoing('item_stack_request', craft)
+    expect(craft.requests[0].actions.map((a) => a.legacy_type_id)).toEqual([12, 20, 0])
+    const input = {
+      item_stack_request: { actions: [{ type_id: 'non_implemented', legacy_type_id: 18 }] },
+    }
+    fixOutgoing('player_auth_input', input)
+    expect(input.item_stack_request.actions[0].legacy_type_id).toBe(19)
   })
 })

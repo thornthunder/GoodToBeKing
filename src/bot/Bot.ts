@@ -54,6 +54,7 @@ import type { SpellArgs } from '../magic/spells'
 import { loadSkin } from './skin'
 import {
   buildTextPacket,
+  fixOutgoing,
   metadataTarget,
   normalisePlayerList,
   parseTextPacket,
@@ -595,6 +596,17 @@ export class Bot extends EventEmitter {
       const target = metadataTarget(packet)
       if (target !== undefined && !this.wantsMetadata(target)) return
       read(packet)
+    }
+    // Item stack requests carry bedboo's 1.26.51 action bytes: fix them for 1.26.60 (packets.ts).
+    const queue = client.queue.bind(client)
+    const write = client.write.bind(client)
+    client.queue = (name: string, params: object) => {
+      fixOutgoing(name, params)
+      queue(name, params)
+    }
+    client.write = (name: string, params: object) => {
+      fixOutgoing(name, params)
+      write(name, params)
     }
     this.body = body
     this.client = client
@@ -1410,6 +1422,11 @@ export class Bot extends EventEmitter {
       this.movement = undefined
       this.mason?.cancel()
       this.mason = undefined
+      // Errands and hand building die with the connection; the new body starts afresh.
+      this.gatherer?.cancel()
+      this.gatherer = undefined
+      this.handbuilder?.cancel()
+      this.handbuilder = undefined
       clearInterval(this.dutyTimer)
       this.dutyFollowing = false
       this.floor?.setOnline(this.cfg.name, false)

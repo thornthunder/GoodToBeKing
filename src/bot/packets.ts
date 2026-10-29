@@ -194,3 +194,35 @@ export function normalisePlayerList(
   }
   return (raw.records ?? []).map((record) => ({ type: raw.type, record }))
 }
+
+/**
+ * Bedrock 1.26.60 added the item stack action `craft_reserved`. BDS reads each action's body by
+ * its `legacy_type_id` byte (the pre-1.26.40 numbering), and there it is 18, so `non_implemented`
+ * and `results_deprecated` moved up to 19 and 20. bedboo, written for 1.26.51, still sends 18 and
+ * 19: every craft (which ends with `results_deprecated`) then made the server drop the bot. Drop
+ * this with the minecraft-data patch once bedboo supports the server's version.
+ */
+const LEGACY_ACTION_IDS_1_26_60: Record<string, number> = {
+  craft_reserved: 18,
+  non_implemented: 19,
+  results_deprecated: 20,
+}
+
+interface StackRequestLike {
+  actions?: Array<{ type_id?: string; legacy_type_id?: number }>
+}
+
+/** Correct an outgoing item stack request's legacy action bytes for 1.26.60, in place. */
+export function fixStackRequest(request: StackRequestLike | undefined): void {
+  for (const action of request?.actions ?? []) {
+    const fixed = action.type_id ? LEGACY_ACTION_IDS_1_26_60[action.type_id] : undefined
+    if (fixed !== undefined) action.legacy_type_id = fixed
+  }
+}
+
+/** Correct any item stack requests in an outgoing packet (standalone, or inside player input). */
+export function fixOutgoing(name: string, params: unknown): void {
+  const p = params as { requests?: StackRequestLike[]; item_stack_request?: StackRequestLike }
+  if (name === 'item_stack_request') for (const r of p.requests ?? []) fixStackRequest(r)
+  else if (name === 'player_auth_input') fixStackRequest(p.item_stack_request)
+}
