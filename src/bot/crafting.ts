@@ -5,6 +5,9 @@ import { errMsg, sleep, withTimeout } from '../util'
 
 type Block = NonNullable<ReturnType<MineflayerBot['blockAt']>>
 
+const ROOM =
+  /^(air|short_grass|tall_grass|fern|large_fern|snow_layer|leaf_litter|wildflowers|[a-z_]*flower|poppy|dandelion|[a-z_]*_tulip)$/
+
 /** Planks from the logs carried, four from each (enough for `want`). */
 export async function makePlanks(bot: MineflayerBot, log: Logger, want: number): Promise<void> {
   for (const item of bot.inventory.items().filter((i) => /_log$/.test(i.name))) {
@@ -111,11 +114,16 @@ async function putDownTable(bot: MineflayerBot, log: Logger): Promise<Block | un
     [0, -2],
     [1, 1],
     [-1, -1],
+    [1, -1],
+    [-1, 1],
+    [2, 1],
+    [-2, -1],
   ]) {
     const spot = new Vec3(me.x + dx, me.y, me.z + dz)
     const floor = bot.blockAt(spot.offset(0, -1, 0))
     const there = bot.blockAt(spot)
-    if (!floor || floor.boundingBox !== 'block' || !there || there.name !== 'air') continue
+    // Grass and flowers make way for a block put down on them.
+    if (!floor || floor.boundingBox !== 'block' || !there || !ROOM.test(there.name)) continue
     try {
       await bot.equip(table, 'hand')
       await withTimeout(bot.placeBlock(floor, new Vec3(0, 1, 0)), 5_000)
