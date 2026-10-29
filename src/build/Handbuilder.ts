@@ -1,6 +1,7 @@
 import type { Chest, Bot as MineflayerBot } from 'mineflayer-bedrock'
 import { Movements, goals, type Pathfinder } from 'mineflayer-pathfinder'
 import { Vec3 } from 'vec3'
+import { craft } from '../bot/crafting'
 import type { Gatherer } from '../bot/gathering'
 import type { Logger } from '../logger'
 import { errMsg, sleep, withTimeout } from '../util'
@@ -176,9 +177,11 @@ export class Handbuilder {
     const want = new Map<string, number>()
     for (const c of job.cells) if (!this.inPlace(c)) want.set(c.block, (want.get(c.block) ?? 0) + 1)
     for (const [block, n] of want) want.set(block, Math.max(0, n - this.carried(block)))
-    // A door is made of six planks at a crafting table, itself four planks.
+    // A door is made of six planks at a crafting table, itself four planks; a chest of eight.
     const doors = want.get('wooden_door') ?? 0
     if (doors > 0) want.set('planks', (want.get('planks') ?? 0) + 6 * doors + 4)
+    const chests = want.get('chest') ?? 0
+    if (chests > 0) want.set('planks', (want.get('planks') ?? 0) + 8 * chests + 4)
     // A few blocks to tower up on, in case a spot is out of reach.
     want.set('dirt', Math.max(0, (want.get('dirt') ?? 0) + 6 - this.carried('dirt')))
     return want
@@ -222,6 +225,8 @@ export class Handbuilder {
       await this.makeTorches(this.needs(job).get('torch') ?? 0)
     const doors = this.needs(job).get('wooden_door') ?? 0
     for (let i = 0; i < doors && !this.cancelled; i++) await this.makeDoor()
+    const chests = this.needs(job).get('chest') ?? 0
+    if (chests > 0 && !this.cancelled) await craft(this.bot, this.log, 'chest', chests)
   }
 
   /** Take up to `count` matching items out of the chest; returns how many it could not find. */

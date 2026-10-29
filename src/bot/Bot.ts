@@ -41,6 +41,7 @@ import { chooseFarm } from '../build/farm'
 import { Handbuilder } from '../build/Handbuilder'
 import {
   bedCells,
+  chestCells,
   doorCells,
   floorCells,
   furnaceCells,
@@ -124,6 +125,7 @@ const HALL_WORK_TITLES: Record<HallWork, string> = {
   beds: 'beds',
   repair: 'repairs',
   furnace: 'a furnace',
+  chest: 'a chest for the storehouse',
 }
 const HALL_WORK_CELLS: Record<
   HallWork,
@@ -137,6 +139,7 @@ const HALL_WORK_CELLS: Record<
   beds: (hall, names) => bedCells(hall, names, 8),
   repair: repairCells,
   furnace: furnaceCells,
+  chest: chestCells,
 }
 
 /** bedboo reads a bed's state from its block (not in mineflayer-bedrock's types). */
@@ -321,7 +324,8 @@ export class Bot extends EventEmitter {
     if (this.building || this.mason.busy || this.gathering || this.handbuilder?.busy) return false
     if (this.survival?.busy) return false
     if (Date.now() < this.worksPausedUntil) return false
-    if (this.movement?.current() && !this.dutyFollowing) return false
+    const walking = this.movement?.current()
+    if (walking && !this.dutyFollowing && walking.kind !== 'going') return false
     if (this.cfg.duty?.auto && this.dutyTarget() && Date.now() >= this.dutyPausedUntil) return false
     if (this.brain.post?.()) return false // on a royal's orders
     return true
@@ -1110,6 +1114,10 @@ export class Bot extends EventEmitter {
       this.household?.storehouse
     )
     if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
+    if (work === 'chest' && result.missing === 0 && cells[0]) {
+      this.household?.setStorehouse(cells[0], this.cfg.name)
+      this.log.info(`the new chest at ${cells[0].x},${cells[0].y},${cells[0].z} is the storehouse`)
+    }
     if (result.cancelled) return
     const short = Object.entries(result.short)
       .map(([block, n]) => `${n} ${block.replace(/_/g, ' ')}`)

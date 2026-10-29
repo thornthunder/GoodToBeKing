@@ -243,10 +243,22 @@ export function repairCells(hall: Hall, names: BlockNames): HandCell[] {
   return cells
 }
 
+/** A chest for the storehouse, placed like the furnace; none if the hall has one. */
+export function chestCells(hall: Hall, names: BlockNames): HandCell[] {
+  if (hall.inside.some(([x, z]) => /^(chest|barrel)$/.test(names(x, hall.floorY, z) ?? '')))
+    return []
+  return againstWall(hall, names).map(([x, z]) => ({ x, y: hall.floorY, z, block: 'chest' }))
+}
+
 /** A furnace on the floor against a wall, clear of the doorway and the beds; none if there is one. */
 export function furnaceCells(hall: Hall, names: BlockNames): HandCell[] {
+  if (hall.inside.some(([x, z]) => /furnace$/.test(names(x, hall.floorY, z) ?? ''))) return []
+  return againstWall(hall, names).map(([x, z]) => ({ x, y: hall.floorY, z, block: 'furnace' }))
+}
+
+/** A free spot on the floor against a solid wall, clear of the doorway and of beds. */
+function againstWall(hall: Hall, names: BlockNames): Array<[number, number]> {
   const y = hall.floorY
-  if (hall.inside.some(([x, z]) => /furnace$/.test(names(x, y, z) ?? ''))) return []
   const isRing = new Set(hall.ring.map(([x, z]) => `${x},${z}`))
   const sides = [
     [1, 0],
@@ -262,7 +274,7 @@ export function furnaceCells(hall: Hall, names: BlockNames): HandCell[] {
       const n = names(x + dx, y, z + dz)
       return isRing.has(`${x + dx},${z + dz}`) && n !== undefined && !open(n) && !DOOR.test(n)
     })
-    if (wall) return [{ x, y, z, block: 'furnace' }]
+    if (wall) return [[x, z]]
   }
   return []
 }

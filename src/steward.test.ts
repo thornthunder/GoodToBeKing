@@ -119,6 +119,13 @@ describe("the Castellan's account", () => {
     })
   })
 
+  it('has a new chest made when the storehouse was blown up, after the repairs', () => {
+    expect(plan({ ...base, storehouse: false, storehouseLost: true })[0]).toEqual({
+      kind: 'hallwork',
+      work: 'chest',
+    })
+  })
+
   it('sends nobody out at night: no field, no hunt, no wood; cooking indoors goes on', () => {
     const night = { ...base, night: true, foodInStore: 2, freeHunter: 'Dyke', woodInStore: 3 }
     expect(plan({ ...night, farm: { exists: true, work: 4 } })).toEqual([])

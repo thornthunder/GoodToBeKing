@@ -20,6 +20,8 @@ export interface CourtState {
   freeBuilder?: string
   builderWithBeds?: string
   builderWithCoal?: string
+  /** The storehouse chest was there once and is gone (blown up): a new one is wanted. */
+  storehouseLost?: boolean
   /** What the hall still lacks, in blocks (0 = done); `repair`: holes against its known shape. */
   hall: { roof: number; door: number; light: number; repair: number }
   /** The storehouse holds coal (for torches). */
@@ -81,6 +83,7 @@ export function plan(s: CourtState): StewardAction[] {
   if (s.freeBuilder) {
     // A hall with holes lets the monsters in: mend it before anything else.
     if (s.hall.repair > 0) out.push({ kind: 'hallwork', work: 'repair' })
+    else if (s.storehouseLost) out.push({ kind: 'hallwork', work: 'chest' })
     else if (s.hall.roof > 0) out.push({ kind: 'hallwork', work: 'roof' })
     else if (s.hall.door > 0) out.push({ kind: 'hallwork', work: 'door' })
     else if (s.builderWithBeds && s.bedsInHall < s.courtiers)

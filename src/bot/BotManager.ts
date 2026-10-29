@@ -253,6 +253,13 @@ export class BotManager {
       staff.find((b) => b.cfg.canBuild && b.isFree() && b.carries(items) > 0)?.cfg.name
     let beds = 0
     for (const [x, z] of hall.inside) if (/bed$/.test(names(x, hall.floorY, z) ?? '')) beds++
+    // The storehouse chest still standing (a creeper may have taken it, and all in it).
+    const chest = this.household.storehouse
+    const storehouseThere =
+      chest !== undefined &&
+      /^(chest|trapped_chest|barrel)$/.test(names(chest.x, chest.y, chest.z) ?? '')
+    if (chest && !storehouseThere && names(chest.x, chest.y, chest.z) !== undefined)
+      this.household.noteStock({})
     const stock = this.household.stock.items
     const sum = (re: RegExp) =>
       Object.entries(stock)
@@ -301,7 +308,8 @@ export class BotManager {
       )?.cfg.name,
       woodInStore: sum(/_log$/) + Math.floor(sum(/_planks$/) / 4),
       freeHand: staff.find((b) => b.isFree() && !b.buildsByMagic())?.cfg.name,
-      storehouse: Boolean(this.household.storehouse),
+      storehouse: storehouseThere,
+      storehouseLost: Boolean(this.household.storehouse) && !storehouseThere,
       night: castellan.isNight(),
     }
     // Beds in the hall: each courtier taps one, so it respawns at home (one a round).
@@ -1115,7 +1123,7 @@ export class BotManager {
     } else if (verb === 'hall') {
       // <bot> hall <roof|floor|light|door|beds> [for <player>] (by hand, survival)
       const work = words[2] as HallWork
-      if (!['roof', 'floor', 'light', 'door', 'beds', 'repair', 'furnace'].includes(work))
+      if (!['roof', 'floor', 'light', 'door', 'beds', 'repair', 'furnace', 'chest'].includes(work))
         return this.log.warn('usage: <bot> hall <roof|floor|light|door|beds> [for <player>]')
       void bot.startHallWork(work, requestedBy)
     } else if (verb === 'hunt') {
