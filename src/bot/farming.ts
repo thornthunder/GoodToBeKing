@@ -70,6 +70,7 @@ export class Farmer {
       })
     }
     if (this.count(HOE) === 0) {
+      this.log.info('making a hoe')
       // Sticks and the hoe are made of planks, and so is a crafting table: eight in all.
       if (this.count(/_planks$/) < 8)
         await makePlanks(this.bot, this.log, 8 - this.count(/_planks$/))
@@ -127,7 +128,9 @@ export class Farmer {
   /** Break grass near the field until there are `want` seeds (or it has tried enough). */
   private async seedsFromGrass(farm: Farm, want: number): Promise<void> {
     const [cx, cz] = farm.cells[0]
-    for (let tries = 0; tries < 60 && this.count(SEEDS) < want; tries++) {
+    const until = Date.now() + 90_000
+    const before = this.count(SEEDS)
+    for (let tries = 0; tries < 60 && this.count(SEEDS) < want && Date.now() < until; tries++) {
       const grass = this.bot.findBlocks({
         matching: (b: { name: string }) => GRASS.test(b.name),
         point: new Vec3(cx, farm.y + 1, cz),
@@ -140,6 +143,9 @@ export class Farmer {
       await withTimeout(this.bot.dig(block, true), 5_000).catch(() => {})
       await this.pickUp(block.position)
     }
+    this.log.info(
+      `broke grass for seeds: ${this.count(SEEDS) - before} found, ${this.count(SEEDS)} in all`
+    )
   }
 
   /** Use an item on the top of a block (a hoe on soil, seeds on farmland). */

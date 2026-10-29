@@ -100,6 +100,8 @@ export class Movement {
     // Survival (doors): no drop that hurts; a fall of more than three blocks costs health.
     if (doors) movements.maxDropDown = 3
     this.bot.pathfinder.setMovements(movements)
+    // Paths through a door (the hall's) take a while to work out.
+    this.bot.pathfinder.thinkTimeout = 10_000
   }
 
   current(): Activity {
