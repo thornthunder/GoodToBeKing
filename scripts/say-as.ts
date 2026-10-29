@@ -9,7 +9,7 @@ import { serverOptions } from '../src/bot/Bot'
 import { defaultBotConfig } from '../src/config'
 import { sleep } from '../src/util'
 
-const ANSWER_MS = 30_000
+const ANSWER_MS = Number(process.env.ANSWER_MS) || 30_000
 
 async function main(): Promise<void> {
   const [player, ...lines] = process.argv.slice(2)
