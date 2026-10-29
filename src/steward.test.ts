@@ -15,6 +15,8 @@ const base: CourtState = {
   foodInStore: 10,
   rawInStore: 0,
   furnace: true,
+  farm: { exists: true, work: 0 },
+  seeds: 8,
   woodInStore: 20,
   freeHand: 'Bruce',
   storehouse: true,
@@ -93,6 +95,22 @@ describe("the Castellan's account", () => {
       to: 'Henry',
       then: 'furnace',
       why: 'a furnace for the hall',
+    })
+  })
+
+  it('lays out a wheat field, tends it, and asks Merlin for seeds only to start it', () => {
+    expect(plan({ ...base, farm: { exists: false, work: 0 } })).toEqual([
+      { kind: 'farm', by: 'Bruce' },
+    ])
+    expect(plan({ ...base, farm: { exists: true, work: 3 } })).toEqual([
+      { kind: 'farm', by: 'Bruce' },
+    ])
+    expect(plan({ ...base, farm: { exists: false, work: 0 }, seeds: 0 })).toContainEqual({
+      kind: 'magic',
+      item: 'wheat_seeds',
+      count: 8,
+      to: 'Bruce',
+      why: 'seeds for a wheat field',
     })
   })
 

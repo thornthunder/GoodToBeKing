@@ -34,6 +34,10 @@ export interface CourtState {
   builderWithFurnace?: string
   /** A free courtier to hunt (a guard first, they carry swords). */
   freeHunter?: string
+  /** The wheat field: whether there is one, and how many squares want work now. */
+  farm: { exists: boolean; work: number }
+  /** Wheat seeds the court has (storehouse and pockets). */
+  seeds: number
   /** Wood in the storehouse, in logs (four planks count as one). */
   woodInStore: number
   /** A free member of the staff for errands. */
@@ -55,6 +59,8 @@ export type StewardAction =
   | { kind: 'hunt'; animals: number; by: string }
   /** Cook the storehouse's raw meat in the hall's furnace. */
   | { kind: 'cook'; by: string }
+  /** Lay out the wheat field, or tend it (till, plant, harvest, bake). */
+  | { kind: 'farm'; by: string }
 
 /** Merlin keeps this much of the hour's magic for the royal family. */
 export const MAGIC_RESERVE = 2
@@ -80,9 +86,15 @@ export function plan(s: CourtState): StewardAction[] {
     else if (s.builderWithFurnace && !s.furnace)
       out.push({ kind: 'hallwork', work: 'furnace', by: s.builderWithFurnace })
   }
+  // The field first: bread is the court's food for good (hunting thins the animals out).
+  const farmer =
+    s.storehouse && s.freeHand && (s.farm.exists ? s.farm.work > 0 : s.seeds > 0)
+      ? s.freeHand
+      : undefined
+  if (farmer) out.push({ kind: 'farm', by: farmer })
   // Food by hand: cook what was hunted, or hunt.
   const hungry = s.foodInStore < FOOD_RESERVE
-  if (hungry && s.storehouse && s.freeHunter) {
+  if (hungry && s.storehouse && s.freeHunter && s.freeHunter !== farmer) {
     if (s.rawInStore > 0 && s.furnace) out.push({ kind: 'cook', by: s.freeHunter })
     else if (s.rawInStore < FOOD_RESERVE) out.push({ kind: 'hunt', animals: 3, by: s.freeHunter })
   }
@@ -99,6 +111,9 @@ export function plan(s: CourtState): StewardAction[] {
       then: 'beds',
       why: 'beds for the court',
     })
+  // Seeds, once, to start the field (after that it gives its own).
+  if (!s.farm.exists && s.seeds === 0 && s.freeHand && s.storehouse)
+    wants.push({ item: 'wheat_seeds', count: 8, to: s.freeHand, why: 'seeds for a wheat field' })
   // A furnace, once, so the meat can be cooked.
   if (!s.furnace && !s.builderWithFurnace && s.freeBuilder && s.storehouse)
     wants.push({

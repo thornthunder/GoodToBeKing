@@ -37,6 +37,7 @@ import { SEE_THROUGH } from '../build/sites'
 import { Vec3 as WorldVec } from 'vec3'
 import type { ChatFloor } from './ChatFloor'
 import { goals, type Pathfinder } from 'mineflayer-pathfinder'
+import { chooseFarm } from '../build/farm'
 import { Handbuilder } from '../build/Handbuilder'
 import {
   bedCells,
@@ -52,6 +53,7 @@ import {
 } from '../build/hall'
 import type { Household } from '../household'
 import { Cook } from './cooking'
+import { Farmer } from './farming'
 import { Gatherer, type Material } from './gathering'
 import { GAME, Hunter, SPOILS } from './hunting'
 import { FOODS, Survival, isNight } from './survival'
@@ -204,6 +206,7 @@ export class Bot extends EventEmitter {
   /** Hunting and cooking for the court's food (survival). */
   private hunter?: Hunter
   private cook?: Cook
+  private farmer?: Farmer
   /** Eating and, for guards, fighting (survival). */
   private survival?: Survival
   private died = false
@@ -812,6 +815,7 @@ export class Bot extends EventEmitter {
     this.gatherer = new Gatherer(body, this.log.child('gather'), (name) => this.isBot(name))
     this.hunter = new Hunter(body, this.log.child('hunt'), (name) => this.isBot(name))
     this.cook = new Cook(body, this.log.child('cook'), this.gatherer)
+    this.farmer = new Farmer(body, this.log.child('farm'), this.gatherer)
     this.handbuilder = new Handbuilder(body, this.log.child('hands'), this.gatherer, () =>
       this.movement?.configure()
     )
@@ -1155,6 +1159,42 @@ export class Bot extends EventEmitter {
     }
   }
 
+  /**
+   * Lay out the court's wheat field near home (once: flat untouched soil, by water if there is
+   * any, clear of the hall) and tend it: till, plant, harvest, bake, store.
+   */
+  async startFarming(): Promise<void> {
+    const farmer = this.farmer
+    const body = this.body
+    const home = this.household?.home
+    if (!farmer || !body || !home || this.gathering || !byHand(this.gameMode())) return
+    let farm = this.household?.farm
+    if (!farm) {
+      const names = (x: number, y: number, z: number) => body.blockAt(new WorldVec(x, y, z))?.name
+      const hall = this.household?.hall
+      farm = chooseFarm(names, home, {
+        keepClear: hall ? [...hall.ring, ...hall.inside] : [[home.x, home.z]],
+      })
+      if (!farm) return void this.log.info('found no flat, untouched soil near home for a field')
+      this.household?.setFarm(farm)
+      this.log.info(
+        `laid out a wheat field at ${farm.cells[0].join(',')} (${farm.watered ? 'by water' : 'dry'})`
+      )
+    }
+    this.gathering = true
+    this.pauseWorks()
+    this.dutyFollowing = false
+    this.movement?.stop()
+    try {
+      await farmer.tend(farm, this.household?.storehouse)
+      if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
+    } catch (err) {
+      this.log.warn(`farming failed: ${errMsg(err)}`)
+    } finally {
+      this.gathering = false
+    }
+  }
+
   /** Cook the storehouse's raw meat in the hall's furnace. Returns how much it cooked. */
   async startCooking(): Promise<number> {
     const cook = this.cook
@@ -1232,6 +1272,12 @@ export class Bot extends EventEmitter {
   /** Magic left this hour (Merlin); 0 for the others. */
   magicLeft(): number {
     return this.magic?.magicLeft() ?? 0
+  }
+
+  /** A block state property at a spot (a crop's growth), as this bot sees it. */
+  blockProperty(x: number, y: number, z: number, name: string): unknown {
+    const block = this.body?.blockAt(new WorldVec(x, y, z))
+    return (block?.getProperties?.() as Record<string, unknown> | undefined)?.[name]
   }
 
   /** The name of the block at a spot as this bot sees it; undefined where nothing is loaded. */
@@ -1749,6 +1795,7 @@ export class Bot extends EventEmitter {
       this.hunter?.cancel()
       this.hunter = undefined
       this.cook = undefined
+      this.farmer = undefined
       clearInterval(this.dutyTimer)
       this.dutyFollowing = false
       this.floor?.setOnline(this.cfg.name, false)

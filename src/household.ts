@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import type { Farm } from './build/farm'
 
 /** A place the royal family chose, and who chose it when. */
 export interface Spot {
@@ -24,6 +25,8 @@ interface Saved {
   home?: Spot
   storehouse?: Spot
   hall?: SavedHall
+  /** The court's wheat field (see build/farm.ts). */
+  farm?: Farm
   /** Courtiers whose respawn point is a bed in the hall, and which bed. */
   spawns?: Record<string, { x: number; y: number; z: number }>
   /** What was in the storehouse when a courtier last opened it: item name -> count. */
@@ -63,6 +66,15 @@ export class Household {
 
   setHall(hall: Omit<SavedHall, 'at'>, now = Date.now()): void {
     this.data.hall = { ...hall, at: now }
+    this.save()
+  }
+
+  get farm(): Farm | undefined {
+    return this.data.farm
+  }
+
+  setFarm(farm: Farm): void {
+    this.data.farm = farm
     this.save()
   }
 

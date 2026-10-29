@@ -35,6 +35,7 @@ import { Household } from '../household'
 import { doorCells, lightCells, repairCells, roofCells, surveyHall } from '../build/hall'
 import { plan, type CourtState, type StewardAction } from '../steward'
 import { RAW } from './cooking'
+import { farmNeed } from '../build/farm'
 import { FOODS } from './survival'
 import type { HallWork } from '../ai/Brain'
 import { ChatFloor } from './ChatFloor'
@@ -291,6 +292,8 @@ export class BotManager {
       rawInStore: sum(RAW),
       furnace: hall.inside.some(([x, z]) => /furnace$/.test(names(x, hall.floorY, z) ?? '')),
       builderWithFurnace: carrying(/^furnace$/),
+      farm: { exists: Boolean(this.household.farm), work: this.farmWork(names) },
+      seeds: sum(/^wheat_seeds$/) + this.bots.reduce((n, b) => n + b.carries(/^wheat_seeds$/), 0),
       // Guards first: they carry swords. Then anyone of the staff.
       freeHunter: (
         staff.find((b) => b.isGuard() && b.isFree() && !b.buildsByMagic()) ??
@@ -314,6 +317,22 @@ export class BotManager {
     const actions = plan(state)
     this.log.debug(`housekeeping: ${JSON.stringify(state)} -> ${JSON.stringify(actions)}`)
     for (const action of actions) await this.carryOutHousekeeping(castellan, merlin, action)
+  }
+
+  /** Squares of the field that want tilling, planting or harvesting now. */
+  private farmWork(names: (x: number, y: number, z: number) => string | undefined): number {
+    const farm = this.household.farm
+    if (!farm) return 0
+    const eyes = this.bots.find((b) => {
+      const p = b.position()
+      return p && Math.hypot(p.x - farm.cells[0][0], p.z - farm.cells[0][1]) < 48
+    })
+    let work = 0
+    for (const [x, z] of farm.cells) {
+      const growth = eyes?.blockProperty(x, farm.y + 1, z, 'growth')
+      if (farmNeed(names(x, farm.y, z), names(x, farm.y + 1, z), Number(growth ?? 0))) work++
+    }
+    return work
   }
 
   private async carryOutHousekeeping(
@@ -342,6 +361,13 @@ export class BotManager {
         if (!hunter) return
         this.log.info(`housekeeping: ${hunter.cfg.name} goes hunting for the court's food`)
         void hunter.startHunt(action.animals)
+        return
+      }
+      case 'farm': {
+        const farmer = by(action.by)
+        if (!farmer) return
+        this.log.info(`housekeeping: ${farmer.cfg.name} tends the wheat field`)
+        void farmer.startFarming()
         return
       }
       case 'cook': {
@@ -1123,6 +1149,8 @@ export class BotManager {
       void bot.startHunt(Number(words[2]) || 2)
     } else if (verb === 'cook') {
       void bot.startCooking()
+    } else if (verb === 'farm') {
+      void bot.startFarming()
     } else if (verb === 'bed') {
       // <bot> bed: go to bed now, as when a royal lies down at night (survival)
       void bot.goToBed()
