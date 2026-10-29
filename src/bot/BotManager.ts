@@ -239,8 +239,10 @@ export class BotManager {
     this.lastHousekeeping = Date.now()
     const names = (x: number, y: number, z: number) => eyes.nameAt(x, y, z)
     const surveyed = surveyHall(names, home)
+    // Whole: remember it, so damage later (endermen, creepers) can be measured against it.
+    if (typeof surveyed !== 'string') this.household.setHall(surveyed)
     const hall = typeof surveyed === 'string' ? this.household.hall : surveyed
-    if (!hall) return
+    if (!hall) return void this.log.info(`housekeeping: cannot see the hall (${surveyed})`)
     const merlin = this.bots.find((b) => b.cfg.magic)
     const staff = this.bots.filter(
       (b) => b.cfg.reportsTo?.toLowerCase() === castellan.cfg.name.toLowerCase() && !b.cfg.magic
