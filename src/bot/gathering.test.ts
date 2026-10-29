@@ -27,6 +27,8 @@ describe('untouched land', () => {
     expect(untouched('dirt', world({ '10,65,10': 'torch' }), 10, 64, 10)).toBe(false)
     // Ground with a hole beside it is not taken either: the bots never dig big pits.
     expect(untouched('dirt', world({ '9,64,10': 'air' }), 10, 64, 10)).toBe(false)
+    // Nor the floor of a hole: that way a bot once dug itself a shaft six deep.
+    expect(untouched('dirt', world({ '10,64,10': 'air' }), 10, 63, 10)).toBe(false)
   })
 
   it('chops logs only from trees, with leaves close by', () => {

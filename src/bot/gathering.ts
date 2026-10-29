@@ -78,6 +78,15 @@ export function untouched(
   }
   const above = names(x, y + 1, z)
   if (!above || !COVER.test(above)) return false
+  // Open sky all round: the floor of a hole (even the one the bot stands in) is not the surface,
+  // or a bot would dig itself into a shaft it cannot climb out of.
+  const open = [
+    names(x + 1, y + 1, z),
+    names(x - 1, y + 1, z),
+    names(x, y + 1, z + 1),
+    names(x, y + 1, z - 1),
+  ]
+  if (!open.every((n) => n !== undefined && COVER.test(n))) return false
   const sides = [names(x + 1, y, z), names(x - 1, y, z), names(x, y, z + 1), names(x, y, z - 1)]
   if (!sides.every((n) => n !== undefined && GROUND.test(n))) return false
   const below = names(x, y - 1, z)
@@ -173,8 +182,10 @@ export class Gatherer {
       .map((p) => p.entity.position)
   }
 
-  /** May this block be dug: untouched land, far enough from every player. */
+  /** May this block be dug: untouched land, far enough from every player, not underfoot. */
   private allowed(material: Material, p: Vec3, players: Vec3[]): boolean {
+    const me = this.bot.entity?.position.floored()
+    if (me && Math.abs(me.x - p.x) <= 1 && Math.abs(me.z - p.z) <= 1 && p.y < me.y) return false
     return (
       players.every((q) => q.distanceTo(p) >= KEEP_AWAY) &&
       untouched(material, this.names, p.x, p.y, p.z)
