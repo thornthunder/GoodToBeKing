@@ -62,6 +62,9 @@ describe('the hall survey', () => {
     const torches = lightCells(h, names)
     expect(torches.length).toBeGreaterThan(1)
     expect(torches.every((c) => c.block === 'torch' && c.y === 65 && c.against)).toBe(true)
+    // With those torches up, none are wanted any more.
+    const lit = hall(Object.fromEntries(torches.map((c) => [`${c.x},${c.y},${c.z}`, 'torch'])))
+    expect(lightCells(h, lit)).toEqual([])
     expect(doorCells(h, names)).toEqual([{ x: 2, y: 64, z: -1, block: 'wooden_door' }])
   })
 

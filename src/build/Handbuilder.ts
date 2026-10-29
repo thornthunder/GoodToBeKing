@@ -138,7 +138,8 @@ export class Handbuilder {
     const movements = new Movements(this.bot as any)
     movements.canDig = false
     movements.allowParkour = false
-    movements.canOpenDoors = false
+    // Builders work in survival only, where the hall has a door to get in and out by.
+    movements.canOpenDoors = true
     movements.allow1by1towers = tower
     movements.scafoldingBlocks = tower
       ? ['dirt', 'cobblestone']

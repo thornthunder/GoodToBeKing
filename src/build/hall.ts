@@ -136,8 +136,11 @@ export function lightCells(hall: Hall, names: BlockNames): HandCell[] {
   const y = hall.floorY + 1
   const isRing = new Set(hall.ring.map(([x, z]) => `${x},${z}`))
   const cells: HandCell[] = []
+  // Torches already up count too: none closer than five blocks to another.
+  const lit = hall.inside.filter(([x, z]) => /torch/.test(names(x, y, z) ?? ''))
   for (const [x, z] of hall.inside) {
     if (!open(names(x, y, z)) || /torch/.test(names(x, y, z) ?? '')) continue
+    if (lit.some(([tx, tz]) => Math.abs(tx - x) + Math.abs(tz - z) < 5)) continue
     const wall = (
       [
         [1, 0],
