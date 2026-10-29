@@ -299,11 +299,10 @@ export function reinforceCells(hall: Hall, names: BlockNames): HandCell[] {
   const roofY = hall.wallTop + 1
   for (const [x, z] of hall.ring)
     for (let y = hall.floorY; y <= roofY; y++)
-      if (EARTH.test(names(x, y, z) ?? ''))
-        cells.push({ x, y, z, block: 'cobblestone', replace: true })
+      if (EARTH.test(names(x, y, z) ?? '')) cells.push({ x, y, z, block: 'stone', replace: true })
   for (const [x, z] of hall.inside)
     if (EARTH.test(names(x, roofY, z) ?? ''))
-      cells.push({ x, y: roofY, z, block: 'cobblestone', replace: true })
+      cells.push({ x, y: roofY, z, block: 'stone', replace: true })
   return cells
 }
 

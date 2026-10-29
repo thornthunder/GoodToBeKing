@@ -332,6 +332,7 @@ export class BotManager {
         work: this.farmWork(names, seedsHad, sum(/^wheat$/)),
       },
       cobblestone: sum(/^(cobblestone|cobbled_deepslate)$/),
+      stone: sum(/^(cobblestone|cobbled_deepslate|andesite|diorite|granite|tuff|stone)$/),
       mineEnded: Boolean(this.household.mine?.ended),
       seeds: seedsHad,
       // Guards first: they carry swords. Then anyone of the staff.

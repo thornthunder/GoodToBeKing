@@ -11,6 +11,8 @@ import type { HandCell } from './hall'
 const GROUPS: Record<string, RegExp> = {
   planks: /_planks$/,
   log: /_log$/,
+  // Any stone a mine gives: cobblestone, andesite, diorite, granite...
+  stone: /^(cobblestone|andesite|diorite|granite|tuff|cobbled_deepslate|stone)$/,
   // Whatever closes a hole, sturdiest first (see FILLER_ORDER).
   filler: /(_planks|^cobblestone|^dirt)$/,
 }

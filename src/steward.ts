@@ -54,8 +54,10 @@ export interface CourtState {
   farm: { exists: boolean; work: number }
   /** Wheat seeds the court has (storehouse and pockets). */
   seeds: number
-  /** Cobblestone in the storehouse. */
+  /** Cobblestone in the storehouse (the furnace and stone tools need it). */
   cobblestone: number
+  /** Any stone in the storehouse, cobblestone included (andesite and the like do for walls). */
+  stone?: number
   /** The court's mine has ended for good (water, lava, a cave, deep enough): no more stone from it. */
   mineEnded: boolean
   /** Wood in the storehouse, in logs (four planks count as one). */
@@ -144,7 +146,7 @@ export function plan(s: CourtState): StewardAction[] {
   else if (!s.furnace && s.cobblestone >= 8 && s.storehouse) jobs.push({ work: 'furnace' })
   // Stone for the dirt in walls and roof (endermen, creepers), with stone to spare after the furnace.
   // (Only once the furnace stands: its eight cobblestone come first.)
-  if ((s.hall.earth ?? 0) > 0 && s.furnace && s.cobblestone >= 8 && s.storehouse)
+  if ((s.hall.earth ?? 0) > 0 && s.furnace && (s.stone ?? s.cobblestone) >= 8 && s.storehouse)
     jobs.push({ work: 'reinforce' })
   for (const job of jobs) {
     if (rests(`hallwork:${job.work}`)) continue

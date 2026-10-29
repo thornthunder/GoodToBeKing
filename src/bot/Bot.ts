@@ -1268,6 +1268,8 @@ export class Bot extends EventEmitter {
     const chest = this.household?.storehouse
     if (!miner || !body || !home || !chest || this.gathering || !byHand(this.gameMode())) return 0
     let mine = this.household?.mine
+    // An older mine that stopped at its depth limit goes on as a tunnel now.
+    if (mine?.ended === 'deep enough') mine.ended = undefined
     if (!mine) {
       const names = (x: number, y: number, z: number) => body.blockAt(new WorldVec(x, y, z))?.name
       const hall = this.household?.hall

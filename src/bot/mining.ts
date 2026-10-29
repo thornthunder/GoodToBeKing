@@ -30,19 +30,23 @@ export const ORE = /^(deepslate_)?(coal|iron|copper)_ore$/
 /** Iron and copper need a stone pickaxe at least. */
 const NEEDS_STONE_PICK = /(iron|copper)_ore$/
 const DANGER = /^(flowing_)?(water|lava)$/
-/** No deeper than this (caves and lava lie further down). */
+/** No deeper than this (caves and lava lie further down); then a level tunnel, this long in all. */
 export const MAX_STEPS = 18
+export const MAX_LENGTH = 80
 const PICKS = [/^iron_pickaxe$/, /^stone_pickaxe$/, /^wooden_pickaxe$/]
 
 /** Where the staircase's n-th step puts the feet. */
 export function stepAt(mine: Mine, n: number): Vec3 {
-  return new Vec3(mine.x + mine.dx * n, mine.y - n, mine.z + mine.dz * n)
+  // Down to the depth limit, then on as a level tunnel.
+  const down = Math.min(n, MAX_STEPS)
+  return new Vec3(mine.x + mine.dx * n, mine.y - down, mine.z + mine.dz * n)
 }
 
 /** The blocks to dig for step n: the feet, the head, and the headroom of stepping down. */
 export function stepCells(mine: Mine, n: number): Vec3[] {
   const f = stepAt(mine, n)
-  return [f.offset(0, 2, 0), f.offset(0, 1, 0), f]
+  // Stepping down needs a third block of headroom; the level tunnel only two.
+  return n <= MAX_STEPS ? [f.offset(0, 2, 0), f.offset(0, 1, 0), f] : [f.offset(0, 1, 0), f]
 }
 
 type MineBot = MineflayerBot & { pathfinder: Pathfinder }
@@ -133,8 +137,8 @@ export class Miner {
     }
     while (!this.cancelled && Date.now() < until && this.count('cobblestone') - before < want) {
       if (mine.ended) break
-      if (mine.steps >= MAX_STEPS) {
-        mine.ended = 'deep enough'
+      if (mine.steps >= MAX_LENGTH) {
+        mine.ended = 'long enough'
         break
       }
       const n = mine.steps + 1
@@ -159,7 +163,6 @@ export class Miner {
       // A torch every fourth step: no monsters spawning in the dark of the stairs.
       if (n % 4 === 0) await this.torch(stepAt(mine, n - 1))
       // Upgrade the pickaxe as soon as the cobblestone allows.
-      if (this.count('stone_pickaxe') === 0 && this.count('cobblestone') >= 3) await this.pickaxe()
     }
     result.cobblestone = Math.max(0, this.count('cobblestone') - before)
     result.ended = mine.ended

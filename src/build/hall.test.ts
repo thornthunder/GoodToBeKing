@@ -151,7 +151,7 @@ describe('stone facing', () => {
     const stone = reinforceCells(h, names)
     // 24 wall columns three high, less the doorway's two blocks.
     expect(stone).toHaveLength(24 * 3 - 2)
-    expect(stone.every((c) => c.block === 'cobblestone' && c.replace)).toBe(true)
+    expect(stone.every((c) => c.block === 'stone' && c.replace)).toBe(true)
     const planked = hall({ '5,64,2': 'oak_planks' })
     expect(reinforceCells(h, planked)).toHaveLength(24 * 3 - 3)
   })
