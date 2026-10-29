@@ -287,6 +287,26 @@ export function repairCells(hall: Hall, names: BlockNames): HandCell[] {
   return cells
 }
 
+/** Earth a monster can carry off or blow away easily: the hall's dirt, turned to stone. */
+const EARTH = /^(dirt|grass_block|coarse_dirt|podzol|mud|rooted_dirt)$/
+
+/**
+ * Stone for the earth in the walls and the roof: endermen carry dirt off, creepers blow it
+ * apart; cobblestone stands up to both far better. One block at a time (dug out, stone in).
+ */
+export function reinforceCells(hall: Hall, names: BlockNames): HandCell[] {
+  const cells: HandCell[] = []
+  const roofY = hall.wallTop + 1
+  for (const [x, z] of hall.ring)
+    for (let y = hall.floorY; y <= roofY; y++)
+      if (EARTH.test(names(x, y, z) ?? ''))
+        cells.push({ x, y, z, block: 'cobblestone', replace: true })
+  for (const [x, z] of hall.inside)
+    if (EARTH.test(names(x, roofY, z) ?? ''))
+      cells.push({ x, y: roofY, z, block: 'cobblestone', replace: true })
+  return cells
+}
+
 /** A chest for the storehouse, placed like the furnace; none if the hall has one. */
 export function chestCells(hall: Hall, names: BlockNames): HandCell[] {
   if (hall.inside.some(([x, z]) => /^(chest|barrel)$/.test(names(x, hall.floorY, z) ?? '')))

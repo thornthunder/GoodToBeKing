@@ -61,7 +61,7 @@ describe("the Castellan's account", () => {
       hall: { roof: 0, door: 0, light: 0, repair: 2 },
       farm: { exists: true, work: 4 },
       cobblestone: 4,
-      woodInStore: 3,
+      woodInStore: 6,
     }
     const who = plan(busy).flatMap((a) => ('by' in a && a.by ? [a.by] : []))
     expect(new Set(who).size).toBe(who.length)
@@ -172,6 +172,12 @@ describe("the Castellan's account", () => {
     })
   })
 
+  it('faces the dirt walls with stone once there is cobblestone to spare', () => {
+    const earthen = { ...base, hall: { roof: 0, door: 0, light: 0, repair: 0, earth: 30 } }
+    expect(plan(earthen)).toContainEqual({ kind: 'hallwork', work: 'reinforce', by: 'Henry' })
+    expect(plan({ ...earthen, cobblestone: 4 }).some((a) => a.kind === 'hallwork')).toBe(false)
+  })
+
   it('mines for stone by day when the storehouse runs short, and not where the mine ended', () => {
     expect(plan({ ...base, cobblestone: 4 })).toContainEqual({
       kind: 'mine',
@@ -186,6 +192,11 @@ describe("the Castellan's account", () => {
     const night = { ...base, night: true, foodInStore: 2, woodInStore: 3 }
     expect(plan({ ...night, farm: { exists: true, work: 4 } })).toEqual([])
     expect(plan({ ...night, rawInStore: 4 })).toEqual([{ kind: 'cook', by: 'Bruce' }])
+  })
+
+  it('fetches wood before the field and the mine when there is hardly any', () => {
+    const bare = { ...base, woodInStore: 1, farm: { exists: true, work: 4 }, cobblestone: 4 }
+    expect(kinds(bare).slice(0, 1)).toEqual(['errand:Henry'])
   })
 
   it('sends a free hand for wood when the storehouse runs low', () => {

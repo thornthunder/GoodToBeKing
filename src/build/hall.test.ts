@@ -4,6 +4,7 @@ import {
   bedCells,
   doorCells,
   floorCells,
+  reinforceCells,
   repairCells,
   lightCells,
   roofCells,
@@ -139,6 +140,20 @@ describe('a roofed hall', () => {
     // A hole in the roof is a repair.
     const holed = hall({ ...roofed, '2,67,2': 'air' })
     expect(repairCells(h, holed)).toEqual([{ x: 2, y: 67, z: 2, block: 'filler' }])
+  })
+})
+
+describe('stone facing', () => {
+  it('turns the dirt of walls and roof to cobblestone, leaving the doorway and planks be', () => {
+    const names = hall()
+    const h = surveyHall(names, { x: 2, y: 64, z: 2 })
+    if (typeof h === 'string') throw new Error(h)
+    const stone = reinforceCells(h, names)
+    // 24 wall columns three high, less the doorway's two blocks.
+    expect(stone).toHaveLength(24 * 3 - 2)
+    expect(stone.every((c) => c.block === 'cobblestone' && c.replace)).toBe(true)
+    const planked = hall({ '5,64,2': 'oak_planks' })
+    expect(reinforceCells(h, planked)).toHaveLength(24 * 3 - 3)
   })
 })
 

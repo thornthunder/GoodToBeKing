@@ -32,7 +32,14 @@ import { errMsg, sleep } from '../util'
 import { Bot } from './Bot'
 import { MATERIALS, type Material } from './gathering'
 import { Household } from '../household'
-import { doorCells, lightCells, repairCells, roofCells, surveyHall } from '../build/hall'
+import {
+  doorCells,
+  lightCells,
+  reinforceCells,
+  repairCells,
+  roofCells,
+  surveyHall,
+} from '../build/hall'
 import { plan, type CourtState, type StewardAction } from '../steward'
 import { RAW } from './cooking'
 import { farmNeed } from '../build/farm'
@@ -297,6 +304,7 @@ export class BotManager {
         door: doorCells(hall, names).length,
         light: lightCells(hall, names).length,
         repair: this.household.hall ? repairCells(this.household.hall, names).length : 0,
+        earth: reinforceCells(hall, names).length,
       },
       storeHasCoal: sum(/^(coal|charcoal)$/) > 0,
       withoutFood: this.bots
@@ -1176,7 +1184,19 @@ export class BotManager {
     } else if (verb === 'hall') {
       // <bot> hall <roof|floor|light|door|beds> [for <player>] (by hand, survival)
       const work = words[2] as HallWork
-      if (!['roof', 'floor', 'light', 'door', 'beds', 'repair', 'furnace', 'chest'].includes(work))
+      if (
+        ![
+          'roof',
+          'floor',
+          'light',
+          'door',
+          'beds',
+          'repair',
+          'furnace',
+          'chest',
+          'reinforce',
+        ].includes(work)
+      )
         return this.log.warn('usage: <bot> hall <roof|floor|light|door|beds> [for <player>]')
       void bot.startHallWork(work, requestedBy)
     } else if (verb === 'hunt') {

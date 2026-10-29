@@ -29,7 +29,7 @@ export interface CourtState {
   /** The storehouse chest was there once and is gone (blown up): a new one is wanted. */
   storehouseLost?: boolean
   /** What the hall still lacks, in blocks (0 = done); `repair`: holes against its known shape. */
-  hall: { roof: number; door: number; light: number; repair: number }
+  hall: { roof: number; door: number; light: number; repair: number; earth?: number }
   /** The storehouse holds coal (for torches). */
   storeHasCoal: boolean
   /** Courtiers carrying no food at all. */
@@ -86,6 +86,8 @@ export type StewardAction =
 export const MAGIC_RESERVE = 2
 /** Below this many logs' worth of wood in the storehouse, someone chops more. */
 export const WOOD_RESERVE = 12
+/** Below this, wood comes before the field and the mine: tools begin with planks. */
+export const WOOD_LOW = 4
 /** Below this many meals in the storehouse, someone cooks or hunts. */
 export const FOOD_RESERVE = 8
 /** Below this much cobblestone in the storehouse, someone mines. */
@@ -124,11 +126,20 @@ export function plan(s: CourtState): StewardAction[] {
   // The court's own furnace: eight cobblestone (or one Merlin conjured).
   if (s.builderWithFurnace && !s.furnace) jobs.push({ work: 'furnace', by: s.builderWithFurnace })
   else if (!s.furnace && s.cobblestone >= 8 && s.storehouse) jobs.push({ work: 'furnace' })
+  // Stone for the dirt in walls and roof (endermen, creepers), with stone to spare after the furnace.
+  if ((s.hall.earth ?? 0) > 0 && s.cobblestone >= (s.furnace ? 8 : 16) && s.storehouse)
+    jobs.push({ work: 'reinforce' })
   for (const job of jobs) {
     const by = job.by ? take(job.by) : builder()
     if (by) out.push({ kind: 'hallwork', work: job.work, by })
   }
 
+  // Almost no wood: every tool, table and chest begins with planks, so wood comes first.
+  const woodFirst = s.storehouse && s.woodInStore < WOOD_LOW && !s.night
+  if (woodFirst) {
+    const by = anyone([], s.guards ?? [])
+    if (by) out.push({ kind: 'errand', material: 'wood', count: 16, by })
+  }
   // Light without coal: charcoal from the court's own logs, in the furnace (indoor work).
   const coal = s.storeHasCoal || Boolean(s.builderWithCoal)
   if (s.hall.light > 0 && !coal && s.furnace && s.woodInStore >= 2 && s.storehouse) {
@@ -208,7 +219,7 @@ export function plan(s: CourtState): StewardAction[] {
     if (by) out.push({ kind: 'mine', by, want: 24 })
   }
   // Wood for the next repairs and planks.
-  if (s.storehouse && s.woodInStore < WOOD_RESERVE && !s.night) {
+  if (!woodFirst && s.storehouse && s.woodInStore < WOOD_RESERVE && !s.night) {
     const by = anyone()
     if (by) out.push({ kind: 'errand', material: 'wood', count: 16, by })
   }
