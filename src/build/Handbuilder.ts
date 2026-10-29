@@ -105,6 +105,7 @@ export class Handbuilder {
       if (!this.cancelled) await this.placeAll(job, result)
       this.useBuildingRules(false)
       await this.clearScaffold(scaffold)
+      if (storehouse && !this.cancelled) await this.putBack(storehouse)
     } catch (err) {
       this.log.warn(`${job.title}: ${errMsg(err)}`)
     } finally {
@@ -185,6 +186,11 @@ export class Handbuilder {
           // Planks can be made from logs: four from each.
           if (block === 'planks' && left > 0)
             await this.withdraw(chest, /_log$/, Math.ceil(left / 4))
+          // Torches are made from coal and sticks, four at a time; sticks from a log's planks.
+          if (block === 'torch' && left > 0) {
+            await this.withdraw(chest, /^(coal|charcoal)$/, Math.ceil(left / 4))
+            if (this.carried('planks') < 2) await this.withdraw(chest, /_log$/, 1)
+          }
         }
         return 0
       })
@@ -239,11 +245,23 @@ export class Handbuilder {
     }
   }
 
+  /** What is left of the materials goes back into the storehouse (a little dirt is kept). */
+  private async putBack(storehouse: { x: number; y: number; z: number }): Promise<void> {
+    const leftovers = /(_planks|_log)$|^(coal|charcoal|stick|torch|crafting_table|wooden_door)$/
+    if (!this.bot.inventory.items().some((i) => leftovers.test(i.name))) return
+    await this.gatherer.withChest(storehouse, async (chest) => {
+      for (const item of this.bot.inventory.items().filter((i) => leftovers.test(i.name)))
+        await withTimeout(chest.deposit(item.type, item.metadata, item.count), 5_000)
+      return 0
+    })
+  }
+
   /** Torches from coal (or charcoal) and sticks; sticks from planks. */
   private async makeTorches(want: number): Promise<void> {
     const coal = this.carriedAny(/^(coal|charcoal)$/)
     if (coal === 0) return void this.log.info('no coal for torches')
     const batches = Math.min(coal, Math.ceil(want / 4))
+    if (this.carried('planks') < 1 && this.carried('stick') < batches) await this.makePlanks(4)
     if (this.carried('stick') < batches)
       await this.craft('stick', Math.ceil((batches - this.carried('stick')) / 4))
     await this.craft('torch', batches)

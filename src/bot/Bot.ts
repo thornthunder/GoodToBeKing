@@ -875,7 +875,13 @@ export class Bot extends EventEmitter {
     const short = Object.entries(result.short)
       .map(([block, n]) => `${n} ${block.replace(/_/g, ' ')}`)
       .join(', ')
-    if (result.missing === 0) {
+    if (result.placed === 0 && result.missing > 0) {
+      await this.speak(
+        `You could not make ${title} for the hall at all${short ? `: there is no ${short} to be had` : ''}. ` +
+          `Tell ${who} so honestly in one short sentence${short ? ', and that the storehouse or Merlin could help' : ''}.`,
+        `Alas, I could not make ${title} for the hall${short ? `: I have no ${short}` : ''}.`
+      )
+    } else if (result.missing === 0) {
       await this.speak(
         `You have finished ${title} for the hall, by hand (${result.placed} blocks). Tell ${who} ` +
           'so in one short, proud sentence.',
