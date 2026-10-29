@@ -32,7 +32,9 @@ import { errMsg, sleep } from '../util'
 import { Bot } from './Bot'
 import { MATERIALS, type Material } from './gathering'
 import { Household } from '../household'
-import { repairCells } from '../build/hall'
+import { doorCells, lightCells, repairCells, roofCells, surveyHall } from '../build/hall'
+import { plan, type CourtState, type StewardAction } from '../steward'
+import { FOODS } from './survival'
 import type { HallWork } from '../ai/Brain'
 import { ChatFloor } from './ChatFloor'
 
@@ -213,6 +215,157 @@ export class BotManager {
   }
 
   private lastInspection = 0
+  private lastHousekeeping = 0
+  private lastMagicRequest = 0
+  /** What the Castellan last asked the royal family for, and when (so he does not nag). */
+  private readonly asked = new Map<string, number>()
+
+  /**
+   * The Castellan keeps house (survival): every minute he takes stock of what the court needs
+   * (see steward.ts) and sees to it: builders for the hall, errands for wood, and Merlin's magic
+   * for what cannot be had by hand, asking the royal family instead when one is near.
+   */
+  private async keepHouse(): Promise<void> {
+    const home = this.household.home
+    if (!home || Date.now() - this.lastHousekeeping < HOUSEKEEPING_MS) return
+    const castellan = this.bots.find(
+      (b) => !b.cfg.canBuild && this.bots.some((w) => w.cfg.reportsTo === b.cfg.name)
+    )
+    const eyes = this.bots.find((b) => {
+      const p = b.position()
+      return p && !b.buildsByMagic() && Math.hypot(p.x - home.x, p.z - home.z) < 32
+    })
+    if (!castellan || castellan.buildsByMagic() || !eyes) return
+    this.lastHousekeeping = Date.now()
+    const names = (x: number, y: number, z: number) => eyes.nameAt(x, y, z)
+    const surveyed = surveyHall(names, home)
+    const hall = typeof surveyed === 'string' ? this.household.hall : surveyed
+    if (!hall) return
+    const merlin = this.bots.find((b) => b.cfg.magic)
+    const staff = this.bots.filter(
+      (b) => b.cfg.reportsTo?.toLowerCase() === castellan.cfg.name.toLowerCase() && !b.cfg.magic
+    )
+    const freeBuilder = staff.find((b) => b.cfg.canBuild && b.isFree() && !b.buildsByMagic())
+    const carrying = (items: RegExp) =>
+      staff.find((b) => b.cfg.canBuild && b.isFree() && b.carries(items) > 0)?.cfg.name
+    let beds = 0
+    for (const [x, z] of hall.inside) if (/bed$/.test(names(x, hall.floorY, z) ?? '')) beds++
+    const stock = this.household.stock.items
+    const sum = (re: RegExp) =>
+      Object.entries(stock)
+        .filter(([n]) => re.test(n))
+        .reduce((total, [, n]) => total + n, 0)
+    const royals = this.bots
+      .flatMap((b) => this.court.members.map((m) => b.playerPosition(m.player)))
+      .filter((p): p is Point => p !== undefined)
+    const near = (b: Bot | undefined) => {
+      const p = b?.position()
+      return p !== undefined && royals.some((r) => Math.hypot(r.x - p.x, r.z - p.z) < 32)
+    }
+    const state: CourtState = {
+      royalNear: near(castellan) || near(merlin),
+      merlinAwake: merlin?.magicAwake() ?? false,
+      magicLeft: merlin?.magicLeft() ?? 0,
+      guardsUnarmed: this.bots
+        .filter((b) => b.isGuard() && b.position() && b.carries(/_(sword|axe)$/) === 0)
+        .map((b) => b.cfg.name),
+      courtiers: this.bots.length,
+      // A bed is two blocks.
+      bedsInHall: Math.floor(beds / 2),
+      freeBuilder: freeBuilder?.cfg.name,
+      builderWithBeds: carrying(/^bed$/),
+      builderWithCoal: carrying(/^(coal|charcoal)$/),
+      hall: {
+        roof: roofCells(hall, names).length,
+        door: doorCells(hall, names).length,
+        light: lightCells(hall, names).length,
+      },
+      storeHasCoal: sum(/^(coal|charcoal)$/) > 0,
+      withoutFood: this.bots
+        .filter((b) => b.position() && b.carries(FOOD_ITEM) === 0)
+        .map((b) => b.cfg.name),
+      woodInStore: sum(/_log$/) + Math.floor(sum(/_planks$/) / 4),
+      freeHand: staff.find((b) => b.isFree() && !b.buildsByMagic())?.cfg.name,
+      storehouse: Boolean(this.household.storehouse),
+    }
+    for (const action of plan(state)) await this.carryOutHousekeeping(castellan, merlin, action)
+  }
+
+  private async carryOutHousekeeping(
+    castellan: Bot,
+    merlin: Bot | undefined,
+    action: StewardAction
+  ): Promise<void> {
+    const by = (name?: string) => this.bots.find((b) => b.cfg.name === name)
+    switch (action.kind) {
+      case 'hallwork': {
+        const builder = by(action.by)
+        this.log.info(
+          `housekeeping: ${action.work} for the hall${builder ? ` by ${builder.cfg.name}` : ''}`
+        )
+        if (builder) void builder.startHallWork(action.work, castellan.cfg.name)
+        else
+          void this.sendToHall(
+            castellan,
+            { work: action.work, requestedBy: castellan.cfg.name },
+            true
+          )
+        return
+      }
+      case 'errand':
+        this.log.info(`housekeeping: ${action.count} ${action.material} for the storehouse`)
+        void this.sendOnErrand(castellan, {
+          material: action.material,
+          count: action.count,
+          requestedBy: castellan.cfg.name,
+          from: castellan.cfg.name,
+          toStore: true,
+        })
+        return
+      case 'ask': {
+        if (Date.now() - (this.asked.get(action.what) ?? 0) < 15 * 60_000) return
+        this.asked.set(action.what, Date.now())
+        this.log.info(`housekeeping: asking the royal family for ${action.what}`)
+        await castellan.speak(
+          `The court needs ${action.what}, which only Merlin's magic can provide just now. Ask ` +
+            'the royal family nearby, politely and in one short sentence, whether Merlin may ' +
+            'conjure it.',
+          `Your Majesty, might Merlin conjure ${action.what}?`
+        )
+        return
+      }
+      case 'magic': {
+        if (!merlin || Date.now() - this.lastMagicRequest < MAGIC_REQUEST_MS) return
+        this.lastMagicRequest = Date.now()
+        const before = merlin.magicLeft()
+        this.log.info(
+          `housekeeping: ${castellan.cfg.name} asks ${merlin.cfg.name} for ${action.why}`
+        )
+        await castellan.speak(
+          `You ask Merlin, the court wizard, to conjure ${action.why} (${action.count} ` +
+            `${action.item.replace(/_/g, ' ')} for ${action.to}). Say it to him in one short, ` +
+            'polite sentence.',
+          `Merlin, might you conjure ${action.why}?`
+        )
+        await merlin.castCommand('gift', {
+          target: action.to,
+          requestedBy: castellan.cfg.name,
+          args: { item: action.item, count: action.count },
+        })
+        if (merlin.magicLeft() >= before) return
+        await merlin.speak(
+          `At Festaris's request you have just conjured ${action.why}. Say so in one short, ` +
+            'magical sentence.',
+          'There! It is done.'
+        )
+        // The beds or coal go straight to work.
+        const then = action.then
+        const worker = by(action.to)
+        if (then && worker)
+          setTimeout(() => void worker.startHallWork(then, castellan.cfg.name), 2_000)
+      }
+    }
+  }
 
   /**
    * The Castellan's rounds (survival): every few minutes, compare the hall with its shape as last
@@ -297,7 +450,7 @@ export class BotManager {
     this.log.info(
       `${from.cfg.name} sends ${worker.cfg.name} for ${errand.count} ${errand.material}`
     )
-    await worker.startGather(errand.material, errand.count, errand.requestedBy)
+    await worker.startGather(errand.material, errand.count, errand.requestedBy, errand.toStore)
   }
 
   private placesCache?: { at: number; places: Place[] }
@@ -583,6 +736,7 @@ export class BotManager {
       // Whoever is still free afterwards goes home.
       this.sendHome()
       void this.inspectHall()
+      void this.keepHouse()
     }, 5_000)
   }
 
@@ -997,6 +1151,11 @@ const HOME_RADIUS = 10
 const HOME_RADIUS_NIGHT = 2.5
 /** Farther than this, Merlin portals them home rather than letting them walk. */
 const HOME_WALK = 96
+/** How often the Castellan takes stock of what the court needs, and asks Merlin for magic. */
+const HOUSEKEEPING_MS = 60_000
+const MAGIC_REQUEST_MS = 3 * 60_000
+/** Food a courtier may carry (see bot/survival.ts). */
+const FOOD_ITEM = new RegExp(`^(${FOODS.join('|')})$`)
 /** How often the Castellan looks the hall over for damage. */
 const INSPECT_MS = 3 * 60_000
 /** Before sending the same bot home again. */
@@ -1012,6 +1171,7 @@ interface Errand {
   count: number
   requestedBy: string
   from: string
+  toStore?: boolean
 }
 
 interface WorksOrder {

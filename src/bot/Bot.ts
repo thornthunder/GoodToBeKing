@@ -1102,6 +1102,26 @@ export class Bot extends EventEmitter {
     this.movement?.goTo(spot, label)
   }
 
+  /** A guard of the royal family (duty: escort). */
+  isGuard(): boolean {
+    return this.cfg.duty?.kind === 'escort'
+  }
+
+  /** How many matching items this bot carries. */
+  carries(items: RegExp): number {
+    return (
+      this.body?.inventory
+        .items()
+        .filter((i) => items.test(i.name))
+        .reduce((n, i) => n + i.count, 0) ?? 0
+    )
+  }
+
+  /** Magic left this hour (Merlin); 0 for the others. */
+  magicLeft(): number {
+    return this.magic?.magicLeft() ?? 0
+  }
+
   /** The name of the block at a spot as this bot sees it; undefined where nothing is loaded. */
   nameAt(x: number, y: number, z: number): string | undefined {
     return this.body?.blockAt(new WorldVec(x, y, z))?.name
