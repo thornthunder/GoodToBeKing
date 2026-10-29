@@ -52,7 +52,8 @@ Write a line to a file named `.command` in the project root (checked every secon
 `<bot> commission <blueprint> [at x y z] [for <player>]` (as if a royal asked that bot: the
 Castellan hands it to a builder), `<bot> fetch <dirt|wood|sand|gravel> [count] [for <player>]`
 (a survival errand), `<bot> hall <roof|floor|light|door|beds>` (by hand, on the court's home hall),
-`household home|storehouse <x> <y> <z>`, `<bot> bed`, `<bot> undo`, and for the court's building works `works status|pause|resume`,
+`household home|storehouse <x> <y> <z>`, `<bot> bed`, `<bot> hunt [n]`, `<bot> cook`,
+`<bot> farm`, `<bot> undo`, and for the court's building works `works status|pause|resume`,
 `works start <design.json>` and `works plan` (the overlord designs the next castle now). For
 magic: `Merlin cast <spell> [on <who>] [to <place>] [item <x>] [creature <x>] [for <player>]`,
 `Merlin spells` (logs spells, places and gifts still to fade), `Merlin fade` (takes every gift
@@ -111,7 +112,15 @@ Windows, killing a background `npx` shell does not kill its node children at all
   (roof, door, beds, torches, a sword per guard, food per courtier, wood in the storehouse) and
   sees to it: builders and errands by hand, and with no royal near, Merlin's magic (within his
   ten an hour, two kept for the royals); with a royal near he asks them instead. His rounds
-  (`inspectHall`) repair holes against the hall's shape as last seen whole (planks).
+  (`inspectHall`) repair holes against the hall's shape as last seen whole (planks). Nobody goes
+  out at night (no field, hunt or wood errands). Food: `build/farm.ts` + `bot/farming.ts` (a 4x4
+  wheat field near home, by water if any; hoe via `bot/crafting.ts`, which puts a crafting table
+  down and takes it back; seeds from grass, Merlin's eight only to start; harvest, replant, bread
+  to the storehouse), `bot/hunting.ts` (the King's rule: never a named, tame, owned or leashed
+  animal nor a baby; only cows, pigs, sheep, chickens, rabbits; 16 blocks from players, not by
+  fences, two of a kind always left; game animals' entity data is read for this), `bot/cooking.ts`
+  (raw meat cooked in the hall's furnace with wood). Bots eat up to 18 when hurt (health only
+  comes back above it); in survival nobody drops more than three blocks.
 - Bedrock 1.26.60 renumbered item stack actions (`craft_reserved`): bedboo's legacy bytes are
   corrected on the way out (`packets.ts fixOutgoing`), or every craft disconnects the bot.
 - The brain returns `BrainReply { say, action? }` from `onChat`; actions are follow/come/stop,
