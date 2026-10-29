@@ -63,7 +63,8 @@ export async function craft(
   if (nearTable) return withTable(bot, log, name, times, nearTable)
   // Our own table, for the moment.
   if (bot.inventory.items().every((i) => i.name !== 'crafting_table')) {
-    if (planks(bot) < 4) await makePlanks(bot, log, 4 - planks(bot))
+    // Planks for the table and for what is made at it (a pickaxe needs three more).
+    if (planks(bot) < 8) await makePlanks(bot, log, 8 - planks(bot))
     const recipe = bot.recipesFor(bot.registry.itemsByName.crafting_table.id, null, 1, null)[0]
     if (!recipe || !(await run(bot, log, 'crafting_table', recipe, 1))) return false
   }

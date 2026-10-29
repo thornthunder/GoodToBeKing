@@ -341,17 +341,29 @@ function againstWall(hall: Hall, names: BlockNames): Array<[number, number]> {
     [0, 1],
     [0, -1],
   ] as const
+  // Where the court gathers (the middle of the room): furniture goes as far from it as it can,
+  // and never right beside other furniture, so every piece can be reached.
+  const cx = hall.inside.reduce((n, [x]) => n + x, 0) / hall.inside.length
+  const cz = hall.inside.reduce((n, [, z]) => n + z, 0) / hall.inside.length
+  const FURNITURE = /(chest|barrel|furnace|crafting_table)$/
+  const spots: Array<[number, number]> = []
   for (const [x, z] of hall.inside) {
     if (!open(names(x, y, z)) || !open(names(x, y + 1, z))) continue
     if (hall.openings.some(([ox, oz]) => Math.abs(ox - x) + Math.abs(oz - z) <= 2)) continue
     if (sides.some(([dx, dz]) => /bed$/.test(names(x + dx, y, z + dz) ?? ''))) continue
+    let crowded = false
+    for (let dx = -1; dx <= 1 && !crowded; dx++)
+      for (let dz = -1; dz <= 1 && !crowded; dz++)
+        crowded = FURNITURE.test(names(x + dx, y, z + dz) ?? '')
+    if (crowded) continue
     const wall = sides.find(([dx, dz]) => {
       const n = names(x + dx, y, z + dz)
       return isRing.has(`${x + dx},${z + dz}`) && n !== undefined && !open(n) && !DOOR.test(n)
     })
-    if (wall) return [[x, z]]
+    if (wall) spots.push([x, z])
   }
-  return []
+  spots.sort((a, b) => Math.hypot(b[0] - cx, b[1] - cz) - Math.hypot(a[0] - cx, a[1] - cz))
+  return spots.slice(0, 1)
 }
 
 /** A door in the first opening two high (the item places both halves). */
