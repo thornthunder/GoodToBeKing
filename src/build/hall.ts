@@ -212,7 +212,8 @@ export function bedCells(hall: Hall, names: BlockNames, count: number): HandCell
 export function repairCells(hall: Hall, names: BlockNames): HandCell[] {
   const cells: HandCell[] = []
   // The floor first, and any crater under it (a creeper's), filled from the bottom up: dirt
-  // below, planks on top; under the walls too, so they stand on something.
+  // below, the sturdiest filler to hand on top; under the walls too, so they stand on something.
+  // Repairs take any filler (planks, cobblestone, else dirt): a hole must be shut tonight.
   for (const [x, z] of [...hall.inside, ...hall.ring]) {
     const top = hall.floorY - 1
     if (!open(names(x, top, z))) continue
@@ -224,14 +225,14 @@ export function repairCells(hall: Hall, names: BlockNames): HandCell[] {
         y,
         z,
         block:
-          y === top && hall.inside.some(([ix, iz]) => ix === x && iz === z) ? 'planks' : 'dirt',
+          y === top && hall.inside.some(([ix, iz]) => ix === x && iz === z) ? 'filler' : 'dirt',
       })
   }
   const doorway = new Set(hall.openings.map(([x, z]) => `${x},${z}`))
   for (const [x, z] of hall.ring)
     for (let y = hall.floorY; y <= hall.wallTop; y++) {
       if (doorway.has(`${x},${z}`) && y <= hall.floorY + 1) continue
-      if (open(names(x, y, z))) cells.push({ x, y, z, block: 'planks' })
+      if (open(names(x, y, z))) cells.push({ x, y, z, block: 'filler' })
     }
   const roofY = hall.wallTop + 1
   const roof = [...hall.ring, ...hall.inside]
@@ -239,7 +240,7 @@ export function repairCells(hall: Hall, names: BlockNames): HandCell[] {
   // Mostly roofed: then the gaps are damage, not a roof never built.
   if (covered > roof.length / 2)
     for (const [x, z] of roof)
-      if (open(names(x, roofY, z))) cells.push({ x, y: roofY, z, block: 'planks' })
+      if (open(names(x, roofY, z))) cells.push({ x, y: roofY, z, block: 'filler' })
   return cells
 }
 

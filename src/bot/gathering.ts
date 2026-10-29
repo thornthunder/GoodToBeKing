@@ -46,6 +46,8 @@ export type BlockNames = (x: number, y: number, z: number) => string | undefined
 export const KEEP_AWAY = 16
 /** How far from the bot it looks for something to dig, and how many places it notes at once. */
 const SEARCH = 48
+/** Trees are fewer: look further for them. */
+const SEARCH_WOOD = 96
 const CANDIDATES = 80
 /** Close enough to toss things over. */
 const TOSS_RANGE = 4
@@ -219,7 +221,7 @@ export class Gatherer {
     const found = this.bot.findBlocks({
       matching: (block: { name: string }) => info.blocks.test(block.name),
       useExtraInfo: (block: { position: Vec3 }) => this.allowed(material, block.position, players),
-      maxDistance: SEARCH,
+      maxDistance: material === 'wood' ? SEARCH_WOOD : SEARCH,
       count: CANDIDATES,
     } as never)
     this.log.info(`found ${found.length} places with untouched ${material} nearby`)

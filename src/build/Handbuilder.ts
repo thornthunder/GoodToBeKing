@@ -11,7 +11,11 @@ import type { HandCell } from './hall'
 const GROUPS: Record<string, RegExp> = {
   planks: /_planks$/,
   log: /_log$/,
+  // Whatever closes a hole, sturdiest first (see FILLER_ORDER).
+  filler: /(_planks|^cobblestone|^dirt)$/,
 }
+/** Filler by preference: planks and stone keep endermen and creepers out better than dirt. */
+const FILLER_ORDER = [/_planks$/, /^cobblestone$/, /^dirt$/]
 export const itemsFor = (block: string): RegExp => GROUPS[block] ?? new RegExp(`^${block}$`)
 
 /** Blocks a builder towers up on when a spot is out of reach, and takes away afterwards. */
@@ -219,7 +223,10 @@ export class Handbuilder {
       await this.gatherer.collect('wood', Math.ceil(stillPlanks / 4))
       await this.makePlanks(stillPlanks)
     }
-    const dirt = this.needs(job).get('dirt') ?? 0
+    const filler = this.needs(job).get('filler') ?? 0
+    if (filler > 0) await this.makePlanks(filler)
+    const stillFiller = this.needs(job).get('filler') ?? 0
+    const dirt = (this.needs(job).get('dirt') ?? 0) + stillFiller
     if (dirt > 0 && !this.cancelled) await this.gatherer.collect('dirt', dirt)
     if ((this.needs(job).get('torch') ?? 0) > 0)
       await this.makeTorches(this.needs(job).get('torch') ?? 0)
@@ -387,7 +394,12 @@ export class Handbuilder {
       }
       const ref = this.reference(c)
       if (!ref) return false
-      const item = this.bot.inventory.items().find((i) => itemsFor(c.block).test(i.name))
+      const item =
+        c.block === 'filler'
+          ? FILLER_ORDER.map((kind) =>
+              this.bot.inventory.items().find((i) => kind.test(i.name))
+            ).find(Boolean)
+          : this.bot.inventory.items().find((i) => itemsFor(c.block).test(i.name))
       if (!item) return false
       try {
         await this.bot.equip(item, 'hand')

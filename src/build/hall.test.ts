@@ -131,7 +131,7 @@ describe('a roofed hall', () => {
     expect(roofCells(h, names)).toEqual([])
     // A hole in the roof is a repair.
     const holed = hall({ ...roofed, '2,67,2': 'air' })
-    expect(repairCells(h, holed)).toEqual([{ x: 2, y: 67, z: 2, block: 'planks' }])
+    expect(repairCells(h, holed)).toEqual([{ x: 2, y: 67, z: 2, block: 'filler' }])
   })
 })
 
@@ -144,7 +144,7 @@ describe('repairs', () => {
     const damaged = hall({ '5,65,2': 'air', '-1,66,4': 'air' })
     const fix = repairCells(h, damaged)
     expect(fix.map((c) => `${c.x},${c.y},${c.z}`).sort()).toEqual(['-1,66,4', '5,65,2'])
-    expect(fix.every((c) => c.block === 'planks')).toBe(true)
+    expect(fix.every((c) => c.block === 'filler')).toBe(true)
     expect(repairCells(h, whole)).toEqual([])
   })
 
@@ -156,7 +156,7 @@ describe('repairs', () => {
     const crater = hall({ '2,63,2': 'air', '2,62,2': 'air' })
     expect(repairCells(h, crater)).toEqual([
       { x: 2, y: 62, z: 2, block: 'dirt' },
-      { x: 2, y: 63, z: 2, block: 'planks' },
+      { x: 2, y: 63, z: 2, block: 'filler' },
     ])
   })
 })
