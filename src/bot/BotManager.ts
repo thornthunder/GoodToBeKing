@@ -883,10 +883,10 @@ export class BotManager {
       }
       void bot.startGather(material, count, requestedBy)
     } else if (verb === 'hall') {
-      // <bot> hall <roof|floor|light|door> [for <player>] (by hand, survival)
+      // <bot> hall <roof|floor|light|door|beds> [for <player>] (by hand, survival)
       const work = words[2] as HallWork
-      if (!['roof', 'floor', 'light', 'door'].includes(work))
-        return this.log.warn('usage: <bot> hall <roof|floor|light|door> [for <player>]')
+      if (!['roof', 'floor', 'light', 'door', 'beds'].includes(work))
+        return this.log.warn('usage: <bot> hall <roof|floor|light|door|beds> [for <player>]')
       void bot.startHallWork(work, requestedBy)
     } else if (verb === 'bed') {
       // <bot> bed: go to bed now, as when a royal lies down at night (survival)
