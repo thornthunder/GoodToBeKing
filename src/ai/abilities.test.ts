@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   declineLine,
   detectBuildRequest,
+  detectGatherRequest,
   detectMissingAbility,
   detectMoveCommand,
   detectWorksRequest,
@@ -47,6 +48,28 @@ describe('detectBuildRequest, asked the Castellan way', () => {
     expect(detectBuildRequest("I'd like a tower built over there")).toEqual({ blueprint: 'tower' })
     expect(detectBuildRequest('who built this lovely tower?')).toBeNull()
     expect(detectMissingAbility('can you get a fountain built here')).toBe('build')
+  })
+})
+
+describe('detectGatherRequest', () => {
+  it('hears an errand, with how much is wanted', () => {
+    expect(detectGatherRequest('Henry, fetch me 10 dirt')).toEqual({ material: 'dirt', count: 10 })
+    expect(detectGatherRequest('chop some wood for us please')).toEqual({
+      material: 'wood',
+      count: 16,
+    })
+    expect(detectGatherRequest('get me a stack of sand')).toEqual({ material: 'sand', count: 64 })
+    expect(detectGatherRequest('george could you collect twenty logs')).toEqual({
+      material: 'wood',
+      count: 20,
+    })
+    expect(detectGatherRequest('dig 200 dirt')).toEqual({ material: 'dirt', count: 64 })
+  })
+
+  it('leaves questions and other lines alone', () => {
+    expect(detectGatherRequest('where can I get wood?')).toBeNull()
+    expect(detectGatherRequest('Henry come here')).toBeNull()
+    expect(detectGatherRequest('this dirt hall is lovely')).toBeNull()
   })
 })
 

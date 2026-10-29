@@ -6,6 +6,7 @@
  *
  * Remove an ability from MissingAbility once the bots can really do it.
  */
+import type { Material } from '../bot/gathering'
 import { matchBlueprint, spellbookList, type BlueprintId } from '../build/blueprints'
 
 export type MissingAbility = 'build' | 'handbuild' | 'fetch' | 'travel'
@@ -28,6 +29,60 @@ export function detectMoveCommand(message: string, moving: boolean): MoveCommand
   if (FOLLOW.test(message)) return 'follow'
   if (COME.test(message)) return 'come'
   return null
+}
+
+const GATHER_VERB = /\b(fetch|bring|get|gather|collect|dig|chop|cut)\b/i
+const QUESTION = /^\s*(where|how|what|why|who)\b/i
+const MATERIAL_WORDS: Array<[Material, RegExp]> = [
+  ['dirt', /\b(dirt|soil|earth)\b/i],
+  ['wood', /\b(wood|logs?|timber|trees?)\b/i],
+  ['sand', /\bsand\b/i],
+  ['gravel', /\bgravel\b/i],
+]
+const NUMBERS: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+  fifteen: 15,
+  twenty: 20,
+  thirty: 30,
+  forty: 40,
+  fifty: 50,
+  dozen: 12,
+}
+
+/** Fetched when no number is said, and the most for one errand. */
+export const FETCH_DEFAULT = 16
+export const FETCH_MAX = 64
+
+/** "Henry, fetch me 10 dirt", "chop some wood for us", "get me a stack of sand". */
+export function detectGatherRequest(message: string): { material: Material; count: number } | null {
+  if (!GATHER_VERB.test(message) || QUESTION.test(message)) return null
+  const hit = MATERIAL_WORDS.find(([, words]) => words.test(message))
+  if (!hit) return null
+  const digits = message.match(/\b(\d{1,3})\b/)
+  const word = message
+    .toLowerCase()
+    .match(
+      /\b(a stack|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|dozen)\b/
+    )
+  const asked = digits
+    ? Number(digits[1])
+    : word
+      ? word[1] === 'a stack'
+        ? 64
+        : NUMBERS[word[1]]
+      : FETCH_DEFAULT
+  return { material: hit[0], count: Math.max(1, Math.min(FETCH_MAX, asked)) }
 }
 
 /** "Please have a garden built", "I'd like a tower built here", but not "who built this?" */
@@ -126,11 +181,18 @@ export function refuses(reply: string): boolean {
   return REFUSAL.test(reply) || /\b(by hand|not (yet )?learned|haven't learned)\b/i.test(reply)
 }
 
+/** What the court can truly offer instead (anything else would be one more empty promise). */
+const OFFERS: Partial<Record<MissingAbility, string>> = {
+  handbuild:
+    'offer only what the court can really do here: fetch dirt, wood, sand or gravel, or keep ' +
+    'them company',
+}
+
 /** Transient instruction placed right next to the request in the prompt. */
 export function abilityNote(ability: MissingAbility, botName: string): string {
   return (
     `(Note for ${botName}: you cannot ${VERBS[ability]} yet. Do not agree, promise or pretend. ` +
-    'Decline kindly in character and offer something else.)'
+    `Decline kindly in character and ${OFFERS[ability] ?? 'offer something else'}.)`
   )
 }
 
@@ -145,7 +207,7 @@ export function declineLine(ability: MissingAbility, address: string, magic = fa
         ? `Alas, ${address}, my spellbook does not hold that yet. It holds ${spellbookList()}: which would please you?`
         : `Alas, ${address}, that is beyond the court's builders for now. They can raise ${spellbookList()}: which would please you?`
     case 'handbuild':
-      return `Alas, ${address}, in this world every block must be gathered and laid by hand, and the court has not learned that yet. Soon, I hope!`
+      return `Alas, ${address}, in this world every block must be gathered and laid by hand, and the court has not learned to build that way yet. But we can fetch you dirt, wood, sand or gravel!`
     case 'fetch':
       return `Alas, ${address}, my satchel cannot carry things yet. Tell me what you seek and I will help you think where to find it.`
     case 'travel':

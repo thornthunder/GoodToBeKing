@@ -1,6 +1,7 @@
 import type { SpellArgs } from '../magic/spells'
 import type { Post } from './orders'
 import type { BlueprintId, Palette } from '../build/blueprints'
+import type { Material } from '../bot/gathering'
 export type ChatKind = 'chat' | 'whisper' | 'announcement' | 'system'
 
 /** One line of in-game chat, already normalised from the wire format. */
@@ -70,6 +71,14 @@ export type BotAction =
   | { type: 'undo'; requestedBy: string }
   /** A royal orders great works: a new palace or castle, where they stand or at `at`. */
   | { type: 'works'; what: string; requestedBy: string; at?: { x: number; y?: number; z: number } }
+  /** Fetch a material by hand for a royal (survival); `delegate`: one of the staff goes. */
+  | {
+      type: 'gather'
+      material: Material
+      count: number
+      requestedBy: string
+      delegate?: boolean
+    }
 
 /** How a build went, for the brain to talk about. */
 export interface BuildOutcome {

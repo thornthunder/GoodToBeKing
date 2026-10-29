@@ -448,6 +448,53 @@ describe('OllamaBrain court behaviour', () => {
       })
     })
 
+    it('in survival sends one of his staff to fetch, and the apprentice goes himself', async () => {
+      const { brain, calls } = castellan('I shall send George at once, Your Majesty.')
+      const survival = { ...at('BigDad'), gameMode: 'survival' as const }
+      const reply = await brain.onChat(
+        chat('BigDad', 'Festaris, fetch me 10 dirt please'),
+        survival
+      )
+      expect(reply?.action).toEqual({
+        type: 'gather',
+        material: 'dirt',
+        count: 10,
+        requestedBy: 'BigDad',
+        delegate: true,
+      })
+      expect(calls[0].at(-1)?.content).toContain('You send one of your staff, Henry or George')
+      // In creative there is nothing to fetch: the creative inventory has it all.
+      const creative = await brain.onChat(
+        chat('BigDad', 'Festaris, fetch me 10 dirt'),
+        at('BigDad')
+      )
+      expect(creative?.action).toBeUndefined()
+
+      const model: ChatModel = {
+        chat: async (messages) =>
+          ({
+            message: {
+              role: 'assistant',
+              content: messages[0].content.startsWith('You help')
+                ? JSON.stringify(NO_ORDER)
+                : 'Right away, Your Majesty!',
+            },
+          }) as never,
+      }
+      const henryCfg = { ...defaultBotConfig(), name: 'Henry', role: 'apprentice', canBuild: true }
+      const henry = new OllamaBrain(henryCfg, model, court, createLogger('test'), { staff })
+      const own = await henry.onChat(chat('BigDad', 'Henry, chop some wood for us'), {
+        ...survival,
+        botName: 'Henry',
+      })
+      expect(own?.action).toEqual({
+        type: 'gather',
+        material: 'wood',
+        count: 16,
+        requestedBy: 'BigDad',
+      })
+    })
+
     it('in survival promises no build, palace or undo, and says why', async () => {
       // What the chat model really said in the test world, against the note.
       const { brain, calls } = castellan(

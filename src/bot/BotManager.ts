@@ -30,6 +30,7 @@ import { CourtRoster } from '../court'
 import type { Logger } from '../logger'
 import { errMsg, sleep } from '../util'
 import { Bot } from './Bot'
+import type { Material } from './gathering'
 import { ChatFloor } from './ChatFloor'
 
 /** Runtime state that should survive restarts (git-ignored). */
@@ -141,11 +142,44 @@ export class BotManager {
       })
       bot.on('commission', (request: CommissionRequest) => this.commission(bot, request))
       bot.on('works', (order: WorksOrder) => void this.orderWorks(bot, order))
+      bot.on('gather', (errand: Errand) => void this.sendOnErrand(bot, errand))
       this.bots.push(bot)
     }
     // Carry on with whatever the court was last building (the overlord's design, once there is one).
     const current = this.courtWorks().current ?? cfg.worksDesign
     if (current) this.startWorks(current)
+  }
+
+  /**
+   * The Castellan sends one of his staff on a royal's errand: the nearest free one who works by
+   * hand (survival). If none is free, he says so.
+   */
+  private async sendOnErrand(from: Bot, errand: Errand): Promise<void> {
+    const boss = from.cfg.name.toLowerCase()
+    const near = from.playerPosition(errand.requestedBy) ?? from.position()
+    const distance = (b: Bot) => {
+      const p = b.position()
+      return p && near ? Math.hypot(p.x - near.x, p.z - near.z) : Infinity
+    }
+    const worker = this.bots
+      .filter((b) => b.cfg.reportsTo?.toLowerCase() === boss && !b.cfg.magic)
+      .filter((b) => b.isFree() && !b.buildsByMagic())
+      .sort((a, b) => distance(a) - distance(b))[0]
+    if (!worker) {
+      this.log.info(
+        `no free hand for ${from.cfg.name}'s errand: ${errand.count} ${errand.material}`
+      )
+      await from.speak(
+        `None of your staff is free to fetch the ${errand.material} just now. Say so kindly in ` +
+          'one short sentence, and that it will be done as soon as someone is free.',
+        'Alas, everyone is busy just now.'
+      )
+      return
+    }
+    this.log.info(
+      `${from.cfg.name} sends ${worker.cfg.name} for ${errand.count} ${errand.material}`
+    )
+    await worker.startGather(errand.material, errand.count, errand.requestedBy)
   }
 
   private placesCache?: { at: number; places: Place[] }
@@ -796,6 +830,14 @@ export class BotManager {
 }
 
 /** A royal's order for great works, as the bot that took it heard it (see Bot.act). */
+/** A royal's errand the Castellan hands to his staff. */
+interface Errand {
+  material: Material
+  count: number
+  requestedBy: string
+  from: string
+}
+
 interface WorksOrder {
   what: string
   requestedBy: string

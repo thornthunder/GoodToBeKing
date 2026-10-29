@@ -28,6 +28,7 @@ import { findSite, type Point, type Site } from '../build/site'
 import { SEE_THROUGH } from '../build/sites'
 import { Vec3 as WorldVec } from 'vec3'
 import type { ChatFloor } from './ChatFloor'
+import { Gatherer, type Material } from './gathering'
 import { Movement } from './movement'
 import type { CommandResult, Magic } from '../magic/Magic'
 import type { SpellArgs } from '../magic/spells'
@@ -132,6 +133,9 @@ export class Bot extends EventEmitter {
   private mason?: Mason
   /** Raising (or taking down) a build a royal asked for. */
   private building = false
+  /** Out fetching something for a royal (survival). */
+  private gatherer?: Gatherer
+  private gathering = false
   /** A royal asked for something else: no work orders until then. */
   private worksPausedUntil = 0
   private readonly worksSummary?: () => string | undefined
@@ -231,7 +235,7 @@ export class Bot extends EventEmitter {
   /** Idle: not building, not walking for anyone, not on duty or a royal's post. */
   isFree(): boolean {
     if (this.state.status !== 'spawned' || !this.body || !this.mason) return false
-    if (this.building || this.mason.busy) return false
+    if (this.building || this.mason.busy || this.gathering) return false
     if (Date.now() < this.worksPausedUntil) return false
     if (this.movement?.current() && !this.dutyFollowing) return false
     if (this.dutyTarget() && Date.now() >= this.dutyPausedUntil) return false
@@ -561,6 +565,7 @@ export class Bot extends EventEmitter {
         .catch((err) => this.log.warn(`brain.onStuck failed: ${errMsg(err)}`))
     }
     this.mason = new Mason(body, this.log.child('mason'))
+    this.gatherer = new Gatherer(body, this.log.child('gather'))
     body.on('error', (err) => this.log.debug(`body error: ${errMsg(err)}`))
     body.once('spawn', () => this.movement?.configure())
     this.attachHandlers(client)
@@ -644,6 +649,11 @@ export class Bot extends EventEmitter {
       case 'cast':
         void this.castSpell(action)
         return
+      case 'gather':
+        // The Castellan's errands go to whichever of his staff is free (see BotManager).
+        if (action.delegate) this.emit('gather', { ...action, from: this.cfg.name })
+        else void this.startGather(action.material, action.count, action.requestedBy)
+        return
       case 'stay':
         // A standing order: no works and no escort while it stands (see post()).
         this.mason?.cancel()
@@ -652,6 +662,7 @@ export class Bot extends EventEmitter {
         return
       case 'stop':
         this.pauseWorks()
+        this.gatherer?.cancel()
         movement.stop()
         // A royal said stop: the escort duty waits too, for a while.
         this.dutyFollowing = false
@@ -665,6 +676,50 @@ export class Bot extends EventEmitter {
           action.type === 'follow' ? movement.follow(action.target) : movement.comeTo(action.target)
         if (result !== 'ok') this.log.warn(`cannot ${action.type} ${action.target}: ${result}`)
       }
+    }
+  }
+
+  /**
+   * Fetch a material by hand for a royal (survival): dig it from untouched land well away from
+   * everyone, bring it back, toss it over, and say how it went.
+   */
+  async startGather(material: Material, count: number, requestedBy: string): Promise<void> {
+    const gatherer = this.gatherer
+    if (!gatherer || this.gathering) return
+    this.gathering = true
+    this.pauseWorks()
+    this.dutyFollowing = false
+    this.movement?.stop()
+    const member = this.court?.find(requestedBy)
+    const who = member ? `the ${member.title}` : requestedBy
+    const name = material === 'wood' ? 'logs' : material
+    try {
+      this.log.info(`fetching ${count} ${material} for ${requestedBy}`)
+      const result = await gatherer.fetch(material, count, requestedBy)
+      if (result.reason === 'cancelled') return
+      if (result.delivered > 0) {
+        await this.speak(
+          `You fetched ${result.delivered} ${name} for ${who}, dug by hand, and have just tossed ` +
+            `them over. Say so in one short, cheerful sentence${result.delivered < count ? ' (it is all you could find nearby)' : ''}.`,
+          `Here you are: ${result.delivered} ${name}!`
+        )
+      } else if (result.gathered > 0) {
+        await this.speak(
+          `You gathered ${result.gathered} ${name} for ${who} but could not find them to hand ` +
+            'it over; you keep it for them. Say so in one short sentence.',
+          `I have your ${name}, but I could not find you!`
+        )
+      } else {
+        await this.speak(
+          `You looked for untouched ${name} for ${who}, well away from everyone's building, and ` +
+            'found none nearby. Say so kindly in one short sentence.',
+          `Alas, I found no ${name} nearby that nobody is using.`
+        )
+      }
+    } catch (err) {
+      this.log.warn(`fetching ${material} failed: ${errMsg(err)}`)
+    } finally {
+      this.gathering = false
     }
   }
 

@@ -15,10 +15,12 @@ import type {
   SeenPlayer,
 } from './Brain'
 import { byHand } from './Brain'
+import type { Material } from '../bot/gathering'
 import {
   abilityNote,
   declineLine,
   detectBuildRequest,
+  detectGatherRequest,
   detectMissingAbility,
   detectMoveCommand,
   detectUndoRequest,
@@ -61,6 +63,14 @@ import { SILENT_TOKEN, cleanChatReply, mentionsName, mentionsNameLoosely } from 
 
 /** Do not hail the same player again if they rejoin within this window. */
 export const REHAIL_AFTER_MS = 10 * 60_000
+
+/** How a fetched material is named in speech: "16 dirt", "16 logs". */
+const MATERIAL_NAMES: Record<Material, string> = {
+  dirt: 'dirt',
+  wood: 'logs',
+  sand: 'sand',
+  gravel: 'gravel',
+}
 
 /** A royal's answer not ready after this long: the bot thinks aloud first. */
 const THINKING_MS = 2_500
@@ -402,7 +412,11 @@ export class OllamaBrain implements Brain {
 
   /** What the line asks of the body. Building takes precedence over walking ("come and build"). */
   private actionTurn(event: ChatEvent, member: CourtMember | undefined, ctx: BrainContext): Turn {
-    return this.buildTurn(event, member, ctx) ?? this.moveTurn(event, member, ctx)
+    return (
+      this.gatherTurn(event, member, ctx) ??
+      this.buildTurn(event, member, ctx) ??
+      this.moveTurn(event, member, ctx)
+    )
   }
 
   /**
@@ -821,6 +835,55 @@ export class OllamaBrain implements Brain {
   }
 
   /**
+   * Errands in survival: fetch dirt, wood, sand or gravel, dug by hand from untouched land. The
+   * Castellan sends one of his staff; the wizard does not dig. Null when the line is no errand.
+   */
+  private gatherTurn(
+    event: ChatEvent,
+    member: CourtMember | undefined,
+    ctx: BrainContext
+  ): Turn | null {
+    if (!byHand(ctx.gameMode)) return null
+    const request = detectGatherRequest(event.message)
+    if (!request) return null
+    const who = member ? `the ${member.title}` : event.from
+    if (!member) {
+      return { note: `(Only the royal family may send you on errands. Decline ${who} kindly.)` }
+    }
+    const what = `${request.count} ${MATERIAL_NAMES[request.material]}`
+    const me = this.cfg.name.toLowerCase()
+    const staff = this.staff.filter((s) => s.reportsTo?.toLowerCase() === me).map((s) => s.name)
+    if (this.magic) {
+      const diggers = this.staff.filter((s) => s.reportsTo).map((s) => s.name)
+      return {
+        note:
+          `(Digging is not a wizard's work: say kindly that ${listWords(diggers, 'or')} can fetch ` +
+          `${what} for ${who}. Do not promise to dig it yourself.)`,
+      }
+    }
+    const action = {
+      type: 'gather' as const,
+      material: request.material,
+      count: request.count,
+      requestedBy: event.from,
+    }
+    if (staff.length) {
+      return {
+        action: { ...action, delegate: true },
+        note:
+          `(You send one of your staff, ${listWords(staff, 'or')}, to fetch ${what} for ${who} ` +
+          'from untouched land nearby. Say so gladly in one short sentence; it takes a few minutes.)',
+      }
+    }
+    return {
+      action,
+      note:
+        `(You now go and fetch ${what} for ${who} from untouched land nearby, dug by hand, and ` +
+        'bring it back. Say so gladly in one short sentence; it takes a few minutes.)',
+    }
+  }
+
+  /**
    * Build and undo requests (royals only). Null when the line is neither, so movement can have a
    * go. A request for something not in the spellbook gets the spellbook offered instead.
    */
@@ -836,7 +899,8 @@ export class OllamaBrain implements Brain {
           note:
             '(In this world every block must be gathered and laid by hand. The court only knows ' +
             'building by creative magic so far, so nobody can build, take down or start great ' +
-            'works here yet. Say so kindly and honestly; do not promise it.)',
+            'works here yet. Say so kindly and honestly; do not promise it. The court can fetch ' +
+            'dirt, wood, sand or gravel instead.)',
           ability: 'handbuild',
         }
       : undefined
@@ -1307,7 +1371,8 @@ export class OllamaBrain implements Brain {
       handWork
         ? '- This world is in survival mode: every block is gathered and laid by hand. The court ' +
           'only knows building by creative magic so far, so nobody builds here yet. Say so ' +
-          'honestly if asked, and never promise a build.'
+          'honestly if asked, and never promise a build. But the apprentices and guards can ' +
+          'fetch dirt, wood, sand or gravel for the royal family, dug by hand from untouched land.'
         : this.cfg.canBuild
           ? `- You can build ${this.magic ? 'from your spellbook' : 'these'} when the royal family asks: ${spellbookList()}. ` +
             'The building happens by itself; just talk about it. Only build for the royal family.'

@@ -2,7 +2,7 @@ import { createRequire } from 'node:module'
 import type { Bot as MineflayerBot } from 'mineflayer-bedrock'
 import { Vec3 } from 'vec3'
 import type { Logger } from '../logger'
-import { errMsg, sleep } from '../util'
+import { errMsg, sleep, withTimeout } from '../util'
 import type { FillColumn, PlanCell, Vec } from './compile'
 import type { Side } from './design'
 import type { BlockKind, WorldView } from './site'
@@ -694,14 +694,4 @@ function dist(a: Vec3, b: { x: number; y: number; z: number }): number {
 
 function timeFor(a: Vec3, b: Vec3): number {
   return 4_000 + a.distanceTo(b) * 400
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  let timer: NodeJS.Timeout
-  return Promise.race([
-    promise.finally(() => clearTimeout(timer)),
-    new Promise<T>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms)
-    }),
-  ])
 }
