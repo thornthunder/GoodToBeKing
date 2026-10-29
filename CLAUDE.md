@@ -121,6 +121,19 @@ Windows, killing a background `npx` shell does not kill its node children at all
   fences, two of a kind always left; game animals' entity data is read for this), `bot/cooking.ts`
   (raw meat cooked in the hall's furnace with wood). Bots eat up to 18 when hurt (health only
   comes back above it); in survival nobody drops more than three blocks.
+- The court's technology ladder (the King's wish: halls monster-free, technology advancing):
+  `steward.ts` plans from one pool of free courtiers, every job naming who does it (hall jobs
+  to builders: repair (walls, roof, floor craters, any filler), a lost storehouse chest remade,
+  roof, door, crafting table, beds, light, furnace, stone facing for dirt walls; then wood first
+  when nearly none, stone first while there is no furnace, charcoal, the field, cooking or
+  hunting (guards first), arming, the mine, wood). Work that came to nothing rests 10 minutes
+  (`resting`); the court's own errands say nothing of a failure. `bot/mining.ts`: a staircase
+  mine near home (walked back down before digging on, stops at water, lava or a cave), a level
+  tunnel past 18 deep; pickaxes made as needed, stone as soon as there is cobblestone. Gatherers
+  climb a dirt pillar to high logs and take it down. Light: torches inside and a ring outside,
+  from charcoal (`Cook.smelt`: logs with planks for fuel). Guards make stone or wooden swords.
+  A courtier is free again right after a job (the 10-minute pause holds back the castle works
+  only). Merlin's magic (beds, food, seeds, logs, a furnace) only for what cannot be had by hand.
 - Bedrock 1.26.60 renumbered item stack actions (`craft_reserved`): bedboo's legacy bytes are
   corrected on the way out (`packets.ts fixOutgoing`), or every craft disconnects the bot.
 - The brain returns `BrainReply { say, action? }` from `onChat`; actions are follow/come/stop,
