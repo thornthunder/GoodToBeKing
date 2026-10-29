@@ -30,7 +30,7 @@ import { CourtRoster } from '../court'
 import type { Logger } from '../logger'
 import { errMsg, sleep } from '../util'
 import { Bot } from './Bot'
-import type { Material } from './gathering'
+import { MATERIALS, type Material } from './gathering'
 import { ChatFloor } from './ChatFloor'
 
 /** Runtime state that should survive restarts (git-ignored). */
@@ -766,6 +766,14 @@ export class BotManager {
       void bot.fadeGiftsNow()
     } else if (verb === 'spells') {
       bot.listSpells()
+    } else if (verb === 'fetch') {
+      // <bot> fetch <dirt|wood|sand|gravel> [count] [for <player>] (survival errands)
+      const material = words[2] as Material
+      const count = Number(words[3]) || 16
+      if (!MATERIALS.includes(material)) {
+        return this.log.warn(`usage: <bot> fetch <${MATERIALS.join('|')}> [count] [for <player>]`)
+      }
+      void bot.startGather(material, count, requestedBy)
     } else if (verb === 'undo') {
       this.log.info(`command: ${bot.cfg.name} takes down its last build`)
       void bot.undoLastBuild(requestedBy)

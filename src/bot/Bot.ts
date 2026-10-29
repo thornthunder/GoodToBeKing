@@ -565,7 +565,7 @@ export class Bot extends EventEmitter {
         .catch((err) => this.log.warn(`brain.onStuck failed: ${errMsg(err)}`))
     }
     this.mason = new Mason(body, this.log.child('mason'))
-    this.gatherer = new Gatherer(body, this.log.child('gather'))
+    this.gatherer = new Gatherer(body, this.log.child('gather'), (name) => this.isBot(name))
     body.on('error', (err) => this.log.debug(`body error: ${errMsg(err)}`))
     body.once('spawn', () => this.movement?.configure())
     this.attachHandlers(client)

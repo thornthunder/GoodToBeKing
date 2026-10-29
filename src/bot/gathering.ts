@@ -44,8 +44,11 @@ export type BlockNames = (x: number, y: number, z: number) => string | undefined
 
 /** Keep at least this far (blocks) from every player: never dig near what someone is making. */
 export const KEEP_AWAY = 16
-/** How far from the bot it looks for something to dig. */
-const SEARCH = 40
+/** How far from the bot it looks for something to dig, and how many places it notes at once. */
+const SEARCH = 48
+const CANDIDATES = 80
+/** Close enough to toss things over. */
+const TOSS_RANGE = 4
 /** Reach for digging, from the eyes. */
 const REACH = 4.5
 /** The longest a whole errand may take. */
@@ -102,7 +105,9 @@ export class Gatherer {
 
   constructor(
     bot: MineflayerBot,
-    private readonly log: Logger
+    private readonly log: Logger,
+    /** The court's own bots: they are not building anything, so they need no keeping away from. */
+    private readonly isBot: (name: string) => boolean = () => false
   ) {
     this.bot = bot as GatherBot
   }
@@ -127,6 +132,8 @@ export class Gatherer {
     const before = this.carried(material)
     const tried = new Set<string>()
     let reason: GatherResult['reason']
+    let candidates = this.search(material)
+    let searched = Date.now()
     while (this.carried(material) - before < want) {
       if (this.cancelled) {
         reason = 'cancelled'
@@ -136,7 +143,13 @@ export class Gatherer {
         reason = 'too_long'
         break
       }
-      const target = this.findTarget(material, tried)
+      let target = this.nearest(material, candidates, tried)
+      // The land near the start is used up: look again from here, once in a while.
+      if (!target && Date.now() - searched > 5_000) {
+        candidates = this.search(material)
+        searched = Date.now()
+        target = this.nearest(material, candidates, tried)
+      }
       if (!target) {
         reason = 'none_found'
         break
@@ -153,24 +166,44 @@ export class Gatherer {
 
   private names: BlockNames = (x, y, z) => this.bot.blockAt(new Vec3(x, y, z))?.name
 
-  /** The nearest untouched block of the material, far enough from every player. */
-  private findTarget(material: Material, tried: Set<string>): Vec3 | undefined {
-    const me = this.bot.entity?.position
-    if (!me) return undefined
-    const info = MATERIAL_INFO[material]
-    const players = Object.values(this.bot.players)
-      .filter((p) => p.username !== this.bot.username && p.entity)
+  /** Where the real players are (not the court's bots). */
+  private players(): Vec3[] {
+    return Object.values(this.bot.players)
+      .filter((p) => p.username !== this.bot.username && !this.isBot(p.username) && p.entity)
       .map((p) => p.entity.position)
+  }
+
+  /** May this block be dug: untouched land, far enough from every player. */
+  private allowed(material: Material, p: Vec3, players: Vec3[]): boolean {
+    return (
+      players.every((q) => q.distanceTo(p) >= KEEP_AWAY) &&
+      untouched(material, this.names, p.x, p.y, p.z)
+    )
+  }
+
+  /** Untouched blocks of the material around the bot, nearest first. */
+  private search(material: Material): Vec3[] {
+    const info = MATERIAL_INFO[material]
+    const players = this.players()
     const found = this.bot.findBlocks({
       matching: (block: { name: string }) => info.blocks.test(block.name),
+      useExtraInfo: (block: { position: Vec3 }) => this.allowed(material, block.position, players),
       maxDistance: SEARCH,
-      count: 400,
-    })
+      count: CANDIDATES,
+    } as never)
+    this.log.info(`found ${found.length} places with untouched ${material} nearby`)
     return found
+  }
+
+  /** The nearest place not tried yet that may still be dug (players move, holes appear). */
+  private nearest(material: Material, places: Vec3[], tried: Set<string>): Vec3 | undefined {
+    const me = this.bot.entity?.position
+    if (!me) return undefined
+    const players = this.players()
+    return places
       .filter((p) => !tried.has(p.toString()))
-      .filter((p) => players.every((q) => q.distanceTo(p) >= KEEP_AWAY))
-      .filter((p) => untouched(material, this.names, p.x, p.y, p.z))
-      .sort((a, b) => a.distanceTo(me) - b.distanceTo(me))[0]
+      .sort((a, b) => a.distanceTo(me) - b.distanceTo(me))
+      .find((p) => this.allowed(material, p, players))
   }
 
   /** Walk over, dig it, and pick up what drops. */
@@ -181,7 +214,7 @@ export class Gatherer {
         30_000
       )
     } catch (err) {
-      this.log.debug(`could not get to ${target}: ${errMsg(err)}`)
+      this.log.info(`could not get to ${target}: ${errMsg(err)}`)
       this.bot.pathfinder.setGoal(null)
       return
     }
@@ -193,7 +226,7 @@ export class Gatherer {
     try {
       await withTimeout(this.bot.dig(block, true), 15_000)
     } catch (err) {
-      this.log.debug(`could not dig ${block.name} at ${target}: ${errMsg(err)}`)
+      this.log.info(`could not dig ${block.name} at ${target}: ${errMsg(err)}`)
       return
     }
     await this.pickUp(target)
@@ -226,20 +259,30 @@ export class Gatherer {
 
   /** Bring the things to the player and toss them over. Returns how many were handed over. */
   private async deliver(material: Material, count: number, player: string): Promise<number> {
-    const target = this.bot.players[player]?.entity
-    if (!target) {
-      this.log.info(`${player} is out of sight: keeping the ${material}`)
-      return 0
-    }
-    try {
-      await withTimeout(this.bot.pathfinder.goto(new goals.GoalFollow(target, 2)), 90_000)
-    } catch (err) {
-      this.log.debug(`could not walk back to ${player}: ${errMsg(err)}`)
-    } finally {
-      this.bot.pathfinder.setGoal(null)
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const target = this.bot.players[player]?.entity
+      if (!target) {
+        this.log.info(`${player} is out of sight: keeping the ${material}`)
+        return 0
+      }
+      if (target.position.distanceTo(this.bot.entity.position) <= TOSS_RANGE) break
+      const p = target.position
+      try {
+        await withTimeout(this.bot.pathfinder.goto(new goals.GoalNear(p.x, p.y, p.z, 2)), 60_000)
+      } catch (err) {
+        this.log.info(`could not walk over to ${player} (try ${attempt}): ${errMsg(err)}`)
+        this.bot.pathfinder.setGoal(null)
+        await sleep(1_000)
+      }
     }
     const near = this.bot.players[player]?.entity
-    if (!near || near.position.distanceTo(this.bot.entity.position) > 6) return 0
+    const gap = near?.position.distanceTo(this.bot.entity.position)
+    if (!near || gap === undefined || gap > TOSS_RANGE + 2) {
+      this.log.info(
+        `${player} is ${gap?.toFixed(1) ?? 'nowhere'} blocks away: keeping the ${material}`
+      )
+      return 0
+    }
     await this.bot.lookAt(near.position.offset(0, 1.6, 0)).catch(() => {})
     const items = MATERIAL_INFO[material].items
     let left = count
@@ -250,7 +293,7 @@ export class Gatherer {
         await withTimeout(this.bot.toss(item.type, item.metadata, n), 5_000)
         left -= n
       } catch (err) {
-        this.log.debug(`could not toss ${item.name}: ${errMsg(err)}`)
+        this.log.info(`could not toss ${item.name}: ${errMsg(err)}`)
       }
     }
     return count - left
