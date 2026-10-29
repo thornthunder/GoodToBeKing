@@ -20,6 +20,7 @@ const base: CourtState = {
   woodInStore: 20,
   freeHand: 'Bruce',
   storehouse: true,
+  night: false,
 }
 
 describe("the Castellan's account", () => {
@@ -112,6 +113,12 @@ describe("the Castellan's account", () => {
       to: 'Bruce',
       why: 'seeds for a wheat field',
     })
+  })
+
+  it('sends nobody out at night: no field, no hunt, no wood; cooking indoors goes on', () => {
+    const night = { ...base, night: true, foodInStore: 2, freeHunter: 'Dyke', woodInStore: 3 }
+    expect(plan({ ...night, farm: { exists: true, work: 4 } })).toEqual([])
+    expect(plan({ ...night, rawInStore: 4 })).toEqual([{ kind: 'cook', by: 'Dyke' }])
   })
 
   it('sends a free hand for wood when the storehouse runs low', () => {

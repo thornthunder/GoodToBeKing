@@ -302,6 +302,7 @@ export class BotManager {
       woodInStore: sum(/_log$/) + Math.floor(sum(/_planks$/) / 4),
       freeHand: staff.find((b) => b.isFree() && !b.buildsByMagic())?.cfg.name,
       storehouse: Boolean(this.household.storehouse),
+      night: castellan.isNight(),
     }
     // Beds in the hall: each courtier taps one, so it respawns at home (one a round).
     if (beds > 0) {

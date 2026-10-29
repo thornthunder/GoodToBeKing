@@ -44,6 +44,8 @@ export interface CourtState {
   freeHand?: string
   /** The court has a storehouse. */
   storehouse: boolean
+  /** Night: monsters about, nobody goes out (only work indoors). */
+  night: boolean
 }
 
 export type StewardAction =
@@ -88,7 +90,7 @@ export function plan(s: CourtState): StewardAction[] {
   }
   // The field first: bread is the court's food for good (hunting thins the animals out).
   const farmer =
-    s.storehouse && s.freeHand && (s.farm.exists ? s.farm.work > 0 : s.seeds > 0)
+    !s.night && s.storehouse && s.freeHand && (s.farm.exists ? s.farm.work > 0 : s.seeds > 0)
       ? s.freeHand
       : undefined
   if (farmer) out.push({ kind: 'farm', by: farmer })
@@ -96,7 +98,8 @@ export function plan(s: CourtState): StewardAction[] {
   const hungry = s.foodInStore < FOOD_RESERVE
   if (hungry && s.storehouse && s.freeHunter && s.freeHunter !== farmer) {
     if (s.rawInStore > 0 && s.furnace) out.push({ kind: 'cook', by: s.freeHunter })
-    else if (s.rawInStore < FOOD_RESERVE) out.push({ kind: 'hunt', animals: 3, by: s.freeHunter })
+    else if (s.rawInStore < FOOD_RESERVE && !s.night)
+      out.push({ kind: 'hunt', animals: 3, by: s.freeHunter })
   }
   // Magic: swords, beds, coal, food; only for what the court cannot get by hand.
   const wants: Array<Omit<Extract<StewardAction, { kind: 'magic' }>, 'kind'>> = []
@@ -142,7 +145,7 @@ export function plan(s: CourtState): StewardAction[] {
       out.push({ kind: 'magic', ...first })
   }
   // Wood for the next repairs and planks.
-  if (s.storehouse && s.freeHand && s.woodInStore < WOOD_RESERVE)
+  if (s.storehouse && s.freeHand && s.woodInStore < WOOD_RESERVE && !s.night)
     out.push({ kind: 'errand', material: 'wood', count: 16 })
   return out
 }
