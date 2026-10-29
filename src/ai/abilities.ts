@@ -7,6 +7,7 @@
  * Remove an ability from MissingAbility once the bots can really do it.
  */
 import type { Material } from '../bot/gathering'
+import type { HallWork } from './Brain'
 import { matchBlueprint, spellbookList, type BlueprintId } from '../build/blueprints'
 
 export type MissingAbility = 'build' | 'handbuild' | 'fetch' | 'travel'
@@ -71,6 +72,21 @@ const STOREHOUSE = [
   /\b(use|make)\b[^.!?]{0,20}\b(chest|barrel)\b[^.!?]{0,30}\b(storehouse|store|storage|larder|stores)\b/i,
   /\b(this|here)\b[^.!?]{0,10}\b(is|shall be|will be)\b[^.!?]{0,10}\b(the|our) (storehouse|larder|stores)\b/i,
 ]
+
+const HALL_WORK: Array<[HallWork, RegExp]> = [
+  ['roof', /\broof\b/i],
+  ['floor', /\bfloor(ing)?\b/i],
+  ['door', /\bdoor\b/i],
+  ['light', /\b(light|torch|torches|lamps?)\b/i],
+]
+const HALL_VERB =
+  /\b(put|build|make|add|give|lay|cover|fit|hang|place|need|light|finish|set|could|can|please)\b/i
+
+/** "Put a roof on the hall", "lay a floor", "light the hall", "make us a door". */
+export function detectHallWork(message: string): HallWork | null {
+  if (!HALL_VERB.test(message) || QUESTION.test(message)) return null
+  return HALL_WORK.find(([, words]) => words.test(message))?.[0] ?? null
+}
 
 /** "This hall is our home", "make it our home". */
 export function detectHomeRequest(message: string): boolean {
@@ -211,8 +227,8 @@ export function refuses(reply: string): boolean {
 /** What the court can truly offer instead (anything else would be one more empty promise). */
 const OFFERS: Partial<Record<MissingAbility, string>> = {
   handbuild:
-    'offer only what the court can really do here: fetch dirt, wood, sand or gravel, or keep ' +
-    'them company',
+    'offer only what the court can really do here: fetch dirt, wood, sand or gravel, put a ' +
+    "roof, a floor, a door or torches on the court's home hall, or keep them company",
 }
 
 /** Transient instruction placed right next to the request in the prompt. */

@@ -144,6 +144,20 @@ export class Gatherer {
   lastStock?: Record<string, number>
 
   async fetch(material: Material, want: number, to: Destination): Promise<GatherResult> {
+    const { gathered, reason } = await this.collect(material, want)
+    if (gathered === 0 || this.cancelled) return { gathered, delivered: 0, reason }
+    const delivered =
+      'player' in to
+        ? await this.deliver(material, gathered, to.player)
+        : await this.store(material, gathered, to.chest)
+    return { gathered, delivered, reason: delivered < gathered ? 'not_delivered' : reason }
+  }
+
+  /** Dig the material up and keep it (a builder chopping wood for his planks). */
+  async collect(
+    material: Material,
+    want: number
+  ): Promise<{ gathered: number; reason?: GatherResult['reason'] }> {
     this.cancelled = false
     const start = Date.now()
     const before = this.carried(material)
@@ -176,12 +190,7 @@ export class Gatherer {
     }
     const gathered = Math.max(0, this.carried(material) - before)
     this.log.info(`gathered ${gathered} of ${want} ${material}${reason ? ` (${reason})` : ''}`)
-    if (gathered === 0 || this.cancelled) return { gathered, delivered: 0, reason }
-    const delivered =
-      'player' in to
-        ? await this.deliver(material, gathered, to.player)
-        : await this.store(material, gathered, to.chest)
-    return { gathered, delivered, reason: delivered < gathered ? 'not_delivered' : reason }
+    return { gathered, reason }
   }
 
   private names: BlockNames = (x, y, z) => this.bot.blockAt(new Vec3(x, y, z))?.name

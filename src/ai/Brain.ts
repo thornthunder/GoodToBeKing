@@ -2,6 +2,9 @@ import type { SpellArgs } from '../magic/spells'
 import type { Post } from './orders'
 import type { BlueprintId, Palette } from '../build/blueprints'
 import type { Material } from '../bot/gathering'
+
+/** What the builders can do for the hall by hand. */
+export type HallWork = 'roof' | 'floor' | 'light' | 'door'
 export type ChatKind = 'chat' | 'whisper' | 'announcement' | 'system'
 
 /** One line of in-game chat, already normalised from the wire format. */
@@ -83,6 +86,8 @@ export type BotAction =
       delegate?: boolean
       toStore?: boolean
     }
+  /** Work on the court's home hall by hand (survival); `delegate`: a builder of the staff goes. */
+  | { type: 'hallwork'; work: HallWork; requestedBy: string; delegate?: boolean }
   /** A royal makes the spot where they stand the court's home. */
   | { type: 'home'; requestedBy: string }
   /** A royal makes the chest beside them the court's storehouse. */

@@ -6,13 +6,21 @@ import {
   type Bot as MineflayerBot,
   type BotOptions as MineflayerBotOptions,
 } from 'mineflayer-bedrock'
-import type { BotAction, Brain, BrainContext, BuildOutcome, ChatEvent, GameMode } from '../ai/Brain'
+import type {
+  BotAction,
+  Brain,
+  BrainContext,
+  BuildOutcome,
+  ChatEvent,
+  GameMode,
+  HallWork,
+} from '../ai/Brain'
 import { byHand } from '../ai/Brain'
 import { mentionsName, splitChatMessage } from '../ai/text'
 import type { BotConfig, ServerConfig } from '../config'
 import type { CourtRoster } from '../court'
 import type { Logger } from '../logger'
-import { errMsg } from '../util'
+import { errMsg, sleep } from '../util'
 import { useLanguage } from './language'
 import { BuildLog, type BuildRecord } from '../build/BuildLog'
 import {
@@ -28,6 +36,16 @@ import { findSite, type Point, type Site } from '../build/site'
 import { SEE_THROUGH } from '../build/sites'
 import { Vec3 as WorldVec } from 'vec3'
 import type { ChatFloor } from './ChatFloor'
+import { Handbuilder } from '../build/Handbuilder'
+import {
+  doorCells,
+  floorCells,
+  lightCells,
+  roofCells,
+  surveyHall,
+  type Hall,
+  type HandCell,
+} from '../build/hall'
 import type { Household } from '../household'
 import { Gatherer, type Material } from './gathering'
 import { Movement } from './movement'
@@ -85,6 +103,23 @@ const EARSHOT = 24
 /** After a royal tells a bot on duty to stop, it leaves the duty alone this long. */
 const DUTY_PAUSE_MS = 10 * 60_000
 
+/** Hall work as the builder speaks of it, and the cells it takes. */
+const HALL_WORK_TITLES: Record<HallWork, string> = {
+  roof: 'a roof',
+  floor: 'a plank floor',
+  light: 'torches',
+  door: 'a door',
+}
+const HALL_WORK_CELLS: Record<
+  HallWork,
+  (hall: Hall, names: (x: number, y: number, z: number) => string | undefined) => HandCell[]
+> = {
+  roof: roofCells,
+  floor: floorCells,
+  light: lightCells,
+  door: doorCells,
+}
+
 export interface BotOptions {
   /** Names of all bots run by this app: they never greet or answer each other. */
   fellowBots?: string[]
@@ -139,6 +174,8 @@ export class Bot extends EventEmitter {
   /** Out fetching something for a royal (survival). */
   private gatherer?: Gatherer
   private gathering = false
+  /** Builds by hand in survival (the hall's roof, floor, light and door). */
+  private handbuilder?: Handbuilder
   /** The court's home and storehouse (survival). */
   private readonly household?: Household
   /** A royal asked for something else: no work orders until then. */
@@ -241,7 +278,7 @@ export class Bot extends EventEmitter {
   /** Idle: not building, not walking for anyone, not on duty or a royal's post. */
   isFree(): boolean {
     if (this.state.status !== 'spawned' || !this.body || !this.mason) return false
-    if (this.building || this.mason.busy || this.gathering) return false
+    if (this.building || this.mason.busy || this.gathering || this.handbuilder?.busy) return false
     if (Date.now() < this.worksPausedUntil) return false
     if (this.movement?.current() && !this.dutyFollowing) return false
     if (this.dutyTarget() && Date.now() >= this.dutyPausedUntil) return false
@@ -572,6 +609,9 @@ export class Bot extends EventEmitter {
     }
     this.mason = new Mason(body, this.log.child('mason'))
     this.gatherer = new Gatherer(body, this.log.child('gather'), (name) => this.isBot(name))
+    this.handbuilder = new Handbuilder(body, this.log.child('hands'), this.gatherer, () =>
+      this.movement?.configure()
+    )
     body.on('error', (err) => this.log.debug(`body error: ${errMsg(err)}`))
     body.once('spawn', () => this.movement?.configure())
     this.attachHandlers(client)
@@ -661,6 +701,11 @@ export class Bot extends EventEmitter {
         else
           void this.startGather(action.material, action.count, action.requestedBy, action.toStore)
         return
+      case 'hallwork':
+        // The Castellan's hall work goes to whichever of his builders is free (see BotManager).
+        if (action.delegate) this.emit('hallwork', { ...action, from: this.cfg.name })
+        else void this.startHallWork(action.work, action.requestedBy)
+        return
       case 'home':
         // The court keeps it (see BotManager): where the royal stands, or failing that, here.
         this.emit('home', {
@@ -680,6 +725,7 @@ export class Bot extends EventEmitter {
       case 'stop':
         this.pauseWorks()
         this.gatherer?.cancel()
+        this.handbuilder?.cancel()
         movement.stop()
         // A royal said stop: the escort duty waits too, for a while.
         this.dutyFollowing = false
@@ -761,6 +807,75 @@ export class Bot extends EventEmitter {
       this.log.warn(`fetching ${material} failed: ${errMsg(err)}`)
     } finally {
       this.gathering = false
+    }
+  }
+
+  /**
+   * Work on the court's home hall by hand: survey it from its walls, build the cells (materials
+   * from the storehouse, more wood chopped if short), and say how it went.
+   */
+  async startHallWork(work: HallWork, requestedBy: string): Promise<void> {
+    const builder = this.handbuilder
+    const home = this.household?.home
+    if (!builder || builder.busy || !home || !this.body) return
+    const member = this.court?.find(requestedBy)
+    const who = member ? `the ${member.title}` : requestedBy
+    const title = HALL_WORK_TITLES[work]
+    this.pauseWorks()
+    this.dutyFollowing = false
+    this.movement?.stop()
+    // Close enough to see the hall: its walls must be loaded to be surveyed.
+    if (
+      this.position() &&
+      Math.hypot(this.position()!.x - home.x, this.position()!.z - home.z) > 24
+    ) {
+      this.movement?.goTo(home, 'home')
+      for (let i = 0; i < 60 && this.movement?.current()?.kind === 'going'; i++) await sleep(1_000)
+    }
+    const body = this.body
+    const names = (x: number, y: number, z: number) => body.blockAt(new WorldVec(x, y, z))?.name
+    const hall = surveyHall(names, home)
+    if (typeof hall === 'string') {
+      this.log.info(`cannot survey the hall: ${hall}`)
+      await this.speak(
+        `${who} asked for ${title}, but looking at the hall: ${hall}. Say so kindly in one short sentence.`,
+        `Alas, I cannot make out the hall: ${hall}.`
+      )
+      return
+    }
+    const cells = HALL_WORK_CELLS[work](hall, names)
+    if (cells.length === 0) {
+      await this.speak(
+        `${who} asked for ${title}, and the hall already has it. Say so in one short sentence.`,
+        `The hall already has ${title}!`
+      )
+      return
+    }
+    this.log.info(
+      `${title} for the hall: ${cells.length} blocks (${hall.inside.length} columns inside)`
+    )
+    const result = await builder.build(
+      { title: `${title} for the hall`, cells },
+      this.household?.storehouse
+    )
+    if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
+    if (result.cancelled) return
+    const short = Object.entries(result.short)
+      .map(([block, n]) => `${n} ${block.replace(/_/g, ' ')}`)
+      .join(', ')
+    if (result.missing === 0) {
+      await this.speak(
+        `You have finished ${title} for the hall, by hand (${result.placed} blocks). Tell ${who} ` +
+          'so in one short, proud sentence.',
+        `${title[0].toUpperCase()}${title.slice(1)} for the hall is done!`
+      )
+    } else {
+      await this.speak(
+        `You made part of ${title} for the hall (${result.placed} blocks); ${result.missing} are ` +
+          `still missing${short ? ` for want of ${short}` : ''}. Tell ${who} so honestly in one ` +
+          'short sentence.',
+        `I made part of it, but ${result.missing} blocks are still missing.`
+      )
     }
   }
 

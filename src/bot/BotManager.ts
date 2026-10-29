@@ -32,6 +32,7 @@ import { errMsg, sleep } from '../util'
 import { Bot } from './Bot'
 import { MATERIALS, type Material } from './gathering'
 import { Household } from '../household'
+import type { HallWork } from '../ai/Brain'
 import { ChatFloor } from './ChatFloor'
 
 /** Runtime state that should survive restarts (git-ignored). */
@@ -146,6 +147,10 @@ export class BotManager {
       bot.on('commission', (request: CommissionRequest) => this.commission(bot, request))
       bot.on('works', (order: WorksOrder) => void this.orderWorks(bot, order))
       bot.on('gather', (errand: Errand) => void this.sendOnErrand(bot, errand))
+      bot.on(
+        'hallwork',
+        (job: { work: HallWork; requestedBy: string }) => void this.sendToHall(bot, job)
+      )
       bot.on('home', (h: { requestedBy: string; at?: Point }) => {
         if (!h.at) return
         const home = this.household.setHome(h.at, h.requestedBy)
@@ -200,6 +205,29 @@ export class BotManager {
         bot.goTo(home, 'home')
       }
     }
+  }
+
+  /** The Castellan sets one of his builders to work on the hall: the nearest free one. */
+  private async sendToHall(from: Bot, job: { work: HallWork; requestedBy: string }): Promise<void> {
+    const boss = from.cfg.name.toLowerCase()
+    const home = this.household.home
+    const distance = (b: Bot) => {
+      const p = b.position()
+      return p && home ? Math.hypot(p.x - home.x, p.z - home.z) : Infinity
+    }
+    const builder = this.bots
+      .filter((b) => b.cfg.canBuild && !b.cfg.magic && b.cfg.reportsTo?.toLowerCase() === boss)
+      .filter((b) => b.isFree() && !b.buildsByMagic())
+      .sort((a, b) => distance(a) - distance(b))[0]
+    if (!builder) {
+      await from.speak(
+        `None of your builders is free for the hall just now. Say so kindly in one short sentence.`,
+        'Alas, the builders are all busy just now.'
+      )
+      return
+    }
+    this.log.info(`${from.cfg.name} sets ${builder.cfg.name} to work on the hall: ${job.work}`)
+    await builder.startHallWork(job.work, job.requestedBy)
   }
 
   /**
@@ -758,6 +786,16 @@ export class BotManager {
     const words = line.trim().split(/\s+/)
     const [name, verb] = words
     if (name?.toLowerCase() === 'works') return this.worksCommand(words.slice(1))
+    if (name?.toLowerCase() === 'household') {
+      // household home|storehouse <x> <y> <z>
+      const [x, y, z] = words.slice(2, 5).map(Number)
+      if (!['home', 'storehouse'].includes(verb) || [x, y, z].some((n) => !Number.isFinite(n)))
+        return this.log.warn('usage: household home|storehouse <x> <y> <z>')
+      if (verb === 'home') this.household.setHome({ x, y, z }, 'the court')
+      else this.household.setStorehouse({ x, y, z }, 'the court')
+      this.placesCache = undefined
+      return this.log.info(`command: the court's ${verb} is now at ${x},${y},${z}`)
+    }
     const bot = name ? this.find(name) : undefined
     if (!bot) return this.log.warn(`command for unknown bot: ${line}`)
     const forIndex = words.indexOf('for')
@@ -842,6 +880,12 @@ export class BotManager {
         return this.log.warn(`usage: <bot> fetch <${MATERIALS.join('|')}> [count] [for <player>]`)
       }
       void bot.startGather(material, count, requestedBy)
+    } else if (verb === 'hall') {
+      // <bot> hall <roof|floor|light|door> [for <player>] (by hand, survival)
+      const work = words[2] as HallWork
+      if (!['roof', 'floor', 'light', 'door'].includes(work))
+        return this.log.warn('usage: <bot> hall <roof|floor|light|door> [for <player>]')
+      void bot.startHallWork(work, requestedBy)
     } else if (verb === 'undo') {
       this.log.info(`command: ${bot.cfg.name} takes down its last build`)
       void bot.undoLastBuild(requestedBy)

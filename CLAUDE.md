@@ -51,7 +51,8 @@ Write a line to a file named `.command` in the project root (checked every secon
 `<bot> build <blueprint> x y z [for <player>]`, `<bot> resume <blueprint> x y z [turns N]`,
 `<bot> commission <blueprint> [at x y z] [for <player>]` (as if a royal asked that bot: the
 Castellan hands it to a builder), `<bot> fetch <dirt|wood|sand|gravel> [count] [for <player>]`
-(a survival errand), `<bot> undo`, and for the court's building works `works status|pause|resume`,
+(a survival errand), `<bot> hall <roof|floor|light|door>` (by hand, on the court's home hall),
+`household home|storehouse <x> <y> <z>`, `<bot> undo`, and for the court's building works `works status|pause|resume`,
 `works start <design.json>` and `works plan` (the overlord designs the next castle now). For
 magic: `Merlin cast <spell> [on <who>] [to <place>] [item <x>] [creature <x>] [for <player>]`,
 `Merlin spells` (logs spells, places and gifts still to fade), `Merlin fade` (takes every gift

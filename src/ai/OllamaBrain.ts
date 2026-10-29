@@ -12,6 +12,7 @@ import type {
   BrainReply,
   BuildOutcome,
   ChatEvent,
+  HallWork,
   SeenPlayer,
 } from './Brain'
 import { byHand } from './Brain'
@@ -22,6 +23,7 @@ import {
   declineLine,
   detectBuildRequest,
   detectGatherRequest,
+  detectHallWork,
   detectHomeRequest,
   detectMissingAbility,
   detectStorehouseRequest,
@@ -66,6 +68,14 @@ import { SILENT_TOKEN, cleanChatReply, mentionsName, mentionsNameLoosely } from 
 
 /** Do not hail the same player again if they rejoin within this window. */
 export const REHAIL_AFTER_MS = 10 * 60_000
+
+/** How hall work is named in speech. */
+const HALL_WORK_WORDS: Record<HallWork, string> = {
+  roof: 'a roof',
+  floor: 'a plank floor',
+  light: 'torches on the walls',
+  door: 'a door',
+}
 
 /** How a fetched material is named in speech: "16 dirt", "16 logs". */
 const MATERIAL_NAMES: Record<Material, string> = {
@@ -419,6 +429,7 @@ export class OllamaBrain implements Brain {
   private actionTurn(event: ChatEvent, member: CourtMember | undefined, ctx: BrainContext): Turn {
     return (
       this.householdTurn(event, member) ??
+      this.hallTurn(event, member, ctx) ??
       this.gatherTurn(event, member, ctx) ??
       this.buildTurn(event, member, ctx) ??
       this.moveTurn(event, member, ctx)
@@ -868,6 +879,59 @@ export class OllamaBrain implements Brain {
     return lines.join('\n')
   }
 
+  /**
+   * Work on the court's home hall in survival: a roof, a floor, light or a door, built by hand.
+   * The Castellan hands it to one of his builders; a builder asked directly goes himself.
+   */
+  private hallTurn(
+    event: ChatEvent,
+    member: CourtMember | undefined,
+    ctx: BrainContext
+  ): Turn | null {
+    if (!byHand(ctx.gameMode)) return null
+    const work = detectHallWork(event.message)
+    if (!work) return null
+    const who = member ? `the ${member.title}` : event.from
+    if (!member)
+      return {
+        note: `(Only the royal family may set the builders to work. Decline ${who} kindly.)`,
+      }
+    const what = HALL_WORK_WORDS[work]
+    if (!this.household?.home) {
+      return {
+        note:
+          `(${who} wants ${what} for the hall, but the court has no home yet. Ask kindly to be ` +
+          'shown: standing inside the hall, say "this hall is our home". Do not promise it before.)',
+      }
+    }
+    const crew = this.builders().map((s) => s.name)
+    if (!this.cfg.canBuild && crew.length === 0) {
+      return {
+        note: `(You do not build. Say kindly that Festaris can have ${what} made by his builders; do not promise it yourself.)`,
+      }
+    }
+    if (this.magic) {
+      return {
+        note: `(Building by hand is not a wizard's work: say kindly that Festaris's builders can make ${what}. Do not promise it yourself.)`,
+      }
+    }
+    if (!this.cfg.canBuild) {
+      return {
+        action: { type: 'hallwork', work, requestedBy: event.from, delegate: true },
+        note:
+          `(You hand this to your builders: ${listWords(crew, 'or')} will make ${what} for the ` +
+          'hall by hand, with what is in the storehouse (chopping more wood if need be). Say so ' +
+          'gladly in one short sentence; it takes a while.)',
+      }
+    }
+    return {
+      action: { type: 'hallwork', work, requestedBy: event.from },
+      note:
+        `(You now make ${what} for the hall by hand, with what is in the storehouse (chopping ` +
+        'more wood if need be). Say so gladly in one short sentence; it takes a while.)',
+    }
+  }
+
   /** A royal makes this spot the court's home, or the chest beside them its storehouse. */
   private householdTurn(event: ChatEvent, member: CourtMember | undefined): Turn | null {
     const home = detectHomeRequest(event.message)
@@ -971,7 +1035,7 @@ export class OllamaBrain implements Brain {
             '(In this world every block must be gathered and laid by hand. The court only knows ' +
             'building by creative magic so far, so nobody can build, take down or start great ' +
             'works here yet. Say so kindly and honestly; do not promise it. The court can fetch ' +
-            'dirt, wood, sand or gravel instead.)',
+            "dirt, wood, sand or gravel instead, or put a roof, a floor, a door or torches on the court's home hall.)",
           ability: 'handbuild',
         }
       : undefined
@@ -1443,7 +1507,8 @@ export class OllamaBrain implements Brain {
         ? '- This world is in survival mode: every block is gathered and laid by hand. The court ' +
           'only knows building by creative magic so far, so nobody builds here yet. Say so ' +
           'honestly if asked, and never promise a build. But the apprentices and guards can ' +
-          'fetch dirt, wood, sand or gravel for the royal family, dug by hand from untouched land.'
+          'fetch dirt, wood, sand or gravel for the royal family, dug by hand from untouched land, ' +
+          "and the builders can put a roof, a floor, a door or torches on the court's home hall."
         : this.cfg.canBuild
           ? `- You can build ${this.magic ? 'from your spellbook' : 'these'} when the royal family asks: ${spellbookList()}. ` +
             'The building happens by itself; just talk about it. Only build for the royal family.'
