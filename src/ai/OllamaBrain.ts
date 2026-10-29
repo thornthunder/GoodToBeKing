@@ -80,6 +80,7 @@ const HALL_WORK_WORDS: Record<HallWork, string> = {
   furnace: 'a furnace',
   chest: 'a chest for the storehouse',
   reinforce: 'stone for the walls in place of dirt',
+  table: 'a crafting table',
 }
 
 /** How a fetched material is named in speech: "16 dirt", "16 logs". */

@@ -1,4 +1,5 @@
 import type { Bot as MineflayerBot } from 'mineflayer-bedrock'
+import { goals, type Pathfinder } from 'mineflayer-pathfinder'
 import { Vec3 } from 'vec3'
 import type { Logger } from '../logger'
 import { errMsg, sleep, withTimeout } from '../util'
@@ -45,12 +46,20 @@ export async function craft(
   if (!item) return false
   const small = bot.recipesFor(item.id, null, 1, null)[0]
   if (small) return run(bot, log, name, small, times)
+  // The hall's crafting table, if it is not far: walk over to it.
   const near = bot.findBlocks({
     matching: (b: { name: string }) => b.name === 'crafting_table',
-    maxDistance: 4,
+    maxDistance: 24,
     count: 1,
   })[0]
-  const nearTable = near && bot.blockAt(near)
+  if (near && near.distanceTo(bot.entity.position) > 3.5) {
+    const walker = bot as MineflayerBot & { pathfinder?: Pathfinder }
+    await withTimeout(
+      walker.pathfinder?.goto(new goals.GoalNear(near.x, near.y, near.z, 2)) ?? Promise.resolve(),
+      30_000
+    ).catch(() => walker.pathfinder?.setGoal(null))
+  }
+  const nearTable = near && near.distanceTo(bot.entity.position) <= 4.5 ? bot.blockAt(near) : null
   if (nearTable) return withTable(bot, log, name, times, nearTable)
   // Our own table, for the moment.
   if (bot.inventory.items().every((i) => i.name !== 'crafting_table')) {

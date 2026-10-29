@@ -240,6 +240,8 @@ export class Handbuilder {
     for (let i = 0; i < doors && !this.cancelled; i++) await this.makeDoor()
     const chests = this.needs(job).get('chest') ?? 0
     if (chests > 0 && !this.cancelled) await craft(this.bot, this.log, 'chest', chests)
+    const tables = this.needs(job).get('crafting_table') ?? 0
+    if (tables > 0 && !this.cancelled) await craft(this.bot, this.log, 'crafting_table', tables)
     const furnaces = this.needs(job).get('furnace') ?? 0
     if (furnaces > 0 && this.carried('cobblestone') >= 8 && !this.cancelled)
       await craft(this.bot, this.log, 'furnace', furnaces)

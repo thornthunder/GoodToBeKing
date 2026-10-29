@@ -39,6 +39,7 @@ import {
   repairCells,
   roofCells,
   surveyHall,
+  tableCells,
 } from '../build/hall'
 import { plan, type CourtState, type StewardAction } from '../steward'
 import { RAW } from './cooking'
@@ -316,6 +317,7 @@ export class BotManager {
         light: lightCells(hall, names).length,
         repair: this.household.hall ? repairCells(this.household.hall, names).length : 0,
         earth: reinforceCells(hall, names).length,
+        table: tableCells(hall, names).length === 0,
       },
       storeHasCoal: sum(/^(coal|charcoal)$/) > 0,
       withoutFood: this.bots
@@ -383,7 +385,8 @@ export class BotManager {
     for (const [x, z] of farm.cells) {
       const growth = eyes?.blockProperty(x, farm.y + 1, z, 'growth')
       const need = farmNeed(names(x, farm.y, z), names(x, farm.y + 1, z), Number(growth ?? 0))
-      if (need === 'harvest' || need === 'till' || (need === 'plant' && seeds > 0)) work++
+      // Farmland without seed in it dries back to dirt: till only with seed to sow.
+      if (need === 'harvest' || ((need === 'till' || need === 'plant') && seeds > 0)) work++
     }
     return work + (wheat >= 3 ? 1 : 0)
   }

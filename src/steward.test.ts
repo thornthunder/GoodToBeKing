@@ -178,6 +178,11 @@ describe("the Castellan's account", () => {
     expect(plan({ ...earthen, cobblestone: 4 }).some((a) => a.kind === 'hallwork')).toBe(false)
   })
 
+  it('mines before the field while there is no furnace', () => {
+    const early = { ...base, furnace: false, cobblestone: 0, farm: { exists: true, work: 4 } }
+    expect(kinds(early).slice(0, 2)).toEqual(['mine:Henry', 'farm:George'])
+  })
+
   it('mines for stone by day when the storehouse runs short, and not where the mine ended', () => {
     expect(plan({ ...base, cobblestone: 4 })).toContainEqual({
       kind: 'mine',

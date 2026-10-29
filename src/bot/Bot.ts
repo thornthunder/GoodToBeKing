@@ -50,6 +50,7 @@ import {
   repairCells,
   roofCells,
   surveyHall,
+  tableCells,
   type Hall,
   type HandCell,
 } from '../build/hall'
@@ -130,6 +131,7 @@ const HALL_WORK_TITLES: Record<HallWork, string> = {
   furnace: 'a furnace',
   chest: 'a chest for the storehouse',
   reinforce: 'stone walls',
+  table: 'a crafting table',
 }
 const HALL_WORK_CELLS: Record<
   HallWork,
@@ -145,6 +147,7 @@ const HALL_WORK_CELLS: Record<
   furnace: furnaceCells,
   chest: chestCells,
   reinforce: reinforceCells,
+  table: tableCells,
 }
 
 /** bedboo reads a bed's state from its block (not in mineflayer-bedrock's types). */

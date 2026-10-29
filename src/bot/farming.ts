@@ -104,7 +104,8 @@ export class Farmer {
         }
         need = 'plant'
       }
-      if (need === 'till' && hoe) {
+      // Tilled land with no seed in it dries back to dirt: till only what can be sown.
+      if (need === 'till' && hoe && this.count(SEEDS) > 0) {
         if (crop && GRASS.test(crop.name))
           await withTimeout(this.bot.dig(crop, true), 5_000).catch(() => {})
         if (await this.use(hoe.name, soil)) result.tilled++

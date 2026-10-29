@@ -80,6 +80,7 @@ const HALL_WORK: Array<[HallWork, RegExp]> = [
   ['door', /\bdoor\b/i],
   ['beds', /\bbeds?\b/i],
   ['furnace', /\bfurnace\b/i],
+  ['table', /\b(crafting|work) ?(table|bench)\b/i],
   ['reinforce', /\b(reinforce|stone walls?|cobblestone|face (it|the walls?) with stone)\b/i],
   ['light', /\b(light|torch|torches|lamps?)\b/i],
 ]

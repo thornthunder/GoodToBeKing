@@ -307,6 +307,17 @@ export function reinforceCells(hall: Hall, names: BlockNames): HandCell[] {
   return cells
 }
 
+/** A crafting table, placed like the furnace; none if the hall has one. */
+export function tableCells(hall: Hall, names: BlockNames): HandCell[] {
+  if (hall.inside.some(([x, z]) => names(x, hall.floorY, z) === 'crafting_table')) return []
+  return againstWall(hall, names).map(([x, z]) => ({
+    x,
+    y: hall.floorY,
+    z,
+    block: 'crafting_table',
+  }))
+}
+
 /** A chest for the storehouse, placed like the furnace; none if the hall has one. */
 export function chestCells(hall: Hall, names: BlockNames): HandCell[] {
   if (hall.inside.some(([x, z]) => /^(chest|barrel)$/.test(names(x, hall.floorY, z) ?? '')))

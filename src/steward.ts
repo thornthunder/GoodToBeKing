@@ -29,7 +29,15 @@ export interface CourtState {
   /** The storehouse chest was there once and is gone (blown up): a new one is wanted. */
   storehouseLost?: boolean
   /** What the hall still lacks, in blocks (0 = done); `repair`: holes against its known shape. */
-  hall: { roof: number; door: number; light: number; repair: number; earth?: number }
+  hall: {
+    roof: number
+    door: number
+    light: number
+    repair: number
+    earth?: number
+    /** The hall has a crafting table to craft at. */
+    table?: boolean
+  }
   /** The storehouse holds coal (for torches). */
   storeHasCoal: boolean
   /** Courtiers carrying no food at all. */
@@ -125,6 +133,8 @@ export function plan(s: CourtState): StewardAction[] {
   // A roof keeps arrows and rain out, a door keeps monsters out.
   if (s.hall.roof > 0) jobs.push({ work: 'roof' })
   if (s.hall.door > 0) jobs.push({ work: 'door' })
+  // A crafting table in the hall: everyone crafts at it instead of making their own each time.
+  if (s.hall.table === false && s.storehouse && s.woodInStore >= 1) jobs.push({ work: 'table' })
   if (s.builderWithBeds && s.bedsInHall < s.courtiers)
     jobs.push({ work: 'beds', by: s.builderWithBeds })
   if (s.hall.light > 0 && (s.storeHasCoal || s.builderWithCoal))
@@ -152,6 +162,13 @@ export function plan(s: CourtState): StewardAction[] {
   if (s.hall.light > 0 && !coal && s.furnace && s.woodInStore >= 2 && s.storehouse) {
     const by = anyone()
     if (by) out.push({ kind: 'charcoal', by })
+  }
+  // Stone first while there is no furnace: it unlocks the furnace, charcoal and stone walls.
+  const stoneFirst =
+    s.storehouse && !s.night && !s.mineEnded && !rests('mine') && !s.furnace && s.cobblestone < 8
+  if (stoneFirst) {
+    const by = anyone()
+    if (by) out.push({ kind: 'mine', by, want: 16 })
   }
   // The field: bread is the court's food for good (hunting thins the animals out).
   if (
@@ -229,7 +246,14 @@ export function plan(s: CourtState): StewardAction[] {
   }
 
   // Stone: the mine, by day.
-  if (s.storehouse && !s.night && !s.mineEnded && !rests('mine') && s.cobblestone < STONE_RESERVE) {
+  if (
+    !stoneFirst &&
+    s.storehouse &&
+    !s.night &&
+    !s.mineEnded &&
+    !rests('mine') &&
+    s.cobblestone < STONE_RESERVE
+  ) {
     const by = anyone()
     if (by) out.push({ kind: 'mine', by, want: 24 })
   }
