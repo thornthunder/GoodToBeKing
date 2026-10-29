@@ -117,6 +117,11 @@ export function promisesAction(reply: string): boolean {
   return PROMISE.test(reply) && !REFUSAL.test(reply)
 }
 
+/** True when a reply turns the request down, or says it cannot be done yet. */
+export function refuses(reply: string): boolean {
+  return REFUSAL.test(reply) || /\b(by hand|not (yet )?learned|haven't learned)\b/i.test(reply)
+}
+
 /** Transient instruction placed right next to the request in the prompt. */
 export function abilityNote(ability: MissingAbility, botName: string): string {
   return (

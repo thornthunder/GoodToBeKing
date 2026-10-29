@@ -24,6 +24,7 @@ import {
   detectUndoRequest,
   detectWorksRequest,
   promisesAction,
+  refuses,
   type MissingAbility,
   type WorksRequest,
 } from './abilities'
@@ -1248,7 +1249,11 @@ export class OllamaBrain implements Brain {
           ctx.botName
         )
       }
-      if (opts.ability && (!reply || promisesAction(reply))) {
+      // Building by hand is never possible yet: anything but a clear "no" is replaced, however it
+      // is worded ("I shall have it begun at once"). Elsewhere only a promise is.
+      const broken =
+        !reply || (opts.ability === 'handbuild' ? !refuses(reply) : promisesAction(reply))
+      if (opts.ability && broken) {
         if (reply) this.log.info(`replacing a reply that promised to ${opts.ability}: ${reply}`)
         reply = declineLine(opts.ability, opts.address ?? 'my friend', Boolean(this.magic))
       }

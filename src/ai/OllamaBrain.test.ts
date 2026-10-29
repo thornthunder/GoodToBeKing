@@ -449,7 +449,10 @@ describe('OllamaBrain court behaviour', () => {
     })
 
     it('in survival promises no build, palace or undo, and says why', async () => {
-      const { brain, calls } = castellan('I will build it for you right away!')
+      // What the chat model really said in the test world, against the note.
+      const { brain, calls } = castellan(
+        'Your Majesty, I shall make it so; I shall have the flower garden begun at once for you.'
+      )
       const survival = (name: string) => ({ ...at(name), gameMode: 'survival' as const })
       const reply = await brain.onChat(
         chat('LittleOne42', 'festaris could you please build a flower garden'),
