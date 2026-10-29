@@ -140,6 +140,8 @@ export class Handbuilder {
     movements.allowParkour = false
     // Builders work in survival only, where the hall has a door to get in and out by.
     movements.canOpenDoors = true
+    // No drop that hurts (more than three blocks costs health).
+    movements.maxDropDown = 3
     movements.allow1by1towers = tower
     movements.scafoldingBlocks = tower
       ? ['dirt', 'cobblestone']

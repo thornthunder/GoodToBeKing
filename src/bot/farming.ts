@@ -4,7 +4,7 @@ import { Vec3 } from 'vec3'
 import { farmNeed, type Farm } from '../build/farm'
 import type { Logger } from '../logger'
 import { errMsg, sleep, withTimeout } from '../util'
-import { craft } from './crafting'
+import { craft, makePlanks } from './crafting'
 import type { Gatherer } from './gathering'
 
 type FarmBot = MineflayerBot & { pathfinder: Pathfinder }
@@ -70,6 +70,9 @@ export class Farmer {
       })
     }
     if (this.count(HOE) === 0) {
+      // Sticks and the hoe are made of planks, and so is a crafting table: eight in all.
+      if (this.count(/_planks$/) < 8)
+        await makePlanks(this.bot, this.log, 8 - this.count(/_planks$/))
       if (this.count('stick') < 2) await craft(this.bot, this.log, 'stick', 1)
       await craft(this.bot, this.log, 'wooden_hoe', 1)
     }

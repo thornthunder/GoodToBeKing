@@ -38,6 +38,8 @@ const WEAPONS = [/_sword$/, /_axe$/]
 
 /** Eat below this much food (of 20): low enough not to nibble all day. */
 export const HUNGRY = 14
+/** Hurt, eat up to this: health only comes back above it. */
+export const HEAL = 18
 /** Guards look this far around a royal (or themselves) for monsters. */
 const GUARD_RANGE = 12
 const SELF_RANGE = 6
@@ -53,8 +55,8 @@ export interface SurvivalOptions {
   guard: boolean
   /** Where royals stand right now (the ones in sight). */
   royals: () => Vec3[]
-  /** Take food out of the storehouse: returns how many it took. */
-  fetchFood: () => Promise<number>
+  /** Take food out of the storehouse: how many it took; undefined when it cannot go now (busy). */
+  fetchFood: () => Promise<number | undefined>
   /** Say something in character (the brain words it). */
   speak: (instruction: string, fallback: string) => Promise<unknown>
 }
@@ -172,16 +174,22 @@ export class Survival {
   /** Eat when hungry; fetch food from the storehouse if there is none; say so if none there either. */
   private async eatIfHungry(): Promise<void> {
     const food = this.bot.food
-    if (food === undefined || food >= HUNGRY || this.eating) return
+    // Health only comes back above 18 food: hurt, eat up to that; else only when hungry.
+    const hurt = (this.bot.health ?? 20) < 20
+    if (food === undefined || this.eating) return
+    if (food >= (hurt ? HEAL : HUNGRY)) return
     let item = this.bestFood()
     // After a trip that found nothing, wait a while before looking again.
     if (!item && Date.now() - this.lastEmptyTrip > 5 * 60_000) {
       const took = await this.opts.fetchFood().catch(() => 0)
+      // Busy just now: eat later, and say nothing.
+      if (took === undefined) return
       if (took > 0) this.log.info(`took ${took} food from the storehouse`)
       else this.lastEmptyTrip = Date.now()
       item = this.bestFood()
     }
     if (!item) {
+      if (food >= HUNGRY) return
       if (Date.now() - this.lastHungryWords > 15 * 60_000) {
         this.lastHungryWords = Date.now()
         this.log.info(`hungry (food ${food}) and nothing to eat`)

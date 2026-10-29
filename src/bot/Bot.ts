@@ -457,11 +457,12 @@ export class Bot extends EventEmitter {
       .filter((p): p is WorldVec => p !== undefined)
   }
 
-  /** Take some food out of the storehouse (survival); returns how many. */
-  private async fetchFood(): Promise<number> {
+  /** Take some food out of the storehouse (survival); returns how many, undefined when busy. */
+  private async fetchFood(): Promise<number | undefined> {
     const chest = this.household?.storehouse
     const gatherer = this.gatherer
-    if (!chest || !gatherer || !this.isFree()) return 0
+    if (!chest || !gatherer) return 0
+    if (!this.isFree()) return undefined
     const count = () =>
       this.body?.inventory
         .items()

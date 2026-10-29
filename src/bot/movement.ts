@@ -97,6 +97,8 @@ export class Movement {
     movements.allowParkour = true
     movements.allowSprinting = true
     movements.canOpenDoors = doors
+    // Survival (doors): no drop that hurts; a fall of more than three blocks costs health.
+    if (doors) movements.maxDropDown = 3
     this.bot.pathfinder.setMovements(movements)
   }
 
