@@ -1011,11 +1011,14 @@ export class Bot extends EventEmitter {
     count: number,
     requestedBy: string,
     toStore = false
-  ): Promise<void> {
+  ): Promise<number> {
     const gatherer = this.gatherer
-    if (!gatherer || this.gathering) return
+    if (!gatherer || this.gathering) return 0
     const chest = toStore ? this.household?.storehouse : undefined
-    if (toStore && !chest) return void this.log.warn('no storehouse to fetch for')
+    if (toStore && !chest) {
+      this.log.warn('no storehouse to fetch for')
+      return 0
+    }
     this.gathering = true
     this.pauseWorks()
     this.dutyFollowing = false
@@ -1031,7 +1034,9 @@ export class Bot extends EventEmitter {
         chest ? { chest } : { player: requestedBy }
       )
       if (gatherer.lastStock) this.household?.noteStock(gatherer.lastStock)
-      if (result.reason === 'cancelled') return
+      if (result.reason === 'cancelled') return result.gathered
+      // The court's own errands (housekeeping) say nothing of a failure: it would be every minute.
+      if (!member && result.gathered === 0) return 0
       if (chest && result.delivered > 0) {
         await this.speak(
           `You fetched ${result.delivered} ${name}, dug by hand, and put them in the storehouse ` +
@@ -1063,8 +1068,10 @@ export class Bot extends EventEmitter {
           `Alas, I found no ${name} nearby that nobody is using.`
         )
       }
+      return result.gathered
     } catch (err) {
       this.log.warn(`fetching ${material} failed: ${errMsg(err)}`)
+      return 0
     } finally {
       this.gathering = false
     }
@@ -1074,13 +1081,13 @@ export class Bot extends EventEmitter {
    * Work on the court's home hall by hand: survey it from its walls, build the cells (materials
    * from the storehouse, more wood chopped if short), and say how it went.
    */
-  async startHallWork(work: HallWork, requestedBy: string): Promise<void> {
+  async startHallWork(work: HallWork, requestedBy: string): Promise<boolean> {
     const builder = this.handbuilder
     const home = this.household?.home
-    if (!builder || builder.busy || this.onHallWork || !home || !this.body) return
+    if (!builder || builder.busy || this.onHallWork || !home || !this.body) return false
     this.onHallWork = true
     try {
-      await this.hallWork(builder, home, work, requestedBy)
+      return await this.hallWork(builder, home, work, requestedBy)
     } finally {
       this.onHallWork = false
     }
@@ -1091,8 +1098,9 @@ export class Bot extends EventEmitter {
     home: { x: number; y: number; z: number },
     work: HallWork,
     requestedBy: string
-  ): Promise<void> {
-    if (!this.body) return
+  ): Promise<boolean> {
+    if (!this.body) return false
+    const royal = Boolean(this.court?.find(requestedBy))
     const member = this.court?.find(requestedBy)
     const who = member ? `the ${member.title}` : requestedBy
     const title = HALL_WORK_TITLES[work]
@@ -1118,19 +1126,21 @@ export class Bot extends EventEmitter {
       this.log.info(`the hall is damaged (${surveyed}); working from its shape as last seen`)
     if (typeof hall === 'string') {
       this.log.info(`cannot survey the hall: ${hall}`)
+      if (!royal) return false
       await this.speak(
         `${who} asked for ${title}, but looking at the hall: ${hall}. Say so kindly in one short sentence.`,
         `Alas, I cannot make out the hall: ${hall}.`
       )
-      return
+      return false
     }
     const cells = HALL_WORK_CELLS[work](hall, names)
     if (cells.length === 0) {
+      if (!royal) return true
       await this.speak(
         `${who} asked for ${title}, and the hall already has it. Say so in one short sentence.`,
         `The hall already has ${title}!`
       )
-      return
+      return true
     }
     this.log.info(
       `${title} for the hall: ${cells.length} blocks (${hall.inside.length} columns inside)`
@@ -1144,7 +1154,9 @@ export class Bot extends EventEmitter {
       this.household?.setStorehouse(cells[0], this.cfg.name)
       this.log.info(`the new chest at ${cells[0].x},${cells[0].y},${cells[0].z} is the storehouse`)
     }
-    if (result.cancelled) return
+    if (result.cancelled) return result.placed > 0
+    // The court's own work says nothing when nothing came of it: it would be every minute.
+    if (!royal && result.placed === 0) return false
     const short = Object.entries(result.short)
       .map(([block, n]) => `${n} ${block.replace(/_/g, ' ')}`)
       .join(', ')
@@ -1168,6 +1180,7 @@ export class Bot extends EventEmitter {
         `I made part of it, but ${result.missing} blocks are still missing.`
       )
     }
+    return result.placed > 0
   }
 
   /**
@@ -1204,11 +1217,11 @@ export class Bot extends EventEmitter {
    * Lay out the court's wheat field near home (once: flat untouched soil, by water if there is
    * any, clear of the hall) and tend it: till, plant, harvest, bake, store.
    */
-  async startFarming(): Promise<void> {
+  async startFarming(): Promise<boolean> {
     const farmer = this.farmer
     const body = this.body
     const home = this.household?.home
-    if (!farmer || !body || !home || this.gathering || !byHand(this.gameMode())) return
+    if (!farmer || !body || !home || this.gathering || !byHand(this.gameMode())) return false
     let farm = this.household?.farm
     if (!farm) {
       const names = (x: number, y: number, z: number) => body.blockAt(new WorldVec(x, y, z))?.name
@@ -1216,7 +1229,10 @@ export class Bot extends EventEmitter {
       farm = chooseFarm(names, home, {
         keepClear: hall ? [...hall.ring, ...hall.inside] : [[home.x, home.z]],
       })
-      if (!farm) return void this.log.info('found no flat, untouched soil near home for a field')
+      if (!farm) {
+        this.log.info('found no flat, untouched soil near home for a field')
+        return false
+      }
       this.household?.setFarm(farm)
       this.log.info(
         `laid out a wheat field at ${farm.cells[0].join(',')} (${farm.watered ? 'by water' : 'dry'})`
@@ -1227,10 +1243,12 @@ export class Bot extends EventEmitter {
     this.dutyFollowing = false
     this.movement?.stop()
     try {
-      await farmer.tend(farm, this.household?.storehouse)
+      const done = await farmer.tend(farm, this.household?.storehouse)
       if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
+      return done.harvested + done.tilled + done.planted + done.bread > 0
     } catch (err) {
       this.log.warn(`farming failed: ${errMsg(err)}`)
+      return false
     } finally {
       this.gathering = false
     }
@@ -1240,12 +1258,12 @@ export class Bot extends EventEmitter {
    * Dig the court's mine on (a staircase near home, chosen once) for cobblestone and ore: a
    * pickaxe and wood from the storehouse, the stone and ore back into it, and the pickaxe too.
    */
-  async startMining(want: number): Promise<void> {
+  async startMining(want: number): Promise<number> {
     const miner = this.miner
     const body = this.body
     const home = this.household?.home
     const chest = this.household?.storehouse
-    if (!miner || !body || !home || !chest || this.gathering || !byHand(this.gameMode())) return
+    if (!miner || !body || !home || !chest || this.gathering || !byHand(this.gameMode())) return 0
     let mine = this.household?.mine
     if (!mine) {
       const names = (x: number, y: number, z: number) => body.blockAt(new WorldVec(x, y, z))?.name
@@ -1255,7 +1273,10 @@ export class Bot extends EventEmitter {
         ...(this.household?.farm?.cells ?? []),
       ]
       mine = chooseMine(names, home, clear)
-      if (!mine) return void this.log.info('found no place near home to start a mine')
+      if (!mine) {
+        this.log.info('found no place near home to start a mine')
+        return 0
+      }
       this.household?.setMine(mine)
       this.log.info(`started the court's mine at ${mine.x},${mine.y},${mine.z}`)
     }
@@ -1291,8 +1312,10 @@ export class Bot extends EventEmitter {
       })
       if (gatherer?.lastStock) this.household?.noteStock(gatherer.lastStock)
       if (result.ended) this.log.info(`the court's mine is done: ${result.ended}`)
+      return result.cobblestone + result.ores
     } catch (err) {
       this.log.warn(`mining failed: ${errMsg(err)}`)
+      return 0
     } finally {
       this.gathering = false
     }

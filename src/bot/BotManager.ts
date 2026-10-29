@@ -227,6 +227,17 @@ export class BotManager {
   private lastMagicRequest = 0
   /** What the Castellan last asked the royal family for, and when (so he does not nag). */
   private readonly asked = new Map<string, number>()
+  /** Work that came to nothing lately, and until when it rests (see steward.ts `resting`). */
+  private readonly resting = new Map<string, number>()
+
+  /** Rest a kind of work for a while after it came to nothing. */
+  private rest(kind: string, ok: boolean): void {
+    if (ok) this.resting.delete(kind)
+    else {
+      this.resting.set(kind, Date.now() + REST_MS)
+      this.log.info(`housekeeping: ${kind} came to nothing; it rests a while`)
+    }
+  }
 
   /**
    * The Castellan keeps house (survival): every minute he takes stock of what the court needs
@@ -331,6 +342,7 @@ export class BotManager {
       storehouse: storehouseThere,
       storehouseLost: Boolean(this.household.storehouse) && !storehouseThere,
       night: castellan.isNight(),
+      resting: [...this.resting].filter(([, until]) => until > Date.now()).map(([kind]) => kind),
     }
     // Beds in the hall: each courtier taps one, so it respawns at home (one a round).
     if (beds > 0) {
@@ -388,7 +400,10 @@ export class BotManager {
         this.log.info(
           `housekeeping: ${action.work} for the hall${builder ? ` by ${builder.cfg.name}` : ''}`
         )
-        if (builder) void builder.startHallWork(action.work, castellan.cfg.name)
+        if (builder)
+          void builder
+            .startHallWork(action.work, castellan.cfg.name)
+            .then((ok) => this.rest(`hallwork:${action.work}`, ok))
         else
           void this.sendToHall(
             castellan,
@@ -401,14 +416,14 @@ export class BotManager {
         const hunter = by(action.by)
         if (!hunter) return
         this.log.info(`housekeeping: ${hunter.cfg.name} goes hunting for the court's food`)
-        void hunter.startHunt(action.animals)
+        void hunter.startHunt(action.animals).then((meat) => this.rest('hunt', meat > 0))
         return
       }
       case 'mine': {
         const miner = by(action.by)
         if (!miner) return
         this.log.info(`housekeeping: ${miner.cfg.name} goes down the mine for stone`)
-        void miner.startMining(action.want)
+        void miner.startMining(action.want).then((got) => this.rest('mine', got > 0))
         return
       }
       case 'arm': {
@@ -429,7 +444,7 @@ export class BotManager {
         const farmer = by(action.by)
         if (!farmer) return
         this.log.info(`housekeeping: ${farmer.cfg.name} tends the wheat field`)
-        void farmer.startFarming()
+        void farmer.startFarming().then((ok) => this.rest('farm', ok))
         return
       }
       case 'cook': {
@@ -445,7 +460,9 @@ export class BotManager {
           `housekeeping: ${hand ? `${hand.cfg.name} fetches ` : ''}${action.count} ${action.material} for the storehouse`
         )
         if (hand) {
-          void hand.startGather(action.material, action.count, castellan.cfg.name, true)
+          void hand
+            .startGather(action.material, action.count, castellan.cfg.name, true)
+            .then((got) => this.rest(action.material, got > 0))
           return
         }
         void this.sendOnErrand(castellan, {
@@ -1284,6 +1301,8 @@ const HOME_RADIUS = 10
 const HOME_RADIUS_NIGHT = 2.5
 /** Farther than this, Merlin portals them home rather than letting them walk. */
 const HOME_WALK = 96
+/** Work that came to nothing rests this long before it is tried again. */
+const REST_MS = 10 * 60_000
 /** How often the Castellan takes stock of what the court needs, and asks Merlin for magic. */
 const HOUSEKEEPING_MS = 60_000
 const MAGIC_REQUEST_MS = 3 * 60_000

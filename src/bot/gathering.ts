@@ -47,7 +47,7 @@ export const KEEP_AWAY = 16
 /** How far from the bot it looks for something to dig, and how many places it notes at once. */
 const SEARCH = 48
 /** Trees are fewer: look further for them. */
-const SEARCH_WOOD = 96
+const SEARCH_WOOD = 160
 const CANDIDATES = 80
 /** Close enough to toss things over. */
 const TOSS_RANGE = 4

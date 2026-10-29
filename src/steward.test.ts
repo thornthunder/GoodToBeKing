@@ -199,6 +199,30 @@ describe("the Castellan's account", () => {
     expect(kinds(bare).slice(0, 1)).toEqual(['errand:Henry'])
   })
 
+  it('rests work that came to nothing, and has Merlin conjure wood when there is none to find', () => {
+    const bare = {
+      ...base,
+      woodInStore: 0,
+      farm: { exists: true, work: 4 },
+      resting: ['wood', 'farm'],
+    }
+    expect(kinds(bare)).not.toContain('errand:Henry')
+    expect(kinds(bare).some((k) => k.startsWith('farm'))).toBe(false)
+    expect(plan(bare)).toContainEqual({
+      kind: 'magic',
+      item: 'oak_log',
+      count: 8,
+      to: 'Henry',
+      why: 'wood for the court',
+    })
+    const doorless = {
+      ...base,
+      hall: { roof: 0, door: 1, light: 0, repair: 0 },
+      resting: ['hallwork:door'],
+    }
+    expect(plan(doorless)).toEqual([])
+  })
+
   it('sends a free hand for wood when the storehouse runs low', () => {
     expect(plan({ ...base, woodInStore: 3 })).toEqual([
       { kind: 'errand', material: 'wood', count: 16, by: 'Henry' },
