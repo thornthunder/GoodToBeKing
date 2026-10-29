@@ -116,6 +116,22 @@ describe('beds', () => {
   })
 })
 
+describe('a roofed hall', () => {
+  it('knows the roof is not wall: the walls stop under it', () => {
+    const roofed: Record<string, string> = {}
+    for (let x = -1; x <= 5; x++)
+      for (let z = -1; z <= 5; z++) roofed[`${x},67,${z}`] = 'oak_planks'
+    const names = hall(roofed)
+    const h = surveyHall(names, { x: 2, y: 64, z: 2 })
+    if (typeof h === 'string') throw new Error(h)
+    expect(h.wallTop).toBe(66)
+    expect(roofCells(h, names)).toEqual([])
+    // A hole in the roof is a repair.
+    const holed = hall({ ...roofed, '2,67,2': 'air' })
+    expect(repairCells(h, holed)).toEqual([{ x: 2, y: 67, z: 2, block: 'planks' }])
+  })
+})
+
 describe('repairs', () => {
   it('fills the holes in walls and roof with planks, but keeps the doorway open', () => {
     const whole = hall()

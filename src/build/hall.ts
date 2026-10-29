@@ -84,10 +84,19 @@ export function surveyHall(
         if (!isInside.has(k)) ringSet.add(k)
       }
   const ring = [...ringSet].map((k) => k.split(',').map(Number) as [number, number])
+  // A roof: a ceiling at one height over most of the room. The walls stop under it.
+  const ceilings = new Map<number, number>()
+  for (const [x, z] of inside) {
+    let y = level + 1
+    while (y < level + 8 && open(names(x, y, z))) y++
+    if (y < level + 8) ceilings.set(y, (ceilings.get(y) ?? 0) + 1)
+  }
+  const [roofY, under] = [...ceilings].sort((a, b) => b[1] - a[1])[0] ?? [undefined, 0]
+  const roofed = roofY !== undefined && under > inside.length / 2
   let wallTop = level
   for (const [x, z] of ring) {
     let y = level
-    while (y < level + 8 && !open(names(x, y + 1, z))) y++
+    while (y < level + 8 && !open(names(x, y + 1, z)) && !(roofed && y + 1 >= roofY)) y++
     wallTop = Math.max(wallTop, y)
   }
   const openings = ring.filter(
