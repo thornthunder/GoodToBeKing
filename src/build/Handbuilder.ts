@@ -261,7 +261,8 @@ export class Handbuilder {
     const coal = this.carriedAny(/^(coal|charcoal)$/)
     if (coal === 0) return void this.log.info('no coal for torches')
     const batches = Math.min(coal, Math.ceil(want / 4))
-    if (this.carried('planks') < 1 && this.carried('stick') < batches) await this.makePlanks(4)
+    // Sticks take two planks.
+    if (this.carried('planks') < 2 && this.carried('stick') < batches) await this.makePlanks(4)
     if (this.carried('stick') < batches)
       await this.craft('stick', Math.ceil((batches - this.carried('stick')) / 4))
     await this.craft('torch', batches)
