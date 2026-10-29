@@ -6,10 +6,20 @@ import { validateDesign, type CastleDesign } from './design'
 import type { Job, JobResult } from './Mason'
 import { Works, type Worker, type WorksEvent } from './Works'
 
-const great = JSON.parse(fs.readFileSync('config/castles/great-castle.json', 'utf8')) as CastleDesign
+const great = JSON.parse(
+  fs.readFileSync('config/castles/great-castle.json', 'utf8')
+) as CastleDesign
 const req = createRequire(require.resolve('mineflayer-bedrock/package.json'))
 const mcData = req('minecraft-data')('bedrock_1.26.0') as { itemsByName: Record<string, unknown> }
-const silent = { debug() {}, info() {}, warn() {}, error() {}, child() { return silent } } as never
+const silent = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+  child() {
+    return silent
+  },
+} as never
 
 describe('castle designs', () => {
   it('the great castle design is valid', () => {
@@ -21,7 +31,12 @@ describe('castle designs', () => {
       ...great,
       buildings: [
         { ...great.buildings[0], x: 30, doors: [] },
-        { ...great.buildings[1], storeys: [{ rooms: [{ name: 'x', type: 'ballroom' as never, x: 0, z: 11, width: 9, depth: 6 }] }] },
+        {
+          ...great.buildings[1],
+          storeys: [
+            { rooms: [{ name: 'x', type: 'ballroom' as never, x: 0, z: 11, width: 9, depth: 6 }] },
+          ],
+        },
       ],
     }
     const problems = validateDesign(broken)
@@ -56,7 +71,8 @@ describe('compiling the great castle', () => {
   })
 
   it('splits big sections and orders storeys', () => {
-    for (const s of plan.sections) expect(s.cells.length + s.columns.length).toBeLessThan(MAX_SECTION_CELLS * 1.6)
+    for (const s of plan.sections)
+      expect(s.cells.length + s.columns.length).toBeLessThan(MAX_SECTION_CELLS * 1.6)
     const ids = plan.sections.map((s) => s.id)
     for (const [i, s] of plan.sections.entries())
       for (const dep of s.after) expect(ids.indexOf(dep)).toBeLessThan(i)
@@ -64,7 +80,18 @@ describe('compiling the great castle', () => {
 
   it('gives the royal rooms their furniture', () => {
     const blocks = plan.sections.flatMap((s) => s.cells.map((c) => c.block))
-    for (const b of ['bed', 'gold_block', 'amethyst_block', 'furnace', 'smoker', 'bookshelf', 'enchanting_table', 'ladder', 'red_carpet', 'magenta_carpet'])
+    for (const b of [
+      'bed',
+      'gold_block',
+      'amethyst_block',
+      'furnace',
+      'smoker',
+      'bookshelf',
+      'enchanting_table',
+      'ladder',
+      'red_carpet',
+      'magenta_carpet',
+    ])
       expect(blocks).toContain(b)
     // Beds come in pairs: a placed foot and an automatic head.
     const beds = plan.sections.flatMap((s) => s.cells.filter((c) => c.block === 'bed'))
@@ -76,7 +103,17 @@ describe('compiling the great castle', () => {
     const repair = plan.sections.find((s) => s.kind === 'repair')!
     const removed = repair.cells.filter((c) => c.remove)
     expect(removed.map((c) => `${c.x},${c.z}`).sort()).toEqual(
-      ['104,128', '104,128', '104,128', '105,128', '105,128', '105,128', '106,128', '106,128', '106,128'].sort()
+      [
+        '104,128',
+        '104,128',
+        '104,128',
+        '105,128',
+        '105,128',
+        '105,128',
+        '106,128',
+        '106,128',
+        '106,128',
+      ].sort()
     )
     expect(repair.columns.length).toBe(121 + 3)
   })
@@ -95,7 +132,14 @@ function fakeWorker(name: string, outcome: (job: Job) => Partial<JobResult> = ()
       jobs.push(job.id)
       await Promise.resolve()
       worker.busy = false
-      return { placed: job.cells.length, dug: 0, missing: 0, blocked: 0, cancelled: false, ...outcome(job) }
+      return {
+        placed: job.cells.length,
+        dug: 0,
+        missing: 0,
+        blocked: 0,
+        cancelled: false,
+        ...outcome(job),
+      }
     },
   }
   return worker
@@ -118,7 +162,9 @@ describe('the works', () => {
     const b = fakeWorker('George')
     await runAll(plan, works, [a, b])
     expect(works.finished).toBe(true)
-    const order = events.filter((e) => e.kind === 'assign').map((e) => (e as { section: { id: string } }).section.id)
+    const order = events
+      .filter((e) => e.kind === 'assign')
+      .map((e) => (e as { section: { id: string } }).section.id)
     expect(new Set(order).size).toBe(plan.sections.length)
     expect(order.indexOf('b-keep-s2-p1')).toBeGreaterThan(order.indexOf('b-keep-s1-p3'))
     expect(events[0].kind).toBe('begin')

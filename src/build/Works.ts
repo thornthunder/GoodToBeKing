@@ -88,7 +88,11 @@ export class Works {
     const yard = plan.sections.filter((s) => s.kind === 'courtyard').flatMap((s) => s.cells)
     for (const c of yard) {
       const free = [1, 2].every((dy) => !plan.planned.has(`${c.x},${c.y + dy},${c.z}`))
-      const near = [-1, 1].some((d) => plan.planned.has(`${c.x + d},${c.y + 1},${c.z}`) || plan.planned.has(`${c.x},${c.y + 1},${c.z + d}`))
+      const near = [-1, 1].some(
+        (d) =>
+          plan.planned.has(`${c.x + d},${c.y + 1},${c.z}`) ||
+          plan.planned.has(`${c.x},${c.y + 1},${c.z + d}`)
+      )
       if (free && !near && c.y === plan.floorY) this.restSpots.push({ x: c.x, y: c.y + 1, z: c.z })
     }
   }
@@ -110,7 +114,9 @@ export class Works {
   }
 
   progress(): { done: number; total: number; doing: Array<{ worker: string; title: string }> } {
-    const done = this.plan.sections.filter((s) => this.state.sections[s.id]?.status === 'done').length
+    const done = this.plan.sections.filter(
+      (s) => this.state.sections[s.id]?.status === 'done'
+    ).length
     const doing = [...this.running].map(([worker, id]) => ({
       worker,
       title: this.plan.sections.find((s) => s.id === id)?.title ?? id,
@@ -150,7 +156,8 @@ export class Works {
     )
     if (!ready.length) return undefined
     // Sections meant for this worker first, then unassigned ones, then other crews' (rather than idle).
-    const fit = (s: Section) => (!s.crew?.length ? 1 : s.crew.some((n) => n.toLowerCase() === w.name.toLowerCase()) ? 0 : 2)
+    const fit = (s: Section) =>
+      !s.crew?.length ? 1 : s.crew.some((n) => n.toLowerCase() === w.name.toLowerCase()) ? 0 : 2
     const best = Math.min(...ready.map(fit))
     // Among the first few in plan order, the closest to the worker.
     const pos = w.position()
@@ -173,14 +180,28 @@ export class Works {
       this.emit({ kind: 'begin', plan: this.plan })
     }
     this.save()
-    this.log.info(`${w.name} takes ${s.title} (${s.cells.length} blocks, ${s.columns.length} columns)`)
+    this.log.info(
+      `${w.name} takes ${s.title} (${s.cells.length} blocks, ${s.columns.length} columns)`
+    )
     this.emit({ kind: 'assign', section: s, worker: w.name })
-    const job: Job = { id: s.id, title: s.title, cells: s.cells, columns: s.columns, planned: this.plan.planned }
+    const job: Job = {
+      id: s.id,
+      title: s.title,
+      cells: s.cells,
+      columns: s.columns,
+      planned: this.plan.planned,
+    }
     w.work(job)
       .then((result) => this.finish(w.name, s, result))
       .catch((err) => {
         this.log.warn(`${w.name} failed at ${s.title}: ${errMsg(err)}`)
-        this.finish(w.name, s, { placed: 0, dug: 0, missing: s.cells.length, blocked: 0, cancelled: true })
+        this.finish(w.name, s, {
+          placed: 0,
+          dug: 0,
+          missing: s.cells.length,
+          blocked: 0,
+          cancelled: true,
+        })
       })
   }
 
@@ -198,7 +219,10 @@ export class Works {
     } else {
       st.attempts++
       st.status = st.attempts >= MAX_ATTEMPTS ? 'done' : 'todo'
-      if (st.status === 'done') this.log.warn(`${s.title}: leaving ${result.missing} blocks missing after ${st.attempts} tries`)
+      if (st.status === 'done')
+        this.log.warn(
+          `${s.title}: leaving ${result.missing} blocks missing after ${st.attempts} tries`
+        )
     }
     this.save()
     if (!result.cancelled) this.emit({ kind: 'done', section: s, worker, result, complete })

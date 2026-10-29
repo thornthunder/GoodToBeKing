@@ -81,7 +81,8 @@ export function findCastleSites(
           [x, z + size - 1],
           [x + size - 1, z + size - 1],
         ]
-        if (corners.some(([cx, cz]) => Math.hypot(cx - zone.center.x, cz - zone.center.z) > r)) continue
+        if (corners.some(([cx, cz]) => Math.hypot(cx - zone.center.x, cz - zone.center.z) > r))
+          continue
         if (avoid.some((a) => overlaps(a, area))) continue
         const heights: number[] = []
         let trees = 0

@@ -154,12 +154,27 @@ class Canvas {
   readonly owners = new Map<string, Owner>()
   private order = 0
 
-  owner(id: string, title: string, kind: SectionKind, after: string[] = [], group?: string, crew?: string[]): string {
-    if (!this.owners.has(id)) this.owners.set(id, { id, title, kind, after, group, crew, order: this.order++ })
+  owner(
+    id: string,
+    title: string,
+    kind: SectionKind,
+    after: string[] = [],
+    group?: string,
+    crew?: string[]
+  ): string {
+    if (!this.owners.has(id))
+      this.owners.set(id, { id, title, kind, after, group, crew, order: this.order++ })
     return id
   }
 
-  set(owner: string, x: number, y: number, z: number, block: string, extra: Partial<PlanCell> = {}) {
+  set(
+    owner: string,
+    x: number,
+    y: number,
+    z: number,
+    block: string,
+    extra: Partial<PlanCell> = {}
+  ) {
     this.cells.set(key(x, y, z), { cell: { x, y, z, block, ...extra }, owner })
   }
 
@@ -215,7 +230,12 @@ export function compileDesign(design: CastleDesign): Plan {
   }
   for (const g of design.gates ?? []) {
     const owner = `wall-${g.side}`
-    for (const [x, z] of openingCells({ x: 0, z: 0, width: W, depth: D }, { width: 3, ...g }, ox, oz))
+    for (const [x, z] of openingCells(
+      { x: 0, z: 0, width: W, depth: D },
+      { width: 3, ...g },
+      ox,
+      oz
+    ))
       for (let y = fy + 1; y <= fy + (g.height ?? 3); y++) c.set(owner, x, y, z, 'air')
   }
 
@@ -229,7 +249,9 @@ export function compileDesign(design: CastleDesign): Plan {
     const r = { x0, z0, x1, z1 }
     const doorCells = new Set(
       (t.doors ?? []).flatMap((d) =>
-        openingCells({ x: t.x, z: t.z, width: t.size, depth: t.size }, d, ox, oz).map(([x, z]) => `${x},${z}`)
+        openingCells({ x: t.x, z: t.z, width: t.size, depth: t.size }, d, ox, oz).map(
+          ([x, z]) => `${x},${z}`
+        )
       )
     )
     const top = fy + t.height
@@ -243,7 +265,9 @@ export function compileDesign(design: CastleDesign): Plan {
         }
         c.set(owner, x, top, z, m.roof)
         const corner = (x === x0 || x === x1) && (z === z0 || z === z1)
-        const middle = (x === Math.floor((x0 + x1) / 2) && (z === z0 || z === z1)) || (z === Math.floor((z0 + z1) / 2) && (x === x0 || x === x1))
+        const middle =
+          (x === Math.floor((x0 + x1) / 2) && (z === z0 || z === z1)) ||
+          (z === Math.floor((z0 + z1) / 2) && (x === x0 || x === x1))
         if (corner || middle) c.set(owner, x, top + 1, z, m.wall)
         else if (!edge) c.set(owner, x, top + 1, z, 'air')
       }
@@ -260,7 +284,14 @@ export function compileDesign(design: CastleDesign): Plan {
   // 5. Courtyard features.
   if (design.features?.length) {
     const owner = c.owner('features', 'the courtyard gardens and lamps', 'features', ['courtyard'])
-    const flowers = ['allium', 'cornflower', 'oxeye_daisy', 'pink_tulip', 'azure_bluet', 'lily_of_the_valley']
+    const flowers = [
+      'allium',
+      'cornflower',
+      'oxeye_daisy',
+      'pink_tulip',
+      'azure_bluet',
+      'lily_of_the_valley',
+    ]
     for (const f of design.features) {
       const x0 = ox + f.x
       const z0 = oz + f.z
@@ -308,7 +339,10 @@ export function compileDesign(design: CastleDesign): Plan {
   return toPlan(design, c, repairs, m)
 }
 
-function towerLadder(r: { x0: number; z0: number; x1: number; z1: number }, doors: Set<string>): { x: number; z: number; against: Vec } {
+function towerLadder(
+  r: { x0: number; z0: number; x1: number; z1: number },
+  doors: Set<string>
+): { x: number; z: number; against: Vec } {
   const options: Array<{ x: number; z: number; against: Vec; wall: [number, number] }> = [
     { x: r.x0 + 1, z: r.z0 + 1, against: [0, 0, -1], wall: [r.x0 + 1, r.z0] },
     { x: r.x1 - 1, z: r.z0 + 1, against: [0, 0, -1], wall: [r.x1 - 1, r.z0] },
@@ -346,15 +380,23 @@ function drawBuilding(
     const lx = ox + b.ladder.x
     const lz = oz + b.ladder.z
     const against: Vec =
-      lx === x0 + 1 ? [-1, 0, 0] : lx === x1 - 1 ? [1, 0, 0] : lz === z0 + 1 ? [0, 0, -1] : [0, 0, 1]
+      lx === x0 + 1
+        ? [-1, 0, 0]
+        : lx === x1 - 1
+          ? [1, 0, 0]
+          : lz === z0 + 1
+            ? [0, 0, -1]
+            : [0, 0, 1]
     ladder = { x: lx, z: lz, against }
   }
   const ladderWall = ladder ? `${ladder.x + ladder.against[0]},${ladder.z + ladder.against[2]}` : ''
-  const isLadder = (x: number, z: number) => ladder !== undefined && ladder.x === x && ladder.z === z
+  const isLadder = (x: number, z: number) =>
+    ladder !== undefined && ladder.x === x && ladder.z === z
 
   const outerDoors = new Map<string, number>()
   for (const d of b.doors ?? [])
-    for (const [x, z] of openingCells(b, d, ox, oz)) outerDoors.set(`${x},${z}`, Math.min(3, d.height ?? 2))
+    for (const [x, z] of openingCells(b, d, ox, oz))
+      outerDoors.set(`${x},${z}`, Math.min(3, d.height ?? 2))
 
   for (let k = 0; k < n; k++) {
     const yk = fy + k * h
@@ -369,7 +411,14 @@ function drawBuilding(
     const sameName = names.length === 1 && slug(names[0]) === base
     const what = sameName ? titled(b.name) : `${listWords(names)} of ${titled(b.name)}`
     const title = k === 0 ? what : `${what} (storey ${k + 1})`
-    const owner = c.owner(`${group}-s${k + 1}`, title, 'storey', k > 0 ? [`${group}-s${k}`] : [], group, b.crew)
+    const owner = c.owner(
+      `${group}-s${k + 1}`,
+      title,
+      'storey',
+      k > 0 ? [`${group}-s${k}`] : [],
+      group,
+      b.crew
+    )
 
     // Floor layer, outer walls, interior air.
     for (let x = x0; x <= x1; x++)
@@ -419,10 +468,16 @@ function drawBuilding(
       if (corner || along % 3 !== 2) continue
       if (k === 0 && outerDoors.has(`${x},${z}`)) continue
       if (`${x},${z}` === ladderWall) continue
-      if (inSolid(lx, lz) && !(lx < 0 || lz < 0 || lx >= design.area.width || lz >= design.area.depth)) continue
+      if (
+        inSolid(lx, lz) &&
+        !(lx < 0 || lz < 0 || lx >= design.area.width || lz >= design.area.depth)
+      )
+        continue
       const inward: [number, number] = [x - out[0], z - out[1]]
       if (partition.has(`${inward[0]},${inward[1]}`)) continue
-      const roomType = rooms.find((rm) => inward[0] >= rm.x0 && inward[0] <= rm.x1 && inward[1] >= rm.z0 && inward[1] <= rm.z1)?.room.type
+      const roomType = rooms.find(
+        (rm) => inward[0] >= rm.x0 && inward[0] <= rm.x1 && inward[1] >= rm.z0 && inward[1] <= rm.z1
+      )?.room.type
       const glass = windowGlass(roomType, along, m.window)
       for (let y = yk + 2; y <= Math.min(yk + 3, yk + h - 2); y++) c.set(owner, x, y, z, glass)
     }
@@ -470,7 +525,8 @@ function drawBuilding(
     // The ladder through this storey (its floor is the hole the ladder passes through).
     if (ladder) {
       const fromY = k === 0 ? yk + 1 : yk
-      for (let y = fromY; y < yk + h; y++) c.set(owner, ladder.x, y, ladder.z, 'ladder', { against: ladder.against })
+      for (let y = fromY; y < yk + h; y++)
+        c.set(owner, ladder.x, y, ladder.z, 'ladder', { against: ladder.against })
     }
   }
 
@@ -502,7 +558,12 @@ function windowGlass(type: RoomType | undefined, i: number, plain: string): stri
 }
 
 /** Perimeter cells of a rectangle (corners once) with the outward direction of their side. */
-function outerWallCells(r: { x0: number; z0: number; x1: number; z1: number }): Array<[number, number, [number, number]]> {
+function outerWallCells(r: {
+  x0: number
+  z0: number
+  x1: number
+  z1: number
+}): Array<[number, number, [number, number]]> {
   const out: Array<[number, number, [number, number]]> = []
   for (let x = r.x0; x <= r.x1; x++) out.push([x, r.z0, [0, -1]])
   for (let z = r.z0 + 1; z <= r.z1; z++) out.push([r.x1, z, [1, 0]])
@@ -541,26 +602,43 @@ function repairExisting(
   const bp = makeBlueprint(e.blueprint)
   const wx = ox + e.x
   const wz = oz + e.z
-  const bottom = new Set(bp.cells.filter((cell) => cell.y === 0).map((cell) => `${cell.x},${cell.z}`))
+  const bottom = new Set(
+    bp.cells.filter((cell) => cell.y === 0).map((cell) => `${cell.x},${cell.z}`)
+  )
   const wallBlock = bp.cells.find((cell) => cell.y === 0)?.block ?? m.wall
   const columns: FillColumn[] = []
   for (let x = 0; x < bp.size.x; x++)
     for (let z = 0; z < bp.size.z; z++) {
       const wall = bottom.has(`${x},${z}`)
-      columns.push({ x: wx + x, z: wz + z, top: e.y - 1, material: wall ? wallBlock : 'dirt', ...(wall ? {} : { topMaterial: m.paving }) })
+      columns.push({
+        x: wx + x,
+        z: wz + z,
+        top: e.y - 1,
+        material: wall ? wallBlock : 'dirt',
+        ...(wall ? {} : { topMaterial: m.paving }),
+      })
     }
   const cells: PlanCell[] = []
   if (e.openBack) {
     // The front gate is a gap in the bottom layers of the z = 0 wall; open the same gap at the back.
     const back = bp.size.z - 1
-    const at = (x: number, y: number, z: number) => bp.cells.some((cell) => cell.x === x && cell.y === y && cell.z === z)
+    const at = (x: number, y: number, z: number) =>
+      bp.cells.some((cell) => cell.x === x && cell.y === y && cell.z === z)
     for (let x = 1; x < bp.size.x - 1; x++) {
-      const gate = !at(x, 0, 0) && bp.cells.some((cell) => cell.x === x && cell.z === 0 && cell.y > 0)
+      const gate =
+        !at(x, 0, 0) && bp.cells.some((cell) => cell.x === x && cell.z === 0 && cell.y > 0)
       if (!gate) continue
       for (let y = 0; y < bp.size.y && !at(x, y, 0); y++)
-        if (at(x, y, back)) cells.push({ x: wx + x, y: e.y + y, z: wz + back, block: 'air', remove: true })
+        if (at(x, y, back))
+          cells.push({ x: wx + x, y: e.y + y, z: wz + back, block: 'air', remove: true })
       // A step down outside the new gate.
-      columns.push({ x: wx + x, z: wz + back + 1, top: Math.min(floorY, e.y - 2), material: 'dirt', topMaterial: m.wall })
+      columns.push({
+        x: wx + x,
+        z: wz + back + 1,
+        top: Math.min(floorY, e.y - 2),
+        material: 'dirt',
+        topMaterial: m.wall,
+      })
     }
     const light = bp.cells.find((cell) => cell.z === 0 && cell.block === 'lantern')
     if (light) cells.push({ x: wx + light.x, y: e.y + light.y, z: wz + back, block: m.light })
@@ -601,7 +679,8 @@ function toPlan(
   for (const r of repairs) {
     byOwner.set(r.id, r.cells)
     columnsByOwner.set(r.id, r.columns)
-    for (const cell of r.cells) if (cell.block !== 'air') planned.set(key(cell.x, cell.y, cell.z), cell.block)
+    for (const cell of r.cells)
+      if (cell.block !== 'air') planned.set(key(cell.x, cell.y, cell.z), cell.block)
   }
 
   const owners = [...c.owners.values()].sort((a, b) => a.order - b.order)
@@ -612,13 +691,17 @@ function toPlan(
     const columns = columnsByOwner.get(o.id) ?? []
     if (!cells.length && !columns.length) continue
     const parts = split(o, cells, columns)
-    partsOf.set(o.id, parts.map((p) => p.id))
+    partsOf.set(
+      o.id,
+      parts.map((p) => p.id)
+    )
     sections.push(...parts)
   }
   // Wait for every part of the sections named in `after`.
   for (const s of sections) s.after = s.after.flatMap((id) => partsOf.get(id) ?? [])
   // Part order within the plan: ground work first, then by storey.
-  const rank = (s: Section) => (s.kind === 'features' ? 9 : s.kind === 'storey' ? Number(/-s(\d+)/.exec(s.id)?.[1] ?? 1) : 0)
+  const rank = (s: Section) =>
+    s.kind === 'features' ? 9 : s.kind === 'storey' ? Number(/-s(\d+)/.exec(s.id)?.[1] ?? 1) : 0
   sections.sort((a, b) => rank(a) - rank(b))
   return {
     id: slug(design.name),
@@ -638,7 +721,15 @@ const SPLIT_NAMES_Z = ['north', 'middle', 'south']
 function split(o: Owner, cells: PlanCell[], columns: FillColumn[]): Section[] {
   const total = cells.length + columns.length
   const parts = Math.min(3, Math.ceil(total / MAX_SECTION_CELLS))
-  const whole: Section = { id: o.id, title: o.title, kind: o.kind, cells, columns, after: o.after, ...(o.crew ? { crew: o.crew } : {}) }
+  const whole: Section = {
+    id: o.id,
+    title: o.title,
+    kind: o.kind,
+    cells,
+    columns,
+    after: o.after,
+    ...(o.crew ? { crew: o.crew } : {}),
+  }
   if (parts <= 1 || o.kind === 'repair') return [whole]
   const xs = [...cells.map((cell) => cell.x), ...columns.map((col) => col.x)]
   const zs = [...cells.map((cell) => cell.z), ...columns.map((col) => col.z)]
@@ -648,11 +739,19 @@ function split(o: Owner, cells: PlanCell[], columns: FillColumn[]): Section[] {
   const lo = axis === 'x' ? Math.min(...xs) : Math.min(...zs)
   const span = (axis === 'x' ? spanX : spanZ) + 1
   const partOf = (v: number) => Math.min(parts - 1, Math.floor(((v - lo) * parts) / span))
-  const names = parts === 2 ? (axis === 'x' ? ['west', 'east'] : ['north', 'south']) : axis === 'x' ? SPLIT_NAMES : SPLIT_NAMES_Z
+  const names =
+    parts === 2
+      ? axis === 'x'
+        ? ['west', 'east']
+        : ['north', 'south']
+      : axis === 'x'
+        ? SPLIT_NAMES
+        : SPLIT_NAMES_Z
   // Keep a bed's two cells together: the head goes with its foot.
   const footOf = new Map<string, number>()
   for (const cell of cells)
-    if (cell.block === 'bed' && !cell.auto) footOf.set(`${cell.x},${cell.y},${cell.z}`, partOf(cell[axis]))
+    if (cell.block === 'bed' && !cell.auto)
+      footOf.set(`${cell.x},${cell.y},${cell.z}`, partOf(cell[axis]))
   const out: Section[] = []
   for (let p = 0; p < parts; p++) {
     out.push({

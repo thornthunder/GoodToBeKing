@@ -42,7 +42,16 @@ const STEP: Record<Side, [number, number]> = {
 }
 
 /** Bed colours (the bed item's data value). */
-const BED = { white: 0, magenta: 2, lightBlue: 3, purple: 10, blue: 11, brown: 12, green: 13, red: 14 }
+const BED = {
+  white: 0,
+  magenta: 2,
+  lightBlue: 3,
+  purple: 10,
+  blue: 11,
+  brown: 12,
+  green: 13,
+  red: 14,
+}
 
 /** A helper bound to one room: tracks used floor cells so pieces never land on each other. */
 class Room {
@@ -171,7 +180,10 @@ function benches(r: Room, cells: Array<[number, number]>): void {
 function feastTables(r: Room): void {
   const [a] = r.longSides
   const across = a === 'north' ? r.d : r.w
-  const rows = across >= 9 ? [Math.floor(across / 3), across - 1 - Math.floor(across / 3)] : [Math.floor(across / 2)]
+  const rows =
+    across >= 9
+      ? [Math.floor(across / 3), across - 1 - Math.floor(across / 3)]
+      : [Math.floor(across / 2)]
   for (const n of rows) {
     table(r, r.row(a, n, 2))
     benches(r, r.row(a, n - 1, 2))
@@ -231,11 +243,17 @@ const FURNISH: Record<RoomType, (r: Room) => void> = {
     const [lx, lz] = back[mid]
     r.put(lx, lz, [{ block: 'quartz_block' }, { block: 'lantern' }])
     for (const [x, z] of [...back, ...front]) r.put(x, z, [{ block: 'quartz_block' }])
-    for (const [x, z] of r.aisle(r.w >= 7 && r.d >= 7 ? 3 : 1)) r.put(x, z, [{ block: 'red_carpet' }])
+    for (const [x, z] of r.aisle(r.w >= 7 && r.d >= 7 ? 3 : 1))
+      r.put(x, z, [{ block: 'red_carpet' }])
     // Pillars along the long walls, one in from them.
     for (const side of r.longSides)
       r.row(side, 1, 2).forEach(([x, z], i) => {
-        if (i % 4 === 0) r.put(x, z, Array.from({ length: r.s.height }, () => ({ block: 'quartz_pillar' })))
+        if (i % 4 === 0)
+          r.put(
+            x,
+            z,
+            Array.from({ length: r.s.height }, () => ({ block: 'quartz_pillar' }))
+          )
       })
     r.lightCorners()
   },
@@ -247,10 +265,27 @@ const FURNISH: Record<RoomType, (r: Room) => void> = {
     stoves.splice(2, 0, [{ block: 'campfire' }])
     along(r, far, stoves)
     const [s1, s2] = r.shortSides
-    along(r, s1, [[{ block: 'cauldron' }], [{ block: 'crafting_table' }], [{ block: 'barrel' }, { block: 'barrel' }]])
-    along(r, s2, [[{ block: 'barrel' }, { block: 'barrel' }], [{ block: 'barrel' }], [{ block: 'composter' }]])
+    along(r, s1, [
+      [{ block: 'cauldron' }],
+      [{ block: 'crafting_table' }],
+      [{ block: 'barrel' }, { block: 'barrel' }],
+    ])
+    along(r, s2, [
+      [{ block: 'barrel' }, { block: 'barrel' }],
+      [{ block: 'barrel' }],
+      [{ block: 'composter' }],
+    ])
     const [cx, cz] = [Math.floor((r.s.x0 + r.s.x1) / 2), Math.floor((r.s.z0 + r.s.z1) / 2)]
-    table(r, [[cx - 1, cz], [cx, cz], [cx + 1, cz]], 'white_carpet', 2)
+    table(
+      r,
+      [
+        [cx - 1, cz],
+        [cx, cz],
+        [cx + 1, cz],
+      ],
+      'white_carpet',
+      2
+    )
     r.lightCorners()
   },
   pantry(r) {
@@ -268,7 +303,11 @@ const FURNISH: Record<RoomType, (r: Room) => void> = {
     r.lightCorners()
   },
   royal_bedchamber(r) {
-    chamber(r, BED.red, 'red_carpet', [[{ block: 'bookshelf' }, { block: 'lantern' }], [{ block: 'chest', from: r.s.doorSide }], [{ block: 'gold_block' }, { block: 'lantern' }]])
+    chamber(r, BED.red, 'red_carpet', [
+      [{ block: 'bookshelf' }, { block: 'lantern' }],
+      [{ block: 'chest', from: r.s.doorSide }],
+      [{ block: 'gold_block' }, { block: 'lantern' }],
+    ])
   },
   princess_bedchamber(r) {
     chamber(r, BED.magenta, 'magenta_carpet', [
@@ -280,38 +319,83 @@ const FURNISH: Record<RoomType, (r: Room) => void> = {
     ])
   },
   bedchamber(r) {
-    chamber(r, BED.blue, 'light_blue_carpet', [[{ block: 'bookshelf' }, { block: 'lantern' }], [{ block: 'chest', from: r.s.doorSide }], [{ block: 'lectern', from: r.s.doorSide }]])
+    chamber(r, BED.blue, 'light_blue_carpet', [
+      [{ block: 'bookshelf' }, { block: 'lantern' }],
+      [{ block: 'chest', from: r.s.doorSide }],
+      [{ block: 'lectern', from: r.s.doorSide }],
+    ])
   },
   apprentices_chamber(r) {
     beds(r, 2, BED.brown)
-    along(r, r.s.doorSide === 'north' ? 'south' : 'north', [[{ block: 'chest', from: r.s.doorSide }], [{ block: 'crafting_table' }], [{ block: 'chest', from: r.s.doorSide }]])
+    along(r, r.s.doorSide === 'north' ? 'south' : 'north', [
+      [{ block: 'chest', from: r.s.doorSide }],
+      [{ block: 'crafting_table' }],
+      [{ block: 'chest', from: r.s.doorSide }],
+    ])
     r.lightCorners()
     r.carpet('brown_carpet')
   },
   barracks(r) {
     beds(r, 4, BED.red)
-    along(r, r.shortSides[0], [[{ block: 'chest', from: OPPOSITE[r.shortSides[0]] }], [{ block: 'barrel' }]])
+    along(r, r.shortSides[0], [
+      [{ block: 'chest', from: OPPOSITE[r.shortSides[0]] }],
+      [{ block: 'barrel' }],
+    ])
     r.lightCorners()
   },
   guardroom(r) {
     const [cx, cz] = [Math.floor((r.s.x0 + r.s.x1) / 2), Math.floor((r.s.z0 + r.s.z1) / 2)]
-    table(r, [[cx, cz], [cx + 1, cz]], 'red_carpet', 2)
-    benches(r, [[cx, cz - 1], [cx + 1, cz - 1], [cx, cz + 1], [cx + 1, cz + 1]])
-    along(r, OPPOSITE[r.s.doorSide], [[{ block: 'barrel' }], [{ block: 'chest', from: r.s.doorSide }], [{ block: 'crafting_table' }], [{ block: 'barrel' }]])
+    table(
+      r,
+      [
+        [cx, cz],
+        [cx + 1, cz],
+      ],
+      'red_carpet',
+      2
+    )
+    benches(r, [
+      [cx, cz - 1],
+      [cx + 1, cz - 1],
+      [cx, cz + 1],
+      [cx + 1, cz + 1],
+    ])
+    along(r, OPPOSITE[r.s.doorSide], [
+      [{ block: 'barrel' }],
+      [{ block: 'chest', from: r.s.doorSide }],
+      [{ block: 'crafting_table' }],
+      [{ block: 'barrel' }],
+    ])
     r.lightCorners()
   },
   armoury(r) {
     const far = OPPOSITE[r.s.doorSide]
-    along(r, far, [[{ block: 'anvil' }], [{ block: 'smithing_table' }], [{ block: 'grindstone' }], [{ block: 'blast_furnace', from: r.s.doorSide }], [{ block: 'barrel' }]])
+    along(r, far, [
+      [{ block: 'anvil' }],
+      [{ block: 'smithing_table' }],
+      [{ block: 'grindstone' }],
+      [{ block: 'blast_furnace', from: r.s.doorSide }],
+      [{ block: 'barrel' }],
+    ])
     for (const side of r.shortSides)
-      for (const [x, z] of r.wall(side, 1)) r.put(x, z, [{ block: 'iron_bars' }, { block: 'iron_bars' }])
+      for (const [x, z] of r.wall(side, 1))
+        r.put(x, z, [{ block: 'iron_bars' }, { block: 'iron_bars' }])
     r.lightCorners()
   },
   library(r) {
     for (const side of ['north', 'south', 'east', 'west'] as Side[])
-      for (const [x, z] of r.wall(side, 1)) r.put(x, z, [{ block: 'bookshelf' }, { block: 'bookshelf' }])
+      for (const [x, z] of r.wall(side, 1))
+        r.put(x, z, [{ block: 'bookshelf' }, { block: 'bookshelf' }])
     const [cx, cz] = [Math.floor((r.s.x0 + r.s.x1) / 2), Math.floor((r.s.z0 + r.s.z1) / 2)]
-    table(r, [[cx, cz], [cx + 1, cz]], 'green_carpet', 2)
+    table(
+      r,
+      [
+        [cx, cz],
+        [cx + 1, cz],
+      ],
+      'green_carpet',
+      2
+    )
     r.put(cx - 1, cz, [{ block: 'lectern', from: r.s.doorSide }])
     r.put(cx + 2, cz, [{ block: 'lectern', from: r.s.doorSide }])
     r.lightCorners()
@@ -322,7 +406,11 @@ const FURNISH: Record<RoomType, (r: Room) => void> = {
     const mid = Math.floor(altar.length / 2)
     for (const i of [mid - 1, mid, mid + 1]) {
       const cell = altar[i]
-      if (cell) r.put(cell[0], cell[1], [{ block: 'quartz_block' }, { block: i === mid ? 'gold_block' : 'candle' }])
+      if (cell)
+        r.put(cell[0], cell[1], [
+          { block: 'quartz_block' },
+          { block: i === mid ? 'gold_block' : 'candle' },
+        ])
     }
     for (const [x, z] of r.aisle(1)) r.put(x, z, [{ block: 'blue_carpet' }])
     const depth = far === 'north' || far === 'south' ? r.d : r.w
@@ -331,9 +419,22 @@ const FURNISH: Record<RoomType, (r: Room) => void> = {
   },
   solar(r) {
     const far = OPPOSITE[r.s.doorSide]
-    along(r, far, [[{ block: 'bookshelf' }, { block: 'lantern' }], [{ block: 'noteblock' }], [{ block: 'jukebox' }], [{ block: 'bookshelf' }]])
+    along(r, far, [
+      [{ block: 'bookshelf' }, { block: 'lantern' }],
+      [{ block: 'noteblock' }],
+      [{ block: 'jukebox' }],
+      [{ block: 'bookshelf' }],
+    ])
     const [cx, cz] = [Math.floor((r.s.x0 + r.s.x1) / 2), Math.floor((r.s.z0 + r.s.z1) / 2)]
-    table(r, [[cx, cz], [cx + 1, cz]], 'yellow_carpet', 3)
+    table(
+      r,
+      [
+        [cx, cz],
+        [cx + 1, cz],
+      ],
+      'yellow_carpet',
+      3
+    )
     r.put(cx, cz - 1, [{ block: 'spruce_slab' }])
     r.put(cx + 1, cz + 1, [{ block: 'spruce_slab' }])
     r.lightCorners()
@@ -341,19 +442,35 @@ const FURNISH: Record<RoomType, (r: Room) => void> = {
   },
   wizard_study(r) {
     const far = OPPOSITE[r.s.doorSide]
-    for (const [x, z] of r.wall(far, 1)) r.put(x, z, [{ block: 'bookshelf' }, { block: 'bookshelf' }])
+    for (const [x, z] of r.wall(far, 1))
+      r.put(x, z, [{ block: 'bookshelf' }, { block: 'bookshelf' }])
     const [cx, cz] = [Math.floor((r.s.x0 + r.s.x1) / 2), Math.floor((r.s.z0 + r.s.z1) / 2)]
     r.put(cx, cz, [{ block: 'enchanting_table' }])
     const [s1, s2] = r.shortSides
-    along(r, s1, [[{ block: 'brewing_stand' }], [{ block: 'cauldron' }], [{ block: 'amethyst_block' }, { block: 'soul_lantern' }]])
-    along(r, s2, [[{ block: 'lectern', from: OPPOSITE[s2] }], [{ block: 'chest', from: OPPOSITE[s2] }]])
+    along(r, s1, [
+      [{ block: 'brewing_stand' }],
+      [{ block: 'cauldron' }],
+      [{ block: 'amethyst_block' }, { block: 'soul_lantern' }],
+    ])
+    along(r, s2, [
+      [{ block: 'lectern', from: OPPOSITE[s2] }],
+      [{ block: 'chest', from: OPPOSITE[s2] }],
+    ])
     r.lightCorners('soul_lantern')
     r.carpet('purple_carpet')
   },
   workshop(r) {
     const far = OPPOSITE[r.s.doorSide]
-    along(r, far, [[{ block: 'crafting_table' }], [{ block: 'stonecutter_block' }], [{ block: 'loom' }], [{ block: 'cartography_table' }], [{ block: 'fletching_table' }], [{ block: 'smithing_table' }]])
-    for (const side of r.shortSides) along(r, side, [[{ block: 'barrel' }, { block: 'barrel' }], [{ block: 'barrel' }]])
+    along(r, far, [
+      [{ block: 'crafting_table' }],
+      [{ block: 'stonecutter_block' }],
+      [{ block: 'loom' }],
+      [{ block: 'cartography_table' }],
+      [{ block: 'fletching_table' }],
+      [{ block: 'smithing_table' }],
+    ])
+    for (const side of r.shortSides)
+      along(r, side, [[{ block: 'barrel' }, { block: 'barrel' }], [{ block: 'barrel' }]])
     r.lightCorners()
   },
   stables(r) {

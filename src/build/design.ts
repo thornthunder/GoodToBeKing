@@ -161,9 +161,7 @@ function inside(inner: Rect, outer: Rect): boolean {
 
 /** Overlap of two rectangles' areas (sharing an edge line counts as overlap of 1 cell wide). */
 export function overlaps(a: Rect, b: Rect): boolean {
-  return (
-    a.x < b.x + b.width && b.x < a.x + a.width && a.z < b.z + b.depth && b.z < a.z + a.depth
-  )
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.z < b.z + b.depth && b.z < a.z + a.depth
 }
 
 /** Interiors overlap (rects that only share a wall line do not count). */
@@ -208,14 +206,17 @@ export function validateDesign(d: CastleDesign): string[] {
       if (!SIDES.includes(o.side)) err(`${owner}: door side must be north, south, east or west`)
       const w = o.width ?? 1
       if (!isInt(o.at) || o.at < 1 || o.at + w > sideLength(r, o.side) - 1)
-        err(`${owner}: a door on the ${o.side} side must be inside that wall, away from the corners`)
+        err(
+          `${owner}: a door on the ${o.side} side must be inside that wall, away from the corners`
+        )
     }
   }
 
   const solids: Array<{ name: string; rect: Rect }> = []
   for (const t of d.towers ?? []) {
     const rect = { x: t.x, z: t.z, width: t.size, depth: t.size }
-    if (![t.x, t.z, t.size, t.height].every(isInt)) err(`tower ${t.name}: x, z, size and height must be whole numbers`)
+    if (![t.x, t.z, t.size, t.height].every(isInt))
+      err(`tower ${t.name}: x, z, size and height must be whole numbers`)
     if (t.size < 3 || t.size > 9) err(`tower ${t.name}: size must be between 3 and 9`)
     if (t.height < 4 || t.height > 24) err(`tower ${t.name}: height must be between 4 and 24`)
     if (!inside(rect, local)) err(`tower ${t.name} must lie inside the area`)
@@ -230,13 +231,15 @@ export function validateDesign(d: CastleDesign): string[] {
     }
     if (b.width < 5 || b.depth < 5) err(`${label}: must be at least 5 by 5`)
     if (!inside(b, local)) err(`${label} must lie inside the area`)
-    if (!Array.isArray(b.storeys) || b.storeys.length === 0) err(`${label}: needs at least one storey`)
+    if (!Array.isArray(b.storeys) || b.storeys.length === 0)
+      err(`${label}: needs at least one storey`)
     else if (b.storeys.length > MAX_STOREYS) err(`${label}: at most ${MAX_STOREYS} storeys`)
     checkOpenings(label, b, b.doors)
     if (!b.doors?.length) err(`${label}: needs at least one door so people can get in`)
     if ((b.storeys?.length ?? 0) > 1) {
       const l = b.ladder
-      if (!l || !isInt(l.x) || !isInt(l.z)) err(`${label}: needs a ladder (x, z) to join its storeys`)
+      if (!l || !isInt(l.x) || !isInt(l.z))
+        err(`${label}: needs a ladder (x, z) to join its storeys`)
       else if (l.x <= b.x || l.x >= b.x + b.width - 1 || l.z <= b.z || l.z >= b.z + b.depth - 1)
         err(
           `${label}: the ladder must stand inside the building, not in its walls (x from ${b.x + 1} to ${b.x + b.width - 2}, z from ${b.z + 1} to ${b.z + b.depth - 2}, counted from the castle's corner)`
@@ -254,9 +257,12 @@ export function validateDesign(d: CastleDesign): string[] {
       if (rooms.length === 0) err(`${label}, storey ${k + 1}: needs at least one room`)
       for (const r of rooms) {
         const rl = `${label}, storey ${k + 1}, room ${r.name}`
-        if (r.honour !== undefined && !SIDES.includes(r.honour)) err(`${rl}: honour must be north, south, east or west`)
-        if (!ROOM_TYPES.includes(r.type)) err(`${rl}: unknown type "${r.type}"; use one of ${ROOM_TYPES.join(', ')}`)
-        if (![r.x, r.z, r.width, r.depth].every(isInt)) err(`${rl}: x, z, width and depth must be whole numbers`)
+        if (r.honour !== undefined && !SIDES.includes(r.honour))
+          err(`${rl}: honour must be north, south, east or west`)
+        if (!ROOM_TYPES.includes(r.type))
+          err(`${rl}: unknown type "${r.type}"; use one of ${ROOM_TYPES.join(', ')}`)
+        if (![r.x, r.z, r.width, r.depth].every(isInt))
+          err(`${rl}: x, z, width and depth must be whole numbers`)
         else if (!inside(r, b))
           err(
             `${rl}: must lie inside its building (rooms use the same x and z as buildings, counted from the castle's corner, not from the building's own corner)`
