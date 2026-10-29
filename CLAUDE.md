@@ -198,7 +198,9 @@ Windows, killing a background `npx` shell does not kill its node children at all
   horse's real state from a client: the `saddled` and `tamed` flags in its entity metadata.
 - `bot/ChatFloor.ts`: one bot answers each line (the one named, the one already talking with that
   player, or the herald: the first bot online, the Castellan first for guests). Only the herald
-  hails and reacts to notices. Guards with `duty: escort` follow their royal when one is in sight.
+  hails and reacts to notices. Guards (`duty: escort`) escort only when a royal asks ("escort
+  me", a follow order; "dismissed" ends it), the King's wish of 2026-10-29; `duty.auto` would
+  make them follow a royal in sight unasked. They still fight monsters near royals.
 
 ### The court's building works
 

@@ -124,6 +124,11 @@ export interface Duty {
   kind: 'escort'
   /** Court titles in order of preference, e.g. ["Princess", "King"]. */
   royals: string[]
+  /**
+   * Follow a royal in sight without being asked. Off by default: the King's wish (2026-10-29) is
+   * that guards escort only when a royal asks ("escort me"); they still guard and fight.
+   */
+  auto?: boolean
 }
 
 export interface AppConfig {

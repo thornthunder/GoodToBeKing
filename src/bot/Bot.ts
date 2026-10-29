@@ -274,6 +274,8 @@ export class Bot extends EventEmitter {
   private performDuty(): void {
     const movement = this.movement
     if (this.cfg.duty?.kind !== 'escort' || !movement || this.state.status !== 'spawned') return
+    // Escort only when asked (a royal's "escort me" is a follow order), unless set to follow by itself.
+    if (!this.cfg.duty.auto) return
     if (this.building || Date.now() < this.dutyPausedUntil) return
     // An errand (hunting, fetching, building by hand) is finished first.
     if (this.gathering || this.handbuilder?.busy) return
@@ -319,7 +321,7 @@ export class Bot extends EventEmitter {
     if (this.survival?.busy) return false
     if (Date.now() < this.worksPausedUntil) return false
     if (this.movement?.current() && !this.dutyFollowing) return false
-    if (this.dutyTarget() && Date.now() >= this.dutyPausedUntil) return false
+    if (this.cfg.duty?.auto && this.dutyTarget() && Date.now() >= this.dutyPausedUntil) return false
     if (this.brain.post?.()) return false // on a royal's orders
     return true
   }

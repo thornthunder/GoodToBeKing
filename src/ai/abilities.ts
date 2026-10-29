@@ -16,8 +16,8 @@ export type MoveCommand = 'follow' | 'come' | 'stop'
 
 const NEGATED_MOVE =
   /\b(don'?t|do not|stop|no more|quit)\b[^.!?]{0,15}\b(follow|following|come|coming)\b/i
-const STOP = /\b(stop|stay|wait|halt|freeze|leave me|stand still)\b/i
-const FOLLOW = /\b(follow|come with me|walk with me|accompany)\b/i
+const STOP = /\b(stop|stay|wait|halt|freeze|leave me|stand still|dismissed|at ease)\b/i
+const FOLLOW = /\b(follow|come with me|walk with me|accompany|escort|(guard|protect) me)\b/i
 const COME = /\b(come(?! on\b)|walk over|over here)\b/i
 
 /**

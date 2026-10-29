@@ -177,3 +177,11 @@ describe('declineLine', () => {
     expect(declineLine('build', 'Your Highness')).not.toContain('spellbook')
   })
 })
+
+describe('escorts on request', () => {
+  it('hears "escort me" as following, and "dismissed" as stopping', () => {
+    expect(detectMoveCommand('Bruce, escort me to the village', false)).toBe('follow')
+    expect(detectMoveCommand('guards, protect me', false)).toBe('follow')
+    expect(detectMoveCommand('thank you Dyke, you are dismissed', true)).toBe('stop')
+  })
+})
