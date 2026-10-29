@@ -11,9 +11,9 @@ describe('survival', () => {
   })
 
   it('fights monsters, but leaves creepers, endermen and the animals alone', () => {
-    for (const foe of ['zombie', 'skeleton', 'spider', 'husk', 'drowned', 'phantom'])
+    for (const foe of ['zombie', 'skeleton', 'spider', 'husk', 'drowned'])
       expect(HOSTILE.test(foe)).toBe(true)
-    for (const other of ['creeper', 'enderman', 'cow', 'villager', 'player', 'wolf'])
+    for (const other of ['creeper', 'enderman', 'phantom', 'cow', 'villager', 'player'])
       expect(HOSTILE.test(other)).toBe(false)
   })
 })

@@ -28,7 +28,7 @@ const FOOD = new RegExp(`^(${FOODS.join('|')})$`)
 
 /** Monsters the guards fight. Creepers and endermen are left alone: fighting them goes badly. */
 export const HOSTILE =
-  /^(zombie|zombie_villager|husk|drowned|skeleton|stray|bogged|spider|cave_spider|witch|pillager|vindicator|slime|phantom|silverfish|zoglin|hoglin|piglin_brute)$/
+  /^(zombie|zombie_villager|husk|drowned|skeleton|stray|bogged|spider|cave_spider|witch|pillager|vindicator|slime|silverfish|zoglin|hoglin|piglin_brute)$/
 const WEAPONS = [/_sword$/, /_axe$/]
 
 /** Eat below this much food (of 20): low enough not to nibble all day. */
@@ -63,6 +63,8 @@ export class Survival {
   private eating = false
   private fighting = false
   private lastEmptyTrip = 0
+  /** Monsters that got away, left alone until then (no chasing the same one every tick). */
+  private readonly letGo = new Map<number, number>()
   private lastHungryWords = 0
 
   constructor(
@@ -91,11 +93,15 @@ export class Survival {
   private foe(): ReturnType<typeof this.monsters>[number] | undefined {
     const me = this.bot.entity.position
     const royals = this.opts.royals()
+    const now = Date.now()
     return this.monsters()
+      .filter((e) => (this.letGo.get(e.id) ?? 0) < now)
       .filter(
         (e) =>
           e.position.distanceTo(me) <= SELF_RANGE ||
-          royals.some((r) => r.distanceTo(e.position) <= GUARD_RANGE)
+          // Near a royal, and near enough to this guard to be reached.
+          (e.position.distanceTo(me) <= GUARD_RANGE &&
+            royals.some((r) => r.distanceTo(e.position) <= GUARD_RANGE))
       )
       .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me))[0]
   }
@@ -124,6 +130,7 @@ export class Survival {
         const gap = foe.position.distanceTo(this.bot.entity.position)
         if (gap > GUARD_RANGE + 6) {
           outcome = 'it got away'
+          this.letGo.set(foe.id, Date.now() + 60_000)
           break
         }
         if (gap > STRIKE) {
@@ -142,6 +149,7 @@ export class Survival {
     } finally {
       this.bot.pathfinder.setGoal(null)
       this.fighting = false
+      if (outcome.startsWith('gave up')) this.letGo.set(foe.id, Date.now() + 60_000)
       this.log.info(`fight with a ${foe.name}: ${strikes} strikes, ${outcome}`)
     }
   }
