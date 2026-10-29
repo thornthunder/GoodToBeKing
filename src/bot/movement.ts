@@ -26,6 +26,7 @@ type PathfinderBot = MineflayerBot & { pathfinder: Pathfinder }
  */
 export class Movement {
   private activity: Activity = null
+  private doors = false
   private readonly bot: PathfinderBot
   private readonly stuck = new StuckDetector()
   /** Following on duty rather than on request: do not announce being stuck. */
@@ -82,8 +83,12 @@ export class Movement {
     })
   }
 
-  /** Call once the bot has spawned and the world around it has loaded. */
-  configure(): void {
+  /**
+   * Call once the bot has spawned and the world around it has loaded. `doors`: walk through
+   * doors (survival, where the court's hall has one; the bots close them behind them).
+   */
+  configure(doors = this.doors): void {
+    this.doors = doors
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const movements = new Movements(this.bot as any)
     movements.canDig = false
@@ -91,7 +96,7 @@ export class Movement {
     movements.scafoldingBlocks = []
     movements.allowParkour = true
     movements.allowSprinting = true
-    movements.canOpenDoors = false
+    movements.canOpenDoors = doors
     this.bot.pathfinder.setMovements(movements)
   }
 

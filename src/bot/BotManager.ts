@@ -185,7 +185,9 @@ export class BotManager {
       const p = bot.position()
       if (!p) continue
       const far = Math.hypot(p.x - home.x - 0.5, p.z - home.z - 0.5)
-      if (far <= HOME_RADIUS && Math.abs(p.y - home.y) < 4) {
+      // At night in survival everyone comes inside the hall; by day near it will do.
+      const radius = bot.isNight() && !bot.buildsByMagic() ? HOME_RADIUS_NIGHT : HOME_RADIUS
+      if (far <= radius && Math.abs(p.y - home.y) < 4) {
         this.homeTrips.delete(bot.cfg.name)
         continue
       }
@@ -950,8 +952,9 @@ export class BotManager {
 }
 
 /** A royal's order for great works, as the bot that took it heard it (see Bot.act). */
-/** Courtiers within this many blocks of home are at home. */
+/** Courtiers within this many blocks of home are at home (by night: inside the hall). */
 const HOME_RADIUS = 10
+const HOME_RADIUS_NIGHT = 2.5
 /** Farther than this, Merlin portals them home rather than letting them walk. */
 const HOME_WALK = 96
 /** Before sending the same bot home again. */

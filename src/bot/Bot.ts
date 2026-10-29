@@ -48,6 +48,7 @@ import {
 } from '../build/hall'
 import type { Household } from '../household'
 import { Gatherer, type Material } from './gathering'
+import { FOODS, Survival, isNight } from './survival'
 import { Movement } from './movement'
 import type { CommandResult, Magic } from '../magic/Magic'
 import type { SpellArgs } from '../magic/spells'
@@ -103,6 +104,8 @@ const EARSHOT = 24
 
 /** After a royal tells a bot on duty to stop, it leaves the duty alone this long. */
 const DUTY_PAUSE_MS = 10 * 60_000
+
+const FOOD_ITEM = new RegExp(`^(${FOODS.join('|')})$`)
 
 /** Hall work as the builder speaks of it, and the cells it takes. */
 const HALL_WORK_TITLES: Record<HallWork, string> = {
@@ -177,6 +180,10 @@ export class Bot extends EventEmitter {
   private gathering = false
   /** Builds by hand in survival (the hall's roof, floor, light and door). */
   private handbuilder?: Handbuilder
+  /** Eating and, for guards, fighting (survival). */
+  private survival?: Survival
+  private died = false
+  private surviving = false
   /** The court's home and storehouse (survival). */
   private readonly household?: Household
   /** A royal asked for something else: no work orders until then. */
@@ -280,6 +287,7 @@ export class Bot extends EventEmitter {
   isFree(): boolean {
     if (this.state.status !== 'spawned' || !this.body || !this.mason) return false
     if (this.building || this.mason.busy || this.gathering || this.handbuilder?.busy) return false
+    if (this.survival?.busy) return false
     if (Date.now() < this.worksPausedUntil) return false
     if (this.movement?.current() && !this.dutyFollowing) return false
     if (this.dutyTarget() && Date.now() >= this.dutyPausedUntil) return false
@@ -290,11 +298,60 @@ export class Bot extends EventEmitter {
   /** Every few seconds: the escort duty, standing orders, and reports owed to the superior. */
   private tick(): void {
     if (this.state.status !== 'spawned') return
+    this.lookAfterSelf()
     this.performDuty()
     this.keepPost()
     this.deliverReports()
     this.fadeGifts()
     this.watchMagic()
+  }
+
+  /** In survival: eat, fight (guards), and close doors left open. One round at a time. */
+  private lookAfterSelf(): void {
+    const survival = this.survival
+    if (!survival || this.surviving || !byHand(this.gameMode())) return
+    this.surviving = true
+    survival
+      .tick()
+      .then(() => (this.isFree() ? survival.closeDoors() : undefined))
+      .catch((err) => this.log.warn(`looking after itself failed: ${errMsg(err)}`))
+      .finally(() => (this.surviving = false))
+  }
+
+  /** Where the royals in sight stand. */
+  private royalPositions(): WorldVec[] {
+    const body = this.body
+    if (!body || !this.court) return []
+    return [...this.state.players.values()]
+      .filter((p) => this.court?.find(p.name))
+      .map((p) => body.players[p.name]?.entity?.position)
+      .filter((p): p is WorldVec => p !== undefined)
+  }
+
+  /** Take some food out of the storehouse (survival); returns how many. */
+  private async fetchFood(): Promise<number> {
+    const chest = this.household?.storehouse
+    const gatherer = this.gatherer
+    if (!chest || !gatherer || !this.isFree()) return 0
+    const before = this.body?.inventory.items().filter((i) => FOOD_ITEM.test(i.name)).length ?? 0
+    await gatherer.withChest(chest, async (window) => {
+      let left = 4
+      for (const item of window.containerItems().filter((i) => FOOD_ITEM.test(i.name))) {
+        if (left <= 0) break
+        const n = Math.min(left, item.count)
+        await window.withdraw(item.type, item.metadata, n)
+        left -= n
+      }
+      return 0
+    })
+    if (gatherer.lastStock) this.household?.noteStock(gatherer.lastStock)
+    const after = this.body?.inventory.items().filter((i) => FOOD_ITEM.test(i.name)).length ?? 0
+    return Math.max(0, after - before)
+  }
+
+  /** Night in this bot's world (monsters about). */
+  isNight(): boolean {
+    return isNight(this.body?.time?.timeOfDay)
   }
 
   /** Work the spells a royal asked for, in order; if the server refuses one, say so and stop. */
@@ -625,7 +682,33 @@ export class Bot extends EventEmitter {
       this.movement?.configure()
     )
     body.on('error', (err) => this.log.debug(`body error: ${errMsg(err)}`))
-    body.once('spawn', () => this.movement?.configure())
+    // Doors only in survival: in the creative world the bots open nobody's door.
+    body.once('spawn', () => this.movement?.configure(byHand(this.gameMode())))
+    this.survival = new Survival(body, this.log.child('life'), {
+      guard: this.cfg.duty?.kind === 'escort',
+      royals: () => this.royalPositions(),
+      fetchFood: () => this.fetchFood(),
+      speak: (instruction, fallback) => this.speak(instruction, fallback),
+    })
+    body.on('death', () => {
+      this.log.info('died')
+      this.died = true
+      this.gatherer?.cancel()
+      this.handbuilder?.cancel()
+    })
+    body.on('respawn', () => {
+      if (!this.died) return
+      this.died = false
+      this.log.info(`back after dying, at ${fmtVec(this.position() ?? { x: 0, y: 0, z: 0 })}`)
+      setTimeout(() => {
+        void this.speak(
+          'You just died (in survival, monsters, falls and drowning are real) and woke up again ' +
+            'at the spawn point. Say so lightly in one short sentence, in character, and that you ' +
+            'will be back soon.',
+          'Oof! I shall be right back.'
+        )
+      }, 3_000)
+    })
     this.attachHandlers(client)
 
     await new Promise<void>((resolve, reject) => {

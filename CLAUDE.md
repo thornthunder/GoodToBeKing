@@ -89,9 +89,22 @@ Windows, killing a background `npx` shell does not kill its node children at all
   players by UUID), chat send/receive, `runCommand`, `act()` for brain actions, auto-reconnect
   with backoff. Emits `spawn`, `chat`, `close`. Never emits `error` (an unhandled `error` event
   would throw); the body's `error` event is logged at debug level.
-- `bot/movement.ts`: follow / come / stop on mineflayer-pathfinder. Movements are configured to
-  never change the world: `canDig=false`, `allow1by1towers=false`, no scaffolding blocks,
-  `canOpenDoors=false`. Keep it that way unless the user asks.
+- `bot/movement.ts`: follow / come / stop / go to a spot on mineflayer-pathfinder. Movements are
+  configured to never change the world: `canDig=false`, `allow1by1towers=false`, no scaffolding
+  blocks. Doors open only in survival (`canOpenDoors`, the court's hall has one; `Survival`
+  closes doors left open). Keep it that way unless the user asks.
+- Survival (the King's goal: Survival on Normal, one difficulty at a time; tested on the VM's
+  test server first): `bot/gathering.ts` fetches dirt, wood, sand or gravel by hand from
+  untouched land (16 blocks from every player; never a hole's floor, never a wall), to a royal
+  or into the storehouse. `household.ts`: the court's home (free courtiers gather there, inside
+  by night; Merlin portals the far ones, travel is free) and storehouse chest with its last seen
+  stock. `build/hall.ts` surveys the royals' hall from its walls (closed at three high);
+  `build/Handbuilder.ts` builds its roof, plank floor, door and torches like a survival player
+  (storehouse first, planks from logs, wood chopped when short, crafting table put down and
+  taken back, towers on dirt and takes the scaffolding away, leftovers back in the chest).
+  `bot/survival.ts`: eating when hungry (food from the storehouse), guards fighting monsters near
+  royals (not creepers or endermen), doors closed behind; dying is said lightly and the bot comes
+  home. In survival the mason (creative) is never used and builds by blueprint are declined.
 - The brain returns `BrainReply { say, action? }` from `onChat`; actions are follow/come/stop,
   only for royals, and only toward a player the bot can see (a known distance in the context).
 - `bot/packets.ts`: the packet field shapes we rely on plus `buildTextPacket`,
