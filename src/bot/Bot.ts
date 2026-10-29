@@ -401,6 +401,51 @@ export class Bot extends EventEmitter {
     }
   }
 
+  /**
+   * Tap a bed near home so this courtier respawns there instead of at the world spawn (in
+   * Bedrock a bed sets the respawn point by day too). Returns the bed when the server says so.
+   */
+  async setSpawnAtBed(): Promise<{ x: number; y: number; z: number } | undefined> {
+    const body = this.body
+    const home = this.household?.home
+    if (!body || !home || !byHand(this.gameMode()) || !this.isFree()) return undefined
+    const bed = body
+      .findBlocks({
+        matching: (b: { name: string }) => /bed$/.test(b.name),
+        point: new WorldVec(home.x, home.y, home.z),
+        maxDistance: 16,
+        count: 1,
+      })
+      .map((p) => body.blockAt(p))[0]
+    if (!bed) return undefined
+    const walker = body as unknown as { pathfinder: Pathfinder }
+    const set = new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        this.off('chat', listen)
+        resolve(false)
+      }, 4_000)
+      const listen = (e: ChatEvent) => {
+        if (e.notice?.key !== 'tile.bed.respawnSet') return
+        clearTimeout(timer)
+        this.off('chat', listen)
+        resolve(true)
+      }
+      this.on('chat', listen)
+    })
+    try {
+      const p = bed.position
+      await withTimeout(walker.pathfinder.goto(new goals.GoalNear(p.x, p.y, p.z, 2)), 30_000)
+      await body.activateBlock(bed)
+    } catch (err) {
+      walker.pathfinder.setGoal(null)
+      this.log.info(`could not get to a bed to set my spawn: ${errMsg(err)}`)
+      return undefined
+    }
+    if (!(await set)) return void this.log.info('tapped a bed, but the spawn point was not set')
+    this.log.info(`respawn point set at the bed at ${bed.position}`)
+    return { x: bed.position.x, y: bed.position.y, z: bed.position.z }
+  }
+
   /** Where the royals in sight stand. */
   private royalPositions(): WorldVec[] {
     const body = this.body
@@ -776,6 +821,11 @@ export class Bot extends EventEmitter {
       royals: () => this.royalPositions(),
       fetchFood: () => this.fetchFood(),
       speak: (instruction, fallback) => this.speak(instruction, fallback),
+    })
+    // The bed it respawned at was gone: it woke at the world spawn, and must tap a bed again.
+    ;(body as unknown as NodeJS.EventEmitter).on('spawnReset', () => {
+      this.log.info('my bed was gone: respawned at the world spawn')
+      this.household?.setSpawn(this.cfg.name, undefined)
     })
     body.on('death', () => {
       this.log.info('died')

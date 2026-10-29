@@ -290,6 +290,17 @@ export class BotManager {
       freeHand: staff.find((b) => b.isFree() && !b.buildsByMagic())?.cfg.name,
       storehouse: Boolean(this.household.storehouse),
     }
+    // Beds in the hall: each courtier taps one, so it respawns at home (one a round).
+    if (beds > 0) {
+      const homeless = this.bots.find(
+        (b) => b.position() && b.isFree() && !this.household.spawnOf(b.cfg.name)
+      )
+      if (homeless) {
+        void homeless.setSpawnAtBed().then((bed) => {
+          if (bed) this.household.setSpawn(homeless.cfg.name, bed)
+        })
+      }
+    }
     const actions = plan(state)
     this.log.debug(`housekeeping: ${JSON.stringify(state)} -> ${JSON.stringify(actions)}`)
     for (const action of actions) await this.carryOutHousekeeping(castellan, merlin, action)

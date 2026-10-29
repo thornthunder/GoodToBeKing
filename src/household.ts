@@ -24,6 +24,8 @@ interface Saved {
   home?: Spot
   storehouse?: Spot
   hall?: SavedHall
+  /** Courtiers whose respawn point is a bed in the hall, and which bed. */
+  spawns?: Record<string, { x: number; y: number; z: number }>
   /** What was in the storehouse when a courtier last opened it: item name -> count. */
   stock?: Record<string, number>
   stockAt?: number
@@ -64,9 +66,22 @@ export class Household {
     this.save()
   }
 
+  /** Where this courtier respawns, if it set its spawn at a bed in the hall. */
+  spawnOf(name: string): { x: number; y: number; z: number } | undefined {
+    return this.data.spawns?.[name]
+  }
+
+  setSpawn(name: string, bed: { x: number; y: number; z: number } | undefined): void {
+    this.data.spawns ??= {}
+    if (bed) this.data.spawns[name] = { x: bed.x, y: bed.y, z: bed.z }
+    else delete this.data.spawns[name]
+    this.save()
+  }
+
   setHome(p: { x: number; y: number; z: number }, setBy: string, now = Date.now()): Spot {
-    // A new home: the old hall's shape says nothing about it.
+    // A new home: the old hall's shape and the beds in it say nothing about it.
     this.data.hall = undefined
+    this.data.spawns = undefined
     this.data.home = { x: Math.floor(p.x), y: Math.floor(p.y), z: Math.floor(p.z), setBy, at: now }
     this.save()
     return this.data.home
