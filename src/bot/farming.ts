@@ -60,8 +60,9 @@ export class Farmer {
             item.name === 'wheat'
           if (take) await withTimeout(chest.withdraw(item.type, item.metadata, item.count), 5_000)
         }
-        // A little wood for a hoe and a crafting table.
-        if (this.count(HOE) === 0 && this.count(/_planks$|_log$/) < 3) {
+        // A little wood for a hoe and a crafting table (bread needs the big grid too).
+        const baking = this.count('wheat') >= 3
+        if ((this.count(HOE) === 0 || baking) && this.count(/_planks$|_log$/) < 3) {
           const log = chest.containerItems().find((i) => /_log$/.test(i.name))
           if (log)
             await withTimeout(chest.withdraw(log.type, log.metadata, Math.min(3, log.count)), 5_000)
@@ -116,6 +117,7 @@ export class Farmer {
     }
     // Bread from the wheat, three to a loaf.
     const wheat = this.count('wheat')
+    if (wheat >= 3 && this.count(/_planks$/) < 4) await makePlanks(this.bot, this.log, 4)
     if (wheat >= 3 && (await craft(this.bot, this.log, 'bread', Math.floor(wheat / 3))))
       result.bread = Math.floor(wheat / 3)
     if (storehouse) await this.store(storehouse, farm.cells.length)

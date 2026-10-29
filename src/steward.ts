@@ -20,6 +20,10 @@ export interface CourtState {
   freeBuilder?: string
   /** Every free builder: each takes the next hall job down the list in the same round. */
   freeBuilders?: string[]
+  /** Every free member of the staff (builders and guards too): the pool the round's work comes from. */
+  freeHands?: string[]
+  /** The guards (they hunt first, and do not farm). */
+  guards?: string[]
   builderWithBeds?: string
   builderWithCoal?: string
   /** The storehouse chest was there once and is gone (blown up): a new one is wanted. */
@@ -57,14 +61,14 @@ export interface CourtState {
 }
 
 export type StewardAction =
-  /** Work on the hall by a builder (`by`: this one). */
+  /** Work on the hall by a builder (`by`: this one; planned work always names one). */
   | { kind: 'hallwork'; work: HallWork; by?: string }
   /** Merlin conjures `count` of `item` for `to`; then `to` does `then` with it. */
   | { kind: 'magic'; item: string; count: number; to: string; then?: HallWork; why: string }
   /** Ask the royal family for Merlin's help instead (they are near). */
   | { kind: 'ask'; what: string }
   /** A free hand fetches this for the storehouse. */
-  | { kind: 'errand'; material: Material; count: number }
+  | { kind: 'errand'; material: Material; count: number; by?: string }
   /** Hunt this many animals for meat (by the King's rule), into the storehouse. */
   | { kind: 'hunt'; animals: number; by: string }
   /** Cook the storehouse's raw meat in the hall's furnace. */
@@ -93,86 +97,100 @@ export const STONE_RESERVE = 32
  */
 export function plan(s: CourtState): StewardAction[] {
   const out: StewardAction[] = []
-  // The hall first, most urgent first; each free builder takes the next job down the list.
-  const jobs: Array<Extract<StewardAction, { kind: 'hallwork' }>> = []
-  // A hall with holes lets the monsters in: mend it before anything else.
-  if (s.hall.repair > 0) jobs.push({ kind: 'hallwork', work: 'repair' })
-  // Without a storehouse nothing else can be kept: mining, farming, cooking all wait for it.
-  if (s.storehouseLost) jobs.push({ kind: 'hallwork', work: 'chest' })
-  // A roof keeps arrows and rain out, a door keeps monsters out.
-  if (s.hall.roof > 0) jobs.push({ kind: 'hallwork', work: 'roof' })
-  if (s.hall.door > 0) jobs.push({ kind: 'hallwork', work: 'door' })
-  if (s.builderWithBeds && s.bedsInHall < s.courtiers)
-    jobs.push({ kind: 'hallwork', work: 'beds', by: s.builderWithBeds })
-  if (s.hall.light > 0 && (s.storeHasCoal || s.builderWithCoal))
-    jobs.push({ kind: 'hallwork', work: 'light', by: s.builderWithCoal })
-  if (s.builderWithFurnace && !s.furnace)
-    jobs.push({ kind: 'hallwork', work: 'furnace', by: s.builderWithFurnace })
-  // The court's own furnace: eight cobblestone.
-  else if (!s.furnace && s.cobblestone >= 8 && s.storehouse)
-    jobs.push({ kind: 'hallwork', work: 'furnace' })
+  // One pool of free courtiers: each job takes someone not yet given work this round.
   const builders = s.freeBuilders ?? (s.freeBuilder ? [s.freeBuilder] : [])
-  out.push(...jobs.slice(0, builders.length))
+  const free = new Set<string>([...(s.freeHands ?? (s.freeHand ? [s.freeHand] : [])), ...builders])
+  const take = (name?: string) => (name && free.delete(name) ? name : undefined)
+  const builder = () => take(builders.find((b) => free.has(b)))
+  /** Anyone free, these first (guards hunt, builders build). */
+  const anyone = (first: string[] = [], last: string[] = []) =>
+    take(first.find((n) => free.has(n))) ??
+    take([...free].find((n) => !last.includes(n))) ??
+    take([...free][0])
+
+  // The hall first, most urgent first: each job to a free builder (or the one carrying its stuff).
+  const jobs: Array<{ work: HallWork; by?: string }> = []
+  // A hall with holes lets the monsters in: mend it before anything else.
+  if (s.hall.repair > 0) jobs.push({ work: 'repair' })
+  // Without a storehouse nothing else can be kept: mining, farming, cooking all wait for it.
+  if (s.storehouseLost) jobs.push({ work: 'chest' })
+  // A roof keeps arrows and rain out, a door keeps monsters out.
+  if (s.hall.roof > 0) jobs.push({ work: 'roof' })
+  if (s.hall.door > 0) jobs.push({ work: 'door' })
+  if (s.builderWithBeds && s.bedsInHall < s.courtiers)
+    jobs.push({ work: 'beds', by: s.builderWithBeds })
+  if (s.hall.light > 0 && (s.storeHasCoal || s.builderWithCoal))
+    jobs.push({ work: 'light', by: s.builderWithCoal })
+  // The court's own furnace: eight cobblestone (or one Merlin conjured).
+  if (s.builderWithFurnace && !s.furnace) jobs.push({ work: 'furnace', by: s.builderWithFurnace })
+  else if (!s.furnace && s.cobblestone >= 8 && s.storehouse) jobs.push({ work: 'furnace' })
+  for (const job of jobs) {
+    const by = job.by ? take(job.by) : builder()
+    if (by) out.push({ kind: 'hallwork', work: job.work, by })
+  }
+
   // Light without coal: charcoal from the court's own logs, in the furnace (indoor work).
   const coal = s.storeHasCoal || Boolean(s.builderWithCoal)
-  if (s.hall.light > 0 && !coal && s.furnace && s.woodInStore >= 2 && s.freeHand && s.storehouse)
-    out.push({ kind: 'charcoal', by: s.freeHand })
-  // The field first: bread is the court's food for good (hunting thins the animals out).
-  const charcoaling = out.some((a) => a.kind === 'charcoal')
-  const farmer =
-    !charcoaling &&
-    !s.night &&
-    s.storehouse &&
-    s.freeHand &&
-    (s.farm.exists ? s.farm.work > 0 : s.seeds > 0)
-      ? s.freeHand
-      : undefined
-  if (farmer) out.push({ kind: 'farm', by: farmer })
-  // Food by hand: cook what was hunted, or hunt.
-  const hungry = s.foodInStore < FOOD_RESERVE
-  if (hungry && s.storehouse && s.freeHunter && s.freeHunter !== farmer) {
-    if (s.rawInStore > 0 && s.furnace) out.push({ kind: 'cook', by: s.freeHunter })
-    else if (s.rawInStore < FOOD_RESERVE && !s.night)
-      out.push({ kind: 'hunt', animals: 3, by: s.freeHunter })
+  if (s.hall.light > 0 && !coal && s.furnace && s.woodInStore >= 2 && s.storehouse) {
+    const by = anyone()
+    if (by) out.push({ kind: 'charcoal', by })
+  }
+  // The field: bread is the court's food for good (hunting thins the animals out).
+  if (!s.night && s.storehouse && (s.farm.exists ? s.farm.work > 0 : s.seeds > 0)) {
+    const by = anyone([], s.guards ?? [])
+    if (by) out.push({ kind: 'farm', by })
+  }
+  // Food by hand: cook what was hunted, or hunt (guards first: they carry swords).
+  if (s.foodInStore < FOOD_RESERVE && s.storehouse) {
+    if (s.rawInStore > 0 && s.furnace) {
+      const by = anyone(s.guards ?? (s.freeHunter ? [s.freeHunter] : []))
+      if (by) out.push({ kind: 'cook', by })
+    } else if (s.rawInStore < FOOD_RESERVE && !s.night) {
+      const by = anyone(s.guards ?? (s.freeHunter ? [s.freeHunter] : []))
+      if (by) out.push({ kind: 'hunt', animals: 3, by })
+    }
   }
   // Guards arm themselves: a stone sword (or a wooden one) from the storehouse's materials.
   const canArm = s.storehouse && (s.cobblestone >= 2 || s.woodInStore >= 1)
-  if (canArm && s.guardsUnarmed[0]) out.push({ kind: 'arm', by: s.guardsUnarmed[0] })
-  // Magic: swords, beds, coal, food; only for what the court cannot get by hand.
+  const armer = canArm
+    ? s.guardsUnarmed.find((g) => free.has(g) || !(s.freeHands ?? []).length)
+    : undefined
+  if (armer) {
+    take(armer)
+    out.push({ kind: 'arm', by: armer })
+  }
+
+  // Magic: swords, beds, seeds, a furnace, coal, food; only for what the court cannot get by hand.
+  const someBuilder = builders.find((b) => free.has(b)) ?? s.freeBuilder
+  const someone = [...free][0] ?? s.freeHand
   const wants: Array<Omit<Extract<StewardAction, { kind: 'magic' }>, 'kind'>> = []
   if (!canArm)
     for (const guard of s.guardsUnarmed)
       wants.push({ item: 'iron_sword', count: 1, to: guard, why: `a sword for ${guard}` })
   const bedsWanted = s.courtiers - s.bedsInHall
-  if (bedsWanted > 0 && !s.builderWithBeds && s.freeBuilder)
+  if (bedsWanted > 0 && !s.builderWithBeds && someBuilder)
     wants.push({
       item: 'bed',
       count: Math.min(6, bedsWanted),
-      to: s.freeBuilder,
+      to: someBuilder,
       then: 'beds',
       why: 'beds for the court',
     })
   // Seeds, once, to start the field (after that it gives its own).
-  if (!s.farm.exists && s.seeds === 0 && s.freeHand && s.storehouse)
-    wants.push({ item: 'wheat_seeds', count: 8, to: s.freeHand, why: 'seeds for a wheat field' })
+  if (!s.farm.exists && s.seeds === 0 && someone && s.storehouse)
+    wants.push({ item: 'wheat_seeds', count: 8, to: someone, why: 'seeds for a wheat field' })
   // A furnace by magic only when the court cannot mine the stone for one.
-  if (!s.furnace && !s.builderWithFurnace && s.freeBuilder && s.storehouse && s.mineEnded)
+  if (!s.furnace && !s.builderWithFurnace && someBuilder && s.storehouse && s.mineEnded)
     wants.push({
       item: 'furnace',
       count: 1,
-      to: s.freeBuilder,
+      to: someBuilder,
       then: 'furnace',
       why: 'a furnace for the hall',
     })
   // Coal by magic only when there is no furnace to make charcoal in.
-  if (s.hall.light > 0 && !coal && !s.furnace && s.freeBuilder)
-    wants.push({
-      item: 'coal',
-      count: 1,
-      to: s.freeBuilder,
-      then: 'light',
-      why: 'coal for torches',
-    })
+  if (s.hall.light > 0 && !coal && !s.furnace && someBuilder)
+    wants.push({ item: 'coal', count: 1, to: someBuilder, then: 'light', why: 'coal for torches' })
   // Bread by magic only when there is nothing in store, cooked or raw, to eat.
   if (s.foodInStore === 0 && s.rawInStore === 0)
     for (const hungry of s.withoutFood)
@@ -183,12 +201,16 @@ export function plan(s: CourtState): StewardAction[] {
     else if (s.merlinAwake && s.magicLeft - first.count >= MAGIC_RESERVE)
       out.push({ kind: 'magic', ...first })
   }
-  // Stone: the mine, by day (a free hand not farming).
-  const miner = s.freeHand !== farmer ? s.freeHand : undefined
-  if (s.storehouse && miner && !s.night && !s.mineEnded && s.cobblestone < STONE_RESERVE)
-    out.push({ kind: 'mine', by: miner, want: 24 })
+
+  // Stone: the mine, by day.
+  if (s.storehouse && !s.night && !s.mineEnded && s.cobblestone < STONE_RESERVE) {
+    const by = anyone()
+    if (by) out.push({ kind: 'mine', by, want: 24 })
+  }
   // Wood for the next repairs and planks.
-  if (s.storehouse && s.freeHand && s.woodInStore < WOOD_RESERVE && !s.night)
-    out.push({ kind: 'errand', material: 'wood', count: 16 })
+  if (s.storehouse && s.woodInStore < WOOD_RESERVE && !s.night) {
+    const by = anyone()
+    if (by) out.push({ kind: 'errand', material: 'wood', count: 16, by })
+  }
   return out
 }

@@ -265,6 +265,8 @@ export class BotManager {
       Object.entries(stock)
         .filter(([n]) => re.test(n))
         .reduce((total, [, n]) => total + n, 0)
+    const seedsHad =
+      sum(/^wheat_seeds$/) + this.bots.reduce((n, b) => n + b.carries(/^wheat_seeds$/), 0)
     const royals = this.bots
       .flatMap((b) => this.court.members.map((m) => b.playerPosition(m.player)))
       .filter((p): p is Point => p !== undefined)
@@ -286,6 +288,8 @@ export class BotManager {
       freeBuilders: staff
         .filter((b) => b.cfg.canBuild && b.isFree() && !b.buildsByMagic())
         .map((b) => b.cfg.name),
+      freeHands: staff.filter((b) => b.isFree() && !b.buildsByMagic()).map((b) => b.cfg.name),
+      guards: staff.filter((b) => b.isGuard()).map((b) => b.cfg.name),
       builderWithBeds: carrying(/^bed$/),
       builderWithCoal: carrying(/^(coal|charcoal)$/),
       hall: {
@@ -302,10 +306,13 @@ export class BotManager {
       rawInStore: sum(RAW),
       furnace: hall.inside.some(([x, z]) => /furnace$/.test(names(x, hall.floorY, z) ?? '')),
       builderWithFurnace: carrying(/^furnace$/),
-      farm: { exists: Boolean(this.household.farm), work: this.farmWork(names) },
+      farm: {
+        exists: Boolean(this.household.farm),
+        work: this.farmWork(names, seedsHad, sum(/^wheat$/)),
+      },
       cobblestone: sum(/^(cobblestone|cobbled_deepslate)$/),
       mineEnded: Boolean(this.household.mine?.ended),
-      seeds: sum(/^wheat_seeds$/) + this.bots.reduce((n, b) => n + b.carries(/^wheat_seeds$/), 0),
+      seeds: seedsHad,
       // Guards first: they carry swords. Then anyone of the staff.
       freeHunter: (
         staff.find((b) => b.isGuard() && b.isFree() && !b.buildsByMagic()) ??
@@ -337,8 +344,15 @@ export class BotManager {
     }
   }
 
-  /** Squares of the field that want tilling, planting or harvesting now. */
-  private farmWork(names: (x: number, y: number, z: number) => string | undefined): number {
+  /**
+   * What the field wants now: squares to harvest or till, to plant (only with seeds to plant),
+   * and wheat in the storehouse to bake.
+   */
+  private farmWork(
+    names: (x: number, y: number, z: number) => string | undefined,
+    seeds: number,
+    wheat: number
+  ): number {
     const farm = this.household.farm
     if (!farm) return 0
     const eyes = this.bots.find((b) => {
@@ -348,9 +362,10 @@ export class BotManager {
     let work = 0
     for (const [x, z] of farm.cells) {
       const growth = eyes?.blockProperty(x, farm.y + 1, z, 'growth')
-      if (farmNeed(names(x, farm.y, z), names(x, farm.y + 1, z), Number(growth ?? 0))) work++
+      const need = farmNeed(names(x, farm.y, z), names(x, farm.y + 1, z), Number(growth ?? 0))
+      if (need === 'harvest' || need === 'till' || (need === 'plant' && seeds > 0)) work++
     }
-    return work
+    return work + (wheat >= 3 ? 1 : 0)
   }
 
   private async carryOutHousekeeping(
@@ -416,8 +431,15 @@ export class BotManager {
         void cook.startCooking()
         return
       }
-      case 'errand':
-        this.log.info(`housekeeping: ${action.count} ${action.material} for the storehouse`)
+      case 'errand': {
+        const hand = by(action.by)
+        this.log.info(
+          `housekeeping: ${hand ? `${hand.cfg.name} fetches ` : ''}${action.count} ${action.material} for the storehouse`
+        )
+        if (hand) {
+          void hand.startGather(action.material, action.count, castellan.cfg.name, true)
+          return
+        }
         void this.sendOnErrand(castellan, {
           material: action.material,
           count: action.count,
@@ -426,6 +448,7 @@ export class BotManager {
           toStore: true,
         })
         return
+      }
       case 'ask': {
         if (Date.now() - (this.asked.get(action.what) ?? 0) < 15 * 60_000) return
         this.asked.set(action.what, Date.now())
