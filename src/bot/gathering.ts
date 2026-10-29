@@ -1,5 +1,5 @@
 import type { Chest, Bot as MineflayerBot } from 'mineflayer-bedrock'
-import { goals, type Pathfinder } from 'mineflayer-pathfinder'
+import { Movements, goals, type Pathfinder } from 'mineflayer-pathfinder'
 import { Vec3 } from 'vec3'
 import type { Logger } from '../logger'
 import { errMsg, sleep, withTimeout } from '../util'
@@ -161,6 +161,8 @@ export class Gatherer {
     want: number
   ): Promise<{ gathered: number; reason?: GatherResult['reason'] }> {
     this.cancelled = false
+    // Logs high up need a pillar to climb: some dirt first.
+    if (material === 'wood' && this.carried('dirt') < 6) await this.collect('dirt', 8)
     const start = Date.now()
     const before = this.carried(material)
     const tried = new Set<string>()
@@ -252,7 +254,12 @@ export class Gatherer {
       return
     }
     const eyes = this.bot.entity.position.offset(0, 1.62, 0)
-    if (eyes.distanceTo(target.offset(0.5, 0.5, 0.5)) > REACH) return
+    if (eyes.distanceTo(target.offset(0.5, 0.5, 0.5)) > REACH) {
+      // A log high up (the trunk below already chopped): climb a pillar of dirt to it.
+      if (MATERIAL_INFO[material].tree && (await this.climbAndDig(material, target)))
+        await this.pickUp(target)
+      return
+    }
     const block = this.bot.blockAt(target)
     if (!block || !MATERIAL_INFO[material].blocks.test(block.name)) return
     await this.equipTool(material)
@@ -263,6 +270,62 @@ export class Gatherer {
       return
     }
     await this.pickUp(target)
+  }
+
+  /**
+   * Tower up on dirt to a block out of reach, dig it, and come back down taking the pillar
+   * away (standing on it, the block underfoot first), as a player would.
+   */
+  private async climbAndDig(material: Material, target: Vec3): Promise<boolean> {
+    const dirtId = this.bot.registry.itemsByName.dirt?.id
+    const dirt = this.bot.inventory.items().find((i) => i.name === 'dirt')
+    const rise = target.y - Math.floor(this.bot.entity.position.y) - 2
+    if (!dirtId || !dirt || dirt.count < Math.max(1, rise)) {
+      this.log.info(`no dirt to climb to the log at ${target}`)
+      return false
+    }
+    const pillar: Vec3[] = []
+    const onPlaced = (_old: unknown, block: { name?: string; position?: Vec3 } | null) => {
+      if (block?.position && block.name === 'dirt') pillar.push(block.position.clone())
+    }
+    const events = this.bot as unknown as NodeJS.EventEmitter
+    events.on('blockPlaced', onPlaced)
+    const everyday = this.bot.pathfinder.movements
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const climbing = new Movements(this.bot as any)
+    climbing.canDig = false
+    climbing.allowParkour = false
+    climbing.allow1by1towers = true
+    climbing.scafoldingBlocks = [dirtId]
+    climbing.maxDropDown = 3
+    climbing.canOpenDoors = everyday.canOpenDoors
+    this.bot.pathfinder.setMovements(climbing)
+    try {
+      await withTimeout(
+        this.bot.pathfinder.goto(new goals.GoalNear(target.x, target.y, target.z, 3)),
+        30_000
+      )
+      const eyes = this.bot.entity.position.offset(0, 1.62, 0)
+      const block = this.bot.blockAt(target)
+      if (eyes.distanceTo(target.offset(0.5, 0.5, 0.5)) > REACH || !block) return false
+      if (!MATERIAL_INFO[material].blocks.test(block.name)) return false
+      await this.equipTool(material)
+      await withTimeout(this.bot.dig(block, true), 15_000)
+      this.log.info(`climbed ${pillar.length} blocks to the log at ${target}`)
+      return true
+    } catch (err) {
+      this.log.info(`could not climb to ${target}: ${errMsg(err)}`)
+      this.bot.pathfinder.setGoal(null)
+      return false
+    } finally {
+      events.removeListener('blockPlaced', onPlaced)
+      this.bot.pathfinder.setMovements(everyday)
+      for (const p of pillar.sort((a, b) => b.y - a.y)) {
+        const block = this.bot.blockAt(p)
+        if (block?.name === 'dirt')
+          await withTimeout(this.bot.dig(block, true), 8_000).catch(() => {})
+      }
+    }
   }
 
   private async equipTool(material: Material): Promise<void> {
