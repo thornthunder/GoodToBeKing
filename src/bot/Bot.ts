@@ -20,7 +20,7 @@ import { mentionsName, splitChatMessage } from '../ai/text'
 import type { BotConfig, ServerConfig } from '../config'
 import type { CourtRoster } from '../court'
 import type { Logger } from '../logger'
-import { errMsg, sleep } from '../util'
+import { errMsg, sleep, withTimeout } from '../util'
 import { useLanguage } from './language'
 import { BuildLog, type BuildRecord } from '../build/BuildLog'
 import {
@@ -36,8 +36,10 @@ import { findSite, type Point, type Site } from '../build/site'
 import { SEE_THROUGH } from '../build/sites'
 import { Vec3 as WorldVec } from 'vec3'
 import type { ChatFloor } from './ChatFloor'
+import { goals, type Pathfinder } from 'mineflayer-pathfinder'
 import { Handbuilder } from '../build/Handbuilder'
 import {
+  bedCells,
   doorCells,
   floorCells,
   lightCells,
@@ -113,6 +115,7 @@ const HALL_WORK_TITLES: Record<HallWork, string> = {
   floor: 'a plank floor',
   light: 'torches',
   door: 'a door',
+  beds: 'beds',
 }
 const HALL_WORK_CELLS: Record<
   HallWork,
@@ -122,7 +125,17 @@ const HALL_WORK_CELLS: Record<
   floor: floorCells,
   light: lightCells,
   door: doorCells,
+  // As many beds as the builder carries or the storehouse holds (one for each courtier, at most).
+  beds: (hall, names) => bedCells(hall, names, 8),
 }
+
+/** bedboo reads a bed's state from its block (not in mineflayer-bedrock's types). */
+interface BedReader {
+  parseBedMetadata(bed: unknown): { occupied?: boolean; part?: boolean }
+}
+
+/** Beds a bot is on its way to, so two bots never make for the same one. */
+const claimedBeds = new Map<string, string>()
 
 export interface BotOptions {
   /** Names of all bots run by this app: they never greet or answer each other. */
@@ -298,7 +311,10 @@ export class Bot extends EventEmitter {
   /** Every few seconds: the escort duty, standing orders, and reports owed to the superior. */
   private tick(): void {
     if (this.state.status !== 'spawned') return
+    // Asleep: nothing to do till morning (or till a royal speaks to it).
+    if (this.body?.isSleeping) return
     this.lookAfterSelf()
+    this.askForSword()
     this.performDuty()
     this.keepPost()
     this.deliverReports()
@@ -316,6 +332,70 @@ export class Bot extends EventEmitter {
       .then(() => (this.isFree() ? survival.closeDoors() : undefined))
       .catch((err) => this.log.warn(`looking after itself failed: ${errMsg(err)}`))
       .finally(() => (this.surviving = false))
+  }
+
+  private lastSwordAsk = 0
+
+  /** A guard without a weapon asks the King for a sword by Merlin's magic (survival). */
+  private askForSword(): void {
+    const body = this.body
+    if (!body || this.cfg.duty?.kind !== 'escort' || !byHand(this.gameMode())) return
+    if (Date.now() - this.lastSwordAsk < 30 * 60_000) return
+    if (body.inventory.items().some((i) => /_(sword|axe)$/.test(i.name))) return
+    const king = this.court?.members.find((m) => m.role === 'king')
+    const pos = king && body.players[king.player]?.entity?.position
+    const me = body.entity?.position
+    if (!king || !pos || !me || pos.distanceTo(me) > 24) return
+    this.lastSwordAsk = Date.now()
+    this.log.info('asking the King for a sword')
+    void this.speak(
+      `You are a guard of the royal family with no sword to protect them. Ask the King politely, ` +
+        'in one short sentence and in character, whether he would have Merlin conjure you one.',
+      'Your Majesty, might Merlin conjure me a sword, so I can guard the court?'
+    )
+  }
+
+  /**
+   * A royal went to bed at night: go to a free bed near home and sleep too, so the night can
+   * pass (survival). Two bots never make for the same bed.
+   */
+  async goToBed(): Promise<void> {
+    const body = this.body
+    if (!body || body.isSleeping || !byHand(this.gameMode()) || !this.isNight()) return
+    if (this.gathering || this.handbuilder?.busy || this.survival?.busy) return
+    const near = this.household?.home ?? this.position()
+    if (!near) return
+    const beds = body
+      .findBlocks({
+        matching: (b: { name: string }) => /bed$/.test(b.name),
+        point: new WorldVec(near.x, near.y, near.z),
+        maxDistance: 32,
+        count: 40,
+      })
+      .map((p) => body.blockAt(p))
+      .filter((b): b is NonNullable<typeof b> => !!b && body.isABed(b))
+      .filter((b) => {
+        const meta = (body as unknown as BedReader).parseBedMetadata(b)
+        const claim = claimedBeds.get(`${b.position}`)
+        return !meta.occupied && !meta.part && (!claim || claim === this.cfg.name)
+      })
+    const me = body.entity.position
+    const bed = beds.sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me))[0]
+    if (!bed) return void this.log.info('wants to sleep, but there is no free bed')
+    claimedBeds.set(`${bed.position}`, this.cfg.name)
+    this.movement?.stop()
+    this.dutyFollowing = false
+    const walker = body as unknown as { pathfinder: Pathfinder }
+    try {
+      const p = bed.position
+      await withTimeout(walker.pathfinder.goto(new goals.GoalNear(p.x, p.y, p.z, 2)), 30_000)
+      await withTimeout(body.sleep(bed), 10_000)
+      this.log.info(`sleeping in the bed at ${p}`)
+    } catch (err) {
+      this.log.info(`could not sleep: ${errMsg(err)}`)
+      walker.pathfinder.setGoal(null)
+      claimedBeds.delete(`${bed.position}`)
+    }
   }
 
   /** Where the royals in sight stand. */
@@ -1541,6 +1621,12 @@ export class Bot extends EventEmitter {
     if (event.kind === 'system') {
       this.log.info(`[server] ${event.message}`)
       this.emit('chat', event)
+      // A royal lies down at night: the whole court goes to bed too, or the night cannot pass.
+      if (
+        event.notice?.key === 'chat.type.sleeping' &&
+        this.court?.find(event.notice.params[0] ?? '')
+      )
+        void this.goToBed()
       if (event.notice && this.state.status === 'spawned' && this.isHerald()) {
         this.brain
           .onNotice(event, this.context())
@@ -1554,6 +1640,8 @@ export class Bot extends EventEmitter {
     this.log.info(`<${event.from}> ${event.message}`)
     this.emit('chat', event)
     if (event.from === this.username) return
+    // A royal speaking wakes the court up.
+    if (this.body?.isSleeping && this.court?.find(event.from)) void this.body.wake().catch(() => {})
     // Never talk to the rest of the court: bots answering bots would never stop. But listen:
     // what a bot hears the others tell the royals, it remembers.
     if (this.isBot(event.from)) {

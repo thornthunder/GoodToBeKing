@@ -155,6 +155,7 @@ export class Handbuilder {
     if (!name) return false
     // A door's item and block are named alike (wooden_door); a torch on a wall is a wall torch.
     if (c.block === 'torch') return /torch$/.test(name)
+    if (c.block === 'bed') return /bed$/.test(name)
     return itemsFor(c.block).test(name)
   }
 
@@ -362,6 +363,7 @@ export class Handbuilder {
 
   private async placeOne(c: HandCell): Promise<boolean> {
     if (this.carried(c.block) === 0) return false
+    if (c.head) return this.placeBed(c)
     for (let attempt = 0; attempt < 3 && !this.cancelled; attempt++) {
       if (!(await this.reach(c, attempt))) continue
       if (c.replace) {
@@ -391,6 +393,39 @@ export class Handbuilder {
       }
     }
     return false
+  }
+
+  /**
+   * A bed lies the way its placer looks: stand behind the foot, look towards the head, and put
+   * it on the floor.
+   */
+  private async placeBed(c: HandCell): Promise<boolean> {
+    const [dx, dz] = c.head!
+    const stand = new Vec3(c.x - dx, c.y, c.z - dz)
+    try {
+      await withTimeout(
+        this.bot.pathfinder.goto(new goals.GoalBlock(stand.x, stand.y, stand.z)),
+        20_000
+      )
+    } catch (err) {
+      this.log.info(`could not stand behind the bed at ${key(c)}: ${errMsg(err)}`)
+      this.bot.pathfinder.setGoal(null)
+      return false
+    }
+    const floor = this.bot.blockAt(new Vec3(c.x, c.y - 1, c.z))
+    const bed = this.bot.inventory.items().find((i) => i.name === 'bed')
+    if (!floor || !bed) return false
+    try {
+      // Yaw: 0 looks south (+z), pi/2 west (-x), pi north (-z), -pi/2 east (+x).
+      await this.bot.look(Math.atan2(-dx, dz), 0.6, true)
+      await this.bot.equip(bed, 'hand')
+      await withTimeout(this.bot.placeBlock(floor, new Vec3(0, 1, 0)), 5_000)
+    } catch (err) {
+      this.log.debug(`place bed at ${key(c)}: ${errMsg(err)}`)
+    }
+    await sleep(300)
+    const head = this.names(c.x + dx, c.y, c.z + dz)
+    return this.inPlace(c) && /bed$/.test(head ?? '')
   }
 
   /** Get within reach of a cell: walk to a spot to stand on, or failing that tower up near it. */

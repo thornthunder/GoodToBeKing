@@ -17,6 +17,8 @@ export interface HandCell {
   replace?: boolean
   /** Place against this neighbour (a torch on a wall). */
   against?: [number, number, number]
+  /** A bed: the foot is this cell, the head lies this way (x, z), against the wall. */
+  head?: [number, number]
 }
 
 export interface Hall {
@@ -144,6 +146,49 @@ export function lightCells(hall: Hall, names: BlockNames): HandCell[] {
     if (!wall) continue
     if (cells.some((c) => Math.abs(c.x - x) + Math.abs(c.z - z) < 5)) continue
     cells.push({ x, y, z, block: 'torch', against: [wall[0], 0, wall[1]] })
+  }
+  return cells
+}
+
+/**
+ * Up to `count` beds along the inside of the walls, head against the wall, a gap between them,
+ * none in front of a doorway: the foot one block in, the head next to the wall.
+ */
+export function bedCells(hall: Hall, names: BlockNames, count: number): HandCell[] {
+  const y = hall.floorY
+  const isInside = new Set(hall.inside.map(([x, z]) => `${x},${z}`))
+  const isRing = new Set(hall.ring.map(([x, z]) => `${x},${z}`))
+  const nearDoor = (x: number, z: number) =>
+    hall.openings.some(([ox, oz]) => Math.abs(ox - x) + Math.abs(oz - z) <= 2)
+  const free = (x: number, z: number) =>
+    isInside.has(`${x},${z}`) && open(names(x, y, z)) && open(names(x, y + 1, z))
+  const used = new Set<string>()
+  const cells: HandCell[] = []
+  const sides = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ] as const
+  for (const [hx, hz] of [...hall.inside].sort((a, b) => a[0] - b[0] || a[1] - b[1])) {
+    if (cells.length >= count) break
+    for (const [dx, dz] of sides) {
+      // The head next to a solid wall; the foot one block further in; room to stand behind it.
+      const wall = names(hx + dx, y, hz + dz)
+      if (!isRing.has(`${hx + dx},${hz + dz}`) || !wall || open(wall) || DOOR.test(wall)) continue
+      const [fx, fz] = [hx - dx, hz - dz]
+      const [sx, sz] = [fx - dx, fz - dz]
+      if (!free(hx, hz) || !free(fx, fz) || !free(sx, sz) || nearDoor(hx, hz)) continue
+      const around = [
+        [hx, hz],
+        [fx, fz],
+      ].flatMap(([x, z]) => [`${x},${z}`, `${x + dz},${z + dx}`, `${x - dz},${z - dx}`])
+      if (around.some((k) => used.has(k))) continue
+      used.add(`${hx},${hz}`)
+      used.add(`${fx},${fz}`)
+      cells.push({ x: fx, y, z: fz, block: 'bed', head: [dx, dz] })
+      break
+    }
   }
   return cells
 }

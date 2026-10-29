@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { detectHallWork } from '../ai/abilities'
-import { doorCells, floorCells, lightCells, roofCells, surveyHall, type BlockNames } from './hall'
+import {
+  bedCells,
+  doorCells,
+  floorCells,
+  lightCells,
+  roofCells,
+  surveyHall,
+  type BlockNames,
+} from './hall'
 
 /**
  * A dirt hall like the King's: 5 by 5 inside (x and z 0 to 4), feet at y 64, walls three high
@@ -84,7 +92,25 @@ describe('detectHallWork', () => {
     expect(detectHallWork('lay a floor in our home')).toBe('floor')
     expect(detectHallWork('Festaris, light the hall')).toBe('light')
     expect(detectHallWork('can you make us a door')).toBe('door')
+    expect(detectHallWork('Festaris, put beds in the hall')).toBe('beds')
     expect(detectHallWork('where is the door?')).toBeNull()
     expect(detectHallWork('what a nice roof')).toBeNull()
+  })
+})
+
+describe('beds', () => {
+  it('puts beds along the walls, head to the wall, none before the door', () => {
+    const names = hall()
+    const h = surveyHall(names, { x: 2, y: 64, z: 2 })
+    if (typeof h === 'string') throw new Error(h)
+    const beds = bedCells(h, names, 8)
+    expect(beds.length).toBeGreaterThanOrEqual(2)
+    for (const b of beds) {
+      const [dx, dz] = b.head!
+      // The head next to the wall ring, the foot inside, nowhere near the doorway at 2,-1.
+      expect(names(b.x + 2 * dx, 64, b.z + 2 * dz)).toBe('dirt')
+      expect(Math.abs(b.x + dx - 2) + Math.abs(b.z + dz + 1)).toBeGreaterThan(2)
+    }
+    expect(bedCells(h, names, 1)).toHaveLength(1)
   })
 })

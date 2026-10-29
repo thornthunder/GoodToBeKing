@@ -4,7 +4,7 @@ import type { BlueprintId, Palette } from '../build/blueprints'
 import type { Material } from '../bot/gathering'
 
 /** What the builders can do for the hall by hand. */
-export type HallWork = 'roof' | 'floor' | 'light' | 'door'
+export type HallWork = 'roof' | 'floor' | 'light' | 'door' | 'beds'
 export type ChatKind = 'chat' | 'whisper' | 'announcement' | 'system'
 
 /** One line of in-game chat, already normalised from the wire format. */

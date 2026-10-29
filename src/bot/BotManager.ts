@@ -888,6 +888,9 @@ export class BotManager {
       if (!['roof', 'floor', 'light', 'door'].includes(work))
         return this.log.warn('usage: <bot> hall <roof|floor|light|door> [for <player>]')
       void bot.startHallWork(work, requestedBy)
+    } else if (verb === 'bed') {
+      // <bot> bed: go to bed now, as when a royal lies down at night (survival)
+      void bot.goToBed()
     } else if (verb === 'undo') {
       this.log.info(`command: ${bot.cfg.name} takes down its last build`)
       void bot.undoLastBuild(requestedBy)

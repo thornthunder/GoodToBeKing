@@ -82,6 +82,8 @@ export const GIFTS: Record<string, number> = {
   crafting_table: 1,
   furnace: 1,
   chest: 1,
+  bed: 6,
+  iron_sword: 1,
 }
 
 /**

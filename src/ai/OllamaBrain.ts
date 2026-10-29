@@ -75,6 +75,7 @@ const HALL_WORK_WORDS: Record<HallWork, string> = {
   floor: 'a plank floor',
   light: 'torches on the walls',
   door: 'a door',
+  beds: 'beds along the walls',
 }
 
 /** How a fetched material is named in speech: "16 dirt", "16 logs". */
@@ -1035,7 +1036,7 @@ export class OllamaBrain implements Brain {
             '(In this world every block must be gathered and laid by hand. The court only knows ' +
             'building by creative magic so far, so nobody can build, take down or start great ' +
             'works here yet. Say so kindly and honestly; do not promise it. The court can fetch ' +
-            "dirt, wood, sand or gravel instead, or put a roof, a floor, a door or torches on the court's home hall.)",
+            "dirt, wood, sand or gravel instead, or put a roof, a floor, a door, torches or beds in the court's home hall.)",
           ability: 'handbuild',
         }
       : undefined
