@@ -105,6 +105,15 @@ Windows, killing a background `npx` shell does not kill its node children at all
   `bot/survival.ts`: eating when hungry (food from the storehouse), guards fighting monsters near
   royals (not creepers or endermen), doors closed behind; dying is said lightly and the bot comes
   home. In survival the mason (creative) is never used and builds by blueprint are declined.
+  Beds: when a royal lies down at night every courtier sleeps in a free bed near home; each taps
+  a bed once so it respawns there (the "Respawn point set" pop-up is not read: a tap that went
+  through counts). `steward.ts` + `BotManager.keepHouse`: every minute the Castellan takes stock
+  (roof, door, beds, torches, a sword per guard, food per courtier, wood in the storehouse) and
+  sees to it: builders and errands by hand, and with no royal near, Merlin's magic (within his
+  ten an hour, two kept for the royals); with a royal near he asks them instead. His rounds
+  (`inspectHall`) repair holes against the hall's shape as last seen whole (planks).
+- Bedrock 1.26.60 renumbered item stack actions (`craft_reserved`): bedboo's legacy bytes are
+  corrected on the way out (`packets.ts fixOutgoing`), or every craft disconnects the bot.
 - The brain returns `BrainReply { say, action? }` from `onChat`; actions are follow/come/stop,
   only for royals, and only toward a player the bot can see (a known distance in the context).
 - `bot/packets.ts`: the packet field shapes we rely on plus `buildTextPacket`,
