@@ -1,4 +1,6 @@
 import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { CastleDesign } from '../build/design'
 import { Magic, type CommandResult } from './Magic'
@@ -62,6 +64,7 @@ describe('spells', () => {
     expect(give).toEqual({
       command: 'give "LittleOne42" cake 1',
       undo: ['clear "LittleOne42" cake -1 1'],
+      items: 1,
     })
     const [find, saddle] = commandsFor(spell('saddle'), ctx)
     expect(find.command).toContain('hasitem={item=saddle,quantity=0}] add merlin_gift_7')
@@ -138,6 +141,35 @@ describe('the magic keeper', () => {
     expect(await magic.takeBack(gift, ok, t0 + 24 * 3_600_000)).toBe(true)
     expect(ran.at(-1)).toBe('clear "LittleOne42" cake -1 1')
     expect(magic.pendingGifts).toHaveLength(0)
+  })
+
+  it('gives at most ten things an hour, all gifts together, even after a restart', async () => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'magic-')), 'magic.json')
+    const magic = new Magic({ file })
+    const who = { requester: 'LittleOne42', target: 'Henry', merlin: 'Merlin' }
+    const t0 = 5_000_000
+    // Twelve cookies asked for: no more than eight at once.
+    expect(await magic.cast(spell('gift'), { item: 'cookie', count: 12 }, who, ok, t0)).toEqual({
+      ok: true,
+    })
+    expect(ran.filter((c) => c.startsWith('give')).at(-1)).toBe('give "Henry" cookie 8')
+    expect(magic.itemsLeft(t0)).toBe(2)
+    // Only two of the four loaves are left to give this hour.
+    const bread = { item: 'bread', count: 4 }
+    expect(await magic.cast(spell('gift'), bread, who, ok, t0 + 600_000)).toEqual({ ok: true })
+    expect(ran.filter((c) => c.startsWith('give')).at(-1)).toBe('give "Henry" bread 2')
+    expect(magic.check(spell('gift'), { item: 'oak_log' }, t0 + 1_800_000)).toBe(
+      'the gift magic is spent (at most 10 things an hour); it gathers again in 30 minutes'
+    )
+    const spent = await magic.cast(spell('gift'), { item: 'oak_log' }, who, ok, t0 + 1_800_000)
+    expect(spent.reason).toContain('the gift magic is spent')
+    // Spells that give nothing are not held back.
+    expect(magic.check(spell('fair_weather'), {}, t0 + 1_800_000)).toBeUndefined()
+
+    const restarted = new Magic({ file })
+    expect(restarted.itemsLeft(t0 + 1_800_000)).toBe(0)
+    expect(restarted.itemsLeft(t0 + 3_600_000)).toBe(8)
+    expect(restarted.itemsLeft(t0 + 4_200_000)).toBe(10)
   })
 
   it('says why a spell failed', async () => {

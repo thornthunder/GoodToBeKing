@@ -222,6 +222,8 @@ export interface SpellRequest {
   target?: string
   place?: string
   item?: string
+  /** How many of the item were asked for. */
+  count?: number
   creature?: string
   effect?: string
 }
@@ -264,6 +266,7 @@ export function readingSchema(magic?: MagicInfo): object {
             target: text,
             place: text,
             item: text,
+            count: { type: 'integer', minimum: 1, maximum: 64 },
             creature: text,
             effect: text,
           },
@@ -367,6 +370,7 @@ export function readingPrompt(bot: string, role: string, magic?: MagicInfo): str
       '  "the King" or "Bruce".',
       `place, for a spell that needs one, exactly as written here: ${magic.places.join('; ')}.`,
       'item, creature, effect: for a spell that needs them, as its line lists.',
+      'count: for a gift, how many were asked for; leave it out when no number was said.',
       'A request for magic that none of these spells can do is an "order" with one spell of id',
       '"unknown".',
       `The King may teach ${bot} a new spell by describing it. Then the type is "teach", and`,

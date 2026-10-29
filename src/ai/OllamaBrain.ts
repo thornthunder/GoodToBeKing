@@ -14,6 +14,7 @@ import type {
   ChatEvent,
   SeenPlayer,
 } from './Brain'
+import { byHand } from './Brain'
 import {
   abilityNote,
   declineLine,
@@ -44,7 +45,14 @@ import {
   type Reading,
 } from './orders'
 import type { Magic } from '../magic/Magic'
-import { needs, stepGuide, tidySteps, type SpellArgs, type Step } from '../magic/spells'
+import {
+  ITEMS_PER_HOUR,
+  needs,
+  stepGuide,
+  tidySteps,
+  type SpellArgs,
+  type Step,
+} from '../magic/spells'
 import { guessedRiddle, pickRiddle, wantsRiddle, type Riddle } from './riddles'
 import { HailLog } from './HailLog'
 import type { ChatMessage, ChatModel } from './OllamaClient'
@@ -393,7 +401,7 @@ export class OllamaBrain implements Brain {
 
   /** What the line asks of the body. Building takes precedence over walking ("come and build"). */
   private actionTurn(event: ChatEvent, member: CourtMember | undefined, ctx: BrainContext): Turn {
-    return this.buildTurn(event, member) ?? this.moveTurn(event, member, ctx)
+    return this.buildTurn(event, member, ctx) ?? this.moveTurn(event, member, ctx)
   }
 
   /**
@@ -580,6 +588,7 @@ export class OllamaBrain implements Brain {
       const args: SpellArgs = {
         place: request.place,
         item: request.item,
+        count: request.count,
         creature: request.creature,
         effect: request.effect,
       }
@@ -822,20 +831,35 @@ export class OllamaBrain implements Brain {
    * Build and undo requests (royals only). Null when the line is neither, so movement can have a
    * go. A request for something not in the spellbook gets the spellbook offered instead.
    */
-  private buildTurn(event: ChatEvent, member: CourtMember | undefined): Turn | null {
+  private buildTurn(
+    event: ChatEvent,
+    member: CourtMember | undefined,
+    ctx: BrainContext
+  ): Turn | null {
     const who = member ? `the ${member.title}` : event.from
+    // In survival every block is gathered and laid by hand, which the court has not learned yet.
+    const cannot: Turn | undefined = byHand(ctx.gameMode)
+      ? {
+          note:
+            '(In this world every block must be gathered and laid by hand. The court only knows ' +
+            'building by creative magic so far, so nobody can build, take down or start great ' +
+            'works here yet. Say so kindly and honestly; do not promise it.)',
+          ability: 'handbuild',
+        }
+      : undefined
     if (detectUndoRequest(event.message)) {
       if (!member)
         return {
           note: `(Only the royal family may ask you to take builds down. Decline ${who} kindly.)`,
         }
+      if (cannot) return cannot
       return {
         action: { type: 'undo', requestedBy: event.from },
         note: '(You now take down the last thing you built, as asked. Say so in one short sentence.)',
       }
     }
     const works = detectWorksRequest(event.message)
-    if (works) return this.worksTurn(event, member, works)
+    if (works) return member && cannot ? cannot : this.worksTurn(event, member, works)
     const request = detectBuildRequest(event.message)
     if (!request) return null
     if (!member) {
@@ -843,6 +867,7 @@ export class OllamaBrain implements Brain {
         note: `(Only the royal family may ask you to build. Decline ${who} kindly; do not promise to build.)`,
       }
     }
+    if (cannot) return cannot
     const crew = this.builders()
     if (!this.cfg.canBuild && crew.length === 0) {
       const builders = this.staff.filter((s) => s.canBuild).map((s) => s.name)
@@ -1252,6 +1277,7 @@ export class OllamaBrain implements Brain {
       : 'nobody else right now'
     const pos = ctx.position
     // "following LittleOne42" -> "following the Princess (LittleOne42)"
+    const handWork = byHand(ctx.gameMode)
     const activity = ctx.activity?.replace(/\S+$/, (name) =>
       this.court.label(name).replace(/^(\S+) \((the .+)\)$/, '$2 ($1)')
     )
@@ -1281,20 +1307,25 @@ export class OllamaBrain implements Brain {
       activity && `- Right now you are ${activity}.`,
       ctx.works &&
         `- The court is building ${ctx.works}. You are part of the crew; talk about it naturally when asked.`,
-      this.cfg.canBuild
-        ? `- You can build ${this.magic ? 'from your spellbook' : 'these'} when the royal family asks: ${spellbookList()}. ` +
-          'The building happens by itself; just talk about it. Only build for the royal family.'
-        : this.builders().length
-          ? `- You do not build yourself, but when the royal family asks for one of these, you have ${listWords(
-              this.builders().map((s) => s.name),
-              'or'
-            )} build it: ${spellbookList()}. ` +
-            'It is handed on and built by itself once one of them is free; only the royal family may ask. ' +
-            'When they order a whole new palace or castle, you take that order too: the master builder ' +
-            'designs it for the spot they choose, anywhere they like, and the whole crew builds it.'
-          : `- You do not build yourself; ${listWords(this.staff.filter((s) => s.canBuild).map((s) => s.name)) || 'others'} build for the court.`,
+      handWork
+        ? '- This world is in survival mode: every block is gathered and laid by hand. The court ' +
+          'only knows building by creative magic so far, so nobody builds here yet. Say so ' +
+          'honestly if asked, and never promise a build.'
+        : this.cfg.canBuild
+          ? `- You can build ${this.magic ? 'from your spellbook' : 'these'} when the royal family asks: ${spellbookList()}. ` +
+            'The building happens by itself; just talk about it. Only build for the royal family.'
+          : this.builders().length
+            ? `- You do not build yourself, but when the royal family asks for one of these, you have ${listWords(
+                this.builders().map((s) => s.name),
+                'or'
+              )} build it: ${spellbookList()}. ` +
+              'It is handed on and built by itself once one of them is free; only the royal family may ask. ' +
+              'When they order a whole new palace or castle, you take that order too: the master builder ' +
+              'designs it for the spot they choose, anywhere they like, and the whole crew builds it.'
+            : `- You do not build yourself; ${listWords(this.staff.filter((s) => s.canBuild).map((s) => s.name)) || 'others'} build for the court.`,
       this.commissionsSection(),
-      (this.cfg.canBuild || this.builders().length > 0) &&
+      !handWork &&
+        (this.cfg.canBuild || this.builders().length > 0) &&
         '- The court builds wherever the royal family asks, never breaking anything anyone made.',
       this.staff.length > 0 &&
         `- Your fellow members of the court (other characters like you): ${this.staff.map((s) => `${s.name} (${s.role}, ${s.reportsTo ? `reports to ${s.reportsTo}` : 'answers to the royal family'})`).join(', ')}. ` +
@@ -1306,7 +1337,8 @@ export class OllamaBrain implements Brain {
           .map((s) => s.name)
           .join(', ')}. You cast a spell when ` +
           'the royal family asks; the magic happens by itself, so just talk about it. You know no ' +
-          'other spells, but the King can teach you new ones.',
+          `other spells, but the King can teach you new ones. By the King's own rule your gifts are ` +
+          `at most ${ITEMS_PER_HOUR} things an hour, all together (${this.magic.itemsLeft()} left now).`,
       `- You still cannot build anything outside ${this.magic ? 'your spellbook' : 'that list'}, fetch or carry items, or find ` +
         'places by name. If asked to, never agree or promise to do it. Kindly explain in ' +
         'character that this magic is not ready yet and offer something else.',

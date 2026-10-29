@@ -447,6 +447,26 @@ describe('OllamaBrain court behaviour', () => {
         at: { x: 400, z: -250 },
       })
     })
+
+    it('in survival promises no build, palace or undo, and says why', async () => {
+      const { brain, calls } = castellan('I will build it for you right away!')
+      const survival = (name: string) => ({ ...at(name), gameMode: 'survival' as const })
+      const reply = await brain.onChat(
+        chat('LittleOne42', 'festaris could you please build a flower garden'),
+        survival('LittleOne42')
+      )
+      expect(reply?.action).toBeUndefined()
+      expect(reply?.say).toContain('gathered and laid by hand')
+      expect(calls[0].at(-1)?.content).toContain('only knows building by creative magic')
+      const palace = await brain.onChat(
+        chat('BigDad', 'Festaris, please build us a palace right here'),
+        survival('BigDad')
+      )
+      expect(palace?.action).toBeUndefined()
+      const prompt = brain.systemPrompt(survival('BigDad'))
+      expect(prompt).toContain('This world is in survival mode')
+      expect(prompt).not.toContain('The court builds wherever')
+    })
   })
 
   it('does not keep the note in the stored history', async () => {

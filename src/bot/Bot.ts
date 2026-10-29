@@ -6,7 +6,8 @@ import {
   type Bot as MineflayerBot,
   type BotOptions as MineflayerBotOptions,
 } from 'mineflayer-bedrock'
-import type { BotAction, Brain, BrainContext, BuildOutcome, ChatEvent } from '../ai/Brain'
+import type { BotAction, Brain, BrainContext, BuildOutcome, ChatEvent, GameMode } from '../ai/Brain'
+import { byHand } from '../ai/Brain'
 import { mentionsName, splitChatMessage } from '../ai/text'
 import type { BotConfig, ServerConfig } from '../config'
 import type { CourtRoster } from '../court'
@@ -211,7 +212,20 @@ export class Bot extends EventEmitter {
 
   /** Free to take a work order from the court's building works. */
   canWork(): boolean {
-    return Boolean(this.cfg.works) && this.isFree()
+    return Boolean(this.cfg.works) && this.buildsByMagic() && this.isFree()
+  }
+
+  /** The game mode the server gave this bot; undefined until it said. */
+  gameMode(): GameMode | undefined {
+    return this.body?.game?.gameMode as GameMode | undefined
+  }
+
+  /**
+   * The mason builds like a creative player (flight, the creative inventory). In survival every
+   * block must be gathered and laid by hand, which the court cannot do yet.
+   */
+  buildsByMagic(): boolean {
+    return !byHand(this.gameMode())
   }
 
   /** Idle: not building, not walking for anyone, not on duty or a royal's post. */
@@ -1008,6 +1022,7 @@ export class Bot extends EventEmitter {
           return { name: p.name, distance: me && pos ? distance(me, pos) : undefined }
         }),
       position: me,
+      gameMode: this.gameMode(),
       activity: this.mason?.activity() ?? this.movement?.describe() ?? undefined,
       works: this.cfg.works ? this.worksSummary?.() : undefined,
     }
@@ -1023,7 +1038,10 @@ export class Bot extends EventEmitter {
     client.on('spawn', () => {
       this.state.status = 'spawned'
       this.reconnectAttempts = 0
-      this.log.info(`spawned${this.state.position ? ` at ${fmtVec(this.state.position)}` : ''}`)
+      const mode = this.gameMode()
+      this.log.info(
+        `spawned${this.state.position ? ` at ${fmtVec(this.state.position)}` : ''}${mode ? ` (${mode})` : ''}`
+      )
       this.floor?.setOnline(this.cfg.name, true)
       this.emit('spawn')
       clearInterval(this.dutyTimer)

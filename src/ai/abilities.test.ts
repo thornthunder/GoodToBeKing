@@ -38,6 +38,14 @@ describe('detectMoveCommand', () => {
   })
 })
 
+describe('declineLine in survival', () => {
+  it('says the court cannot build by hand yet, offering no spellbook', () => {
+    const line = declineLine('handbuild', 'Your Highness')
+    expect(line).toContain('gathered and laid by hand')
+    expect(line).not.toContain('garden')
+  })
+})
+
 describe('detectMissingAbility', () => {
   it.each([
     ['can you build me a castle merlin', 'build'],

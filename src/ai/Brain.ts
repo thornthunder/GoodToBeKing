@@ -22,6 +22,13 @@ export interface SeenPlayer {
 }
 
 /** Snapshot of what the bot knows about the world when the brain is consulted. */
+export type GameMode = 'survival' | 'creative' | 'adventure' | 'spectator'
+
+/** Survival (or adventure): every block is gathered and laid by hand, no creative magic. */
+export function byHand(mode: GameMode | undefined): boolean {
+  return mode === 'survival' || mode === 'adventure'
+}
+
 export interface BrainContext {
   /** Say something before the answer is ready (to the speaker, the way the line came). */
   interim?: (text: string) => void
@@ -29,6 +36,8 @@ export interface BrainContext {
   /** The other players currently on the server (fellow bots excluded). */
   players: SeenPlayer[]
   position?: { x: number; y: number; z: number }
+  /** The bot's game mode; undefined before the server said (taken as creative). */
+  gameMode?: GameMode
   /** What the bot is doing, e.g. "following LittleOne42"; undefined when standing still. */
   activity?: string
   /** False when another bot of the court answers this line: listen, but stay quiet. */

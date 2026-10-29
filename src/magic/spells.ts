@@ -44,7 +44,10 @@ export const CREATURES = [
 ] as const
 export type Creature = (typeof CREATURES)[number]
 
-/** Gifts, with how many may be given at once. They are taken back after a day. */
+/**
+ * Gifts, with how many may be given at once. They are taken back after a day. Food and building
+ * materials help the court in survival, but sparingly: see ITEMS_PER_HOUR.
+ */
 export const GIFTS: Record<string, number> = {
   cake: 1,
   cookie: 8,
@@ -64,6 +67,31 @@ export const GIFTS: Record<string, number> = {
   firework_rocket: 8,
   lead: 1,
   name_tag: 1,
+  cooked_beef: 4,
+  cooked_chicken: 4,
+  cooked_cod: 4,
+  baked_potato: 4,
+  carrot: 4,
+  oak_log: 10,
+  oak_planks: 10,
+  cobblestone: 10,
+  coal: 8,
+  torch: 8,
+  wheat_seeds: 8,
+  oak_sapling: 4,
+  crafting_table: 1,
+  furnace: 1,
+  chest: 1,
+}
+
+/** Merlin gives at most this many things an hour, all gifts together (the King's rule). */
+export const ITEMS_PER_HOUR = 10
+
+/** Thrown when a spell would give more than is left of this hour's gifts. */
+export class GiftsSpent extends Error {
+  constructor() {
+    super('the gift magic is spent for this hour')
+  }
 }
 
 export const PARTICLES = [
@@ -112,6 +140,8 @@ export interface SpellArgs {
   target?: string
   place?: string
   item?: string
+  /** How many of the item were asked for (a gift); its own limit and the hour's still apply. */
+  count?: number
   creature?: string
   effect?: string
 }
@@ -275,7 +305,7 @@ export const BUILTIN_SPELLS: Spell[] = [
   {
     id: 'gift',
     name: 'Magic Gift',
-    does: `Gives the one it is cast on a magic gift that fades after a day (item: ${Object.keys(GIFTS).join(', ')}).`,
+    does: `Gives the one it is cast on a magic gift that fades after a day, as many as asked within limits (item: ${Object.keys(GIFTS).join(', ')}).`,
     steps: [
       { kind: 'give', who: 'target', item: '$item', count: 1 },
       { kind: 'sound', sound: 'random.orb', at: 'target' },
@@ -388,6 +418,8 @@ export interface Cast {
   undo?: string[]
   /** Set on a saddle: the tag command must find a horse, or the spell fails. */
   mustFind?: string
+  /** How many things it gives (counted against ITEMS_PER_HOUR). */
+  items?: number
 }
 
 export interface CastContext {
@@ -400,6 +432,8 @@ export interface CastContext {
   args: SpellArgs
   /** A fresh id per cast, for tagging what a gift is put on. */
   giftId: string
+  /** Things that may still be given this hour (no limit when unset). */
+  itemsLeft?: number
 }
 
 const q = (name: string) => `"${name.replace(/"/g, '')}"`
@@ -411,6 +445,7 @@ export function commandsFor(spell: Spell, ctx: CastContext): Cast[] {
       ? ctx.court
       : [w === 'merlin' ? ctx.merlin : w === 'requester' ? ctx.requester : ctx.target]
   const out: Cast[] = []
+  let left = ctx.itemsLeft ?? Infinity
   for (const step of spell.steps) {
     switch (step.kind) {
       case 'teleport': {
@@ -469,23 +504,31 @@ export function commandsFor(spell: Spell, ctx: CastContext): Cast[] {
         const item = step.item === '$item' ? ctx.args.item : step.item
         const max = item ? GIFTS[item] : undefined
         if (!item || !max) throw new Error(`not a gift Merlin may give: ${String(item)}`)
-        const count = Math.min(step.count, max)
-        for (const who of whom(step.who))
+        const asked = step.item === '$item' && ctx.args.count ? ctx.args.count : step.count
+        for (const who of whom(step.who)) {
+          const count = Math.min(Math.floor(asked), max, left)
+          if (count < 1) throw new GiftsSpent()
+          left -= count
           out.push({
             command: `give ${q(who)} ${item} ${count}`,
             undo: [`clear ${q(who)} ${item} -1 ${count}`],
+            items: count,
           })
+        }
         break
       }
       case 'saddle': {
         const tag = `merlin_gift_${ctx.giftId}`
         for (const who of whom(step.who)) {
+          if (left < 1) throw new GiftsSpent()
+          left -= 1
           const find =
             `execute at ${q(who)} run tag @e[type=horse,r=8,c=1,` +
             `hasitem={item=saddle,quantity=0}] add ${tag}`
           out.push({ command: find, mustFind: tag })
           out.push({
             command: `replaceitem entity @e[tag=${tag}] slot.saddle 0 saddle`,
+            items: 1,
             undo: [
               // A horse keeps its saddle in slot 0 of its own inventory, and stays saddled until
               // the game's own event says otherwise (emptying "slot.saddle" does neither).

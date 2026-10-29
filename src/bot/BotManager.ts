@@ -449,7 +449,7 @@ export class BotManager {
         this.commissions.locate(c.id, seen)
       }
       const near = c.near!
-      const crew = this.crewFor(c).filter((b) => b.isFree())
+      const crew = this.crewFor(c).filter((b) => b.isFree() && b.buildsByMagic())
       const distance = (b: Bot) => {
         const p = b.position()
         return p ? Math.hypot(p.x - near.x, p.z - near.z) : Infinity
@@ -699,13 +699,13 @@ export class BotManager {
       this.log.info(`command: ${bot.cfg.name} resumes ${id} at ${x},${y},${z} (turns ${turns})`)
       void bot.resumeBuildAt(id, { x, y, z }, turns, requestedBy)
     } else if (verb === 'cast') {
-      // <bot> cast <spell> [on <who>] [to <place ...>] [item <x>] [creature <x>] [effect <x>] [for <player>]
+      // <bot> cast <spell> [on <who>] [to <place ...>] [item <x>] [count <n>] [creature <x>] [effect <x>] [for <player>]
       const after = (key: string) => {
         const i = words.indexOf(key)
         return i > 0 ? words[i + 1] : undefined
       }
       const toIndex = words.indexOf('to')
-      const stops = ['on', 'item', 'creature', 'effect', 'for']
+      const stops = ['on', 'item', 'count', 'creature', 'effect', 'for']
       const place =
         toIndex > 0
           ? words
@@ -716,7 +716,13 @@ export class BotManager {
       void bot.castCommand(words[2] ?? '', {
         target: after('on') ?? (requestedBy === 'the court' ? bot.cfg.name : requestedBy),
         requestedBy,
-        args: { place, item: after('item'), creature: after('creature'), effect: after('effect') },
+        args: {
+          place,
+          item: after('item'),
+          count: Number(after('count')) || undefined,
+          creature: after('creature'),
+          effect: after('effect'),
+        },
       })
     } else if (verb === 'run') {
       // Developer tool: a raw server command as this bot. Only this machine writes the command

@@ -8,7 +8,7 @@
  */
 import { matchBlueprint, spellbookList, type BlueprintId } from '../build/blueprints'
 
-export type MissingAbility = 'build' | 'fetch' | 'travel'
+export type MissingAbility = 'build' | 'handbuild' | 'fetch' | 'travel'
 
 export type MoveCommand = 'follow' | 'come' | 'stop'
 
@@ -38,6 +38,9 @@ const REQUEST_PATTERNS: Array<[MissingAbility, RegExp]> = [
 
 const VERBS: Record<MissingAbility, string> = {
   build: `build anything outside your spellbook (${spellbookList()})`,
+  handbuild:
+    'build, take down or start great works in this world, where every block must be gathered ' +
+    'and laid by hand (the court only knows building by creative magic so far)',
   fetch: 'fetch, carry or hand over items',
   travel: 'find places by name or teleport',
 }
@@ -132,6 +135,8 @@ export function declineLine(ability: MissingAbility, address: string, magic = fa
       return magic
         ? `Alas, ${address}, my spellbook does not hold that yet. It holds ${spellbookList()}: which would please you?`
         : `Alas, ${address}, that is beyond the court's builders for now. They can raise ${spellbookList()}: which would please you?`
+    case 'handbuild':
+      return `Alas, ${address}, in this world every block must be gathered and laid by hand, and the court has not learned that yet. Soon, I hope!`
     case 'fetch':
       return `Alas, ${address}, my satchel cannot carry things yet. Tell me what you seek and I will help you think where to find it.`
     case 'travel':

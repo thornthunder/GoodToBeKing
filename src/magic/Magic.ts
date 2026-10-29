@@ -6,6 +6,8 @@ import {
   CREATURES,
   EFFECTS,
   GIFTS,
+  GiftsSpent,
+  ITEMS_PER_HOUR,
   commandsFor,
   cooldownOf,
   needs,
@@ -38,15 +40,23 @@ export interface Gift {
   until: number
 }
 
-const DAY = 24 * 60 * 60_000
+const HOUR = 60 * 60_000
+const DAY = 24 * HOUR
 /** Gifts that cannot be taken back (eaten, placed, horse far away) are forgotten after a week. */
 const GIVE_UP_MS = 7 * DAY
 /** How often taking a gift back is tried again. */
 const RETRY_MS = 30 * 60_000
 
+/** Things given at one time, counted against the hour's gifts. */
+interface Given {
+  at: number
+  items: number
+}
+
 interface Saved {
   learned?: Spell[]
   gifts?: Gift[]
+  given?: Given[]
   next?: number
 }
 
@@ -57,6 +67,7 @@ interface Saved {
 export class Magic {
   private learned: Spell[] = []
   private gifts: Gift[] = []
+  private given: Given[] = []
   private next = 1
   private readonly lastCast = new Map<string, number>()
   private readonly lastTry = new Map<string, number>()
@@ -80,6 +91,7 @@ export class Magic {
         const saved = JSON.parse(fs.readFileSync(opts.file, 'utf8')) as Saved
         this.learned = saved.learned ?? []
         this.gifts = saved.gifts ?? []
+        this.given = saved.given ?? []
         this.next = saved.next ?? 1
       } catch {
         // A broken file: the built-in spells still work.
@@ -112,8 +124,29 @@ export class Magic {
     return last === undefined ? 0 : Math.max(0, last + cooldownOf(spell) - now)
   }
 
+  /** Things Merlin may still give this hour: at most ITEMS_PER_HOUR in any hour, all gifts together. */
+  itemsLeft(now = Date.now()): number {
+    const used = this.given.filter((g) => now - g.at < HOUR).reduce((n, g) => n + g.items, 0)
+    return Math.max(0, ITEMS_PER_HOUR - used)
+  }
+
+  /** Why nothing more can be given now; undefined while something is left this hour. */
+  private spent(now: number): string | undefined {
+    if (this.itemsLeft(now) > 0) return undefined
+    const oldest = Math.min(...this.given.filter((g) => now - g.at < HOUR).map((g) => g.at))
+    const minutes = Math.max(1, Math.ceil((oldest + HOUR - now) / 60_000))
+    return (
+      `the gift magic is spent (at most ${ITEMS_PER_HOUR} things an hour); it gathers again in ` +
+      `${minutes} minute${minutes > 1 ? 's' : ''}`
+    )
+  }
+
   /** What is wrong with a request for this spell, in plain words; undefined when it can be cast. */
-  check(spell: Spell, args: SpellArgs): string | undefined {
+  check(spell: Spell, args: SpellArgs, now = Date.now()): string | undefined {
+    if (spell.steps.some((s) => s.kind === 'give' || s.kind === 'saddle')) {
+      const spent = this.spent(now)
+      if (spent) return spent
+    }
     for (const need of needs(spell)) {
       if (need === 'place' && !this.place(args.place))
         return `it needs a place Merlin knows (${args.place ? `not "${args.place}"` : 'none was named'})`
@@ -178,8 +211,10 @@ export class Magic {
         placeOf: (name) => this.place(name),
         args,
         giftId,
+        itemsLeft: this.itemsLeft(now),
       })
     } catch (err) {
+      if (err instanceof GiftsSpent) return { ok: false, reason: this.spent(now) ?? err.message }
       return { ok: false, reason: err instanceof Error ? err.message : String(err) }
     }
     for (const cast of casts) {
@@ -195,6 +230,11 @@ export class Magic {
           ok: false,
           reason: `the server refused "${cast.command}": ${result.output.join('; ')}`,
         }
+      }
+      if (cast.items) {
+        this.given = this.given.filter((g) => now - g.at < HOUR)
+        this.given.push({ at: now, items: cast.items })
+        this.save()
       }
       if (cast.undo) {
         const what = cast.command.startsWith('give') ? `${args.item ?? 'a gift'}` : 'a magic saddle'
@@ -245,7 +285,12 @@ export class Magic {
     const file = this.opts.file
     if (!file) return
     fs.mkdirSync(path.dirname(file), { recursive: true })
-    const saved: Saved = { learned: this.learned, gifts: this.gifts, next: this.next }
+    const saved: Saved = {
+      learned: this.learned,
+      gifts: this.gifts,
+      given: this.given,
+      next: this.next,
+    }
     fs.writeFileSync(file, JSON.stringify(saved, null, 2))
   }
 }
