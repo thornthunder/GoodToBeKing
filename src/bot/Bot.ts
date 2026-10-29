@@ -42,6 +42,7 @@ import {
   bedCells,
   doorCells,
   floorCells,
+  furnaceCells,
   lightCells,
   repairCells,
   roofCells,
@@ -50,7 +51,9 @@ import {
   type HandCell,
 } from '../build/hall'
 import type { Household } from '../household'
+import { Cook } from './cooking'
 import { Gatherer, type Material } from './gathering'
+import { GAME, Hunter, SPOILS } from './hunting'
 import { FOODS, Survival, isNight } from './survival'
 import { Movement } from './movement'
 import type { CommandResult, Magic } from '../magic/Magic'
@@ -118,6 +121,7 @@ const HALL_WORK_TITLES: Record<HallWork, string> = {
   door: 'a door',
   beds: 'beds',
   repair: 'repairs',
+  furnace: 'a furnace',
 }
 const HALL_WORK_CELLS: Record<
   HallWork,
@@ -130,6 +134,7 @@ const HALL_WORK_CELLS: Record<
   // As many beds as the builder carries or the storehouse holds (one for each courtier, at most).
   beds: (hall, names) => bedCells(hall, names, 8),
   repair: repairCells,
+  furnace: furnaceCells,
 }
 
 /** bedboo reads a bed's state from its block (not in mineflayer-bedrock's types). */
@@ -196,6 +201,9 @@ export class Bot extends EventEmitter {
   private gathering = false
   /** Builds by hand in survival (the hall's roof, floor, light and door). */
   private handbuilder?: Handbuilder
+  /** Hunting and cooking for the court's food (survival). */
+  private hunter?: Hunter
+  private cook?: Cook
   /** Eating and, for guards, fighting (survival). */
   private survival?: Survival
   private died = false
@@ -685,7 +693,9 @@ export class Bot extends EventEmitter {
   private wantsMetadata(entity: bigint): boolean {
     if (this.state.runtimeId === undefined || entity === this.state.runtimeId) return true
     for (const p of this.state.players.values()) if (p.runtimeId === entity) return true
-    return false
+    // Game animals: their name tags, babies and leashes decide whether they may be hunted.
+    const name = this.body?.entities[Number(entity)]?.name
+    return name !== undefined && GAME.test(name)
   }
 
   /** Where a player stands, if this bot can see them. */
@@ -798,6 +808,8 @@ export class Bot extends EventEmitter {
     }
     this.mason = new Mason(body, this.log.child('mason'))
     this.gatherer = new Gatherer(body, this.log.child('gather'), (name) => this.isBot(name))
+    this.hunter = new Hunter(body, this.log.child('hunt'), (name) => this.isBot(name))
+    this.cook = new Cook(body, this.log.child('cook'), this.gatherer)
     this.handbuilder = new Handbuilder(body, this.log.child('hands'), this.gatherer, () =>
       this.movement?.configure()
     )
@@ -1108,6 +1120,66 @@ export class Bot extends EventEmitter {
           'short sentence.',
         `I made part of it, but ${result.missing} blocks are still missing.`
       )
+    }
+  }
+
+  /**
+   * Hunt for the court's food (the King's rule: never a named or tame animal; see hunting.ts) and
+   * bring the spoils to the storehouse. Returns how much meat it brought.
+   */
+  async startHunt(animals: number): Promise<number> {
+    const hunter = this.hunter
+    const chest = this.household?.storehouse
+    if (!hunter || !chest || this.gathering || !byHand(this.gameMode())) return 0
+    this.gathering = true
+    this.pauseWorks()
+    this.dutyFollowing = false
+    this.movement?.stop()
+    try {
+      const result = await hunter.hunt(animals)
+      if (result.killed === 0) return 0
+      await this.gatherer?.withChest(chest, async (window) => {
+        for (const item of this.body?.inventory.items() ?? [])
+          if (SPOILS.test(item.name)) await window.deposit(item.type, item.metadata, item.count)
+        return 0
+      })
+      if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
+      return result.meat
+    } catch (err) {
+      this.log.warn(`hunting failed: ${errMsg(err)}`)
+      return 0
+    } finally {
+      this.gathering = false
+    }
+  }
+
+  /** Cook the storehouse's raw meat in the hall's furnace. Returns how much it cooked. */
+  async startCooking(): Promise<number> {
+    const cook = this.cook
+    const body = this.body
+    const chest = this.household?.storehouse
+    const home = this.household?.home
+    if (!cook || !body || !chest || !home || this.gathering) return 0
+    const furnace = body.findBlocks({
+      matching: (b: { name: string }) => /^(furnace|lit_furnace)$/.test(b.name),
+      point: new WorldVec(home.x, home.y, home.z),
+      maxDistance: 16,
+      count: 1,
+    })[0]
+    if (!furnace) return 0
+    this.gathering = true
+    this.pauseWorks()
+    this.dutyFollowing = false
+    this.movement?.stop()
+    try {
+      const cooked = await cook.cook(furnace, chest)
+      if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
+      return cooked
+    } catch (err) {
+      this.log.warn(`cooking failed: ${errMsg(err)}`)
+      return 0
+    } finally {
+      this.gathering = false
     }
   }
 
@@ -1672,6 +1744,9 @@ export class Bot extends EventEmitter {
       this.gatherer = undefined
       this.handbuilder?.cancel()
       this.handbuilder = undefined
+      this.hunter?.cancel()
+      this.hunter = undefined
+      this.cook = undefined
       clearInterval(this.dutyTimer)
       this.dutyFollowing = false
       this.floor?.setOnline(this.cfg.name, false)

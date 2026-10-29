@@ -23,6 +23,11 @@ export const FOODS = [
   'melon_slice',
   'sweet_berries',
   'cookie',
+  // Raw meat only when nothing else is left (never raw chicken: it makes one ill).
+  'beef',
+  'porkchop',
+  'mutton',
+  'rabbit',
 ]
 const FOOD = new RegExp(`^(${FOODS.join('|')})$`)
 

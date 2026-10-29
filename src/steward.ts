@@ -26,6 +26,14 @@ export interface CourtState {
   storeHasCoal: boolean
   /** Courtiers carrying no food at all. */
   withoutFood: string[]
+  /** Meals in the storehouse (cooked meat, bread...), and raw meat waiting to be cooked. */
+  foodInStore: number
+  rawInStore: number
+  /** The hall has a furnace; a builder carries one to put in. */
+  furnace: boolean
+  builderWithFurnace?: string
+  /** A free courtier to hunt (a guard first, they carry swords). */
+  freeHunter?: string
   /** Wood in the storehouse, in logs (four planks count as one). */
   woodInStore: number
   /** A free member of the staff for errands. */
@@ -43,11 +51,17 @@ export type StewardAction =
   | { kind: 'ask'; what: string }
   /** A free hand fetches this for the storehouse. */
   | { kind: 'errand'; material: Material; count: number }
+  /** Hunt this many animals for meat (by the King's rule), into the storehouse. */
+  | { kind: 'hunt'; animals: number; by: string }
+  /** Cook the storehouse's raw meat in the hall's furnace. */
+  | { kind: 'cook'; by: string }
 
 /** Merlin keeps this much of the hour's magic for the royal family. */
 export const MAGIC_RESERVE = 2
 /** Below this many logs' worth of wood in the storehouse, someone chops more. */
 export const WOOD_RESERVE = 12
+/** Below this many meals in the storehouse, someone cooks or hunts. */
+export const FOOD_RESERVE = 8
 
 /**
  * What to do now: at most one piece of hall work, one piece of magic (or a request to the royal
@@ -63,6 +77,14 @@ export function plan(s: CourtState): StewardAction[] {
       out.push({ kind: 'hallwork', work: 'beds', by: s.builderWithBeds })
     else if (s.hall.light > 0 && (s.storeHasCoal || s.builderWithCoal))
       out.push({ kind: 'hallwork', work: 'light', by: s.builderWithCoal })
+    else if (s.builderWithFurnace && !s.furnace)
+      out.push({ kind: 'hallwork', work: 'furnace', by: s.builderWithFurnace })
+  }
+  // Food by hand: cook what was hunted, or hunt.
+  const hungry = s.foodInStore < FOOD_RESERVE
+  if (hungry && s.storehouse && s.freeHunter) {
+    if (s.rawInStore > 0 && s.furnace) out.push({ kind: 'cook', by: s.freeHunter })
+    else if (s.rawInStore < FOOD_RESERVE) out.push({ kind: 'hunt', animals: 3, by: s.freeHunter })
   }
   // Magic: swords, beds, coal, food; only for what the court cannot get by hand.
   const wants: Array<Omit<Extract<StewardAction, { kind: 'magic' }>, 'kind'>> = []
@@ -77,6 +99,15 @@ export function plan(s: CourtState): StewardAction[] {
       then: 'beds',
       why: 'beds for the court',
     })
+  // A furnace, once, so the meat can be cooked.
+  if (!s.furnace && !s.builderWithFurnace && s.freeBuilder && s.storehouse)
+    wants.push({
+      item: 'furnace',
+      count: 1,
+      to: s.freeBuilder,
+      then: 'furnace',
+      why: 'a furnace for the hall',
+    })
   if (s.hall.light > 0 && !s.storeHasCoal && !s.builderWithCoal && s.freeBuilder)
     wants.push({
       item: 'coal',
@@ -85,8 +116,10 @@ export function plan(s: CourtState): StewardAction[] {
       then: 'light',
       why: 'coal for torches',
     })
-  for (const hungry of s.withoutFood)
-    wants.push({ item: 'bread', count: 4, to: hungry, why: `food for ${hungry}` })
+  // Bread by magic only when there is nothing in store, cooked or raw, to eat.
+  if (s.foodInStore === 0 && s.rawInStore === 0)
+    for (const hungry of s.withoutFood)
+      wants.push({ item: 'bread', count: 4, to: hungry, why: `food for ${hungry}` })
   const first = wants[0]
   if (first) {
     if (s.royalNear) out.push({ kind: 'ask', what: first.why })

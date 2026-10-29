@@ -79,6 +79,7 @@ const HALL_WORK: Array<[HallWork, RegExp]> = [
   ['floor', /\bfloor(ing)?\b/i],
   ['door', /\bdoor\b/i],
   ['beds', /\bbeds?\b/i],
+  ['furnace', /\bfurnace\b/i],
   ['light', /\b(light|torch|torches|lamps?)\b/i],
 ]
 const HALL_VERB =

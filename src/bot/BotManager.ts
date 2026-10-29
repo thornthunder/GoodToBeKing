@@ -34,6 +34,7 @@ import { MATERIALS, type Material } from './gathering'
 import { Household } from '../household'
 import { doorCells, lightCells, repairCells, roofCells, surveyHall } from '../build/hall'
 import { plan, type CourtState, type StewardAction } from '../steward'
+import { RAW } from './cooking'
 import { FOODS } from './survival'
 import type { HallWork } from '../ai/Brain'
 import { ChatFloor } from './ChatFloor'
@@ -286,6 +287,15 @@ export class BotManager {
       withoutFood: this.bots
         .filter((b) => b.position() && b.carries(FOOD_ITEM) === 0)
         .map((b) => b.cfg.name),
+      foodInStore: sum(FOOD_ITEM) - sum(RAW),
+      rawInStore: sum(RAW),
+      furnace: hall.inside.some(([x, z]) => /furnace$/.test(names(x, hall.floorY, z) ?? '')),
+      builderWithFurnace: carrying(/^furnace$/),
+      // Guards first: they carry swords. Then anyone of the staff.
+      freeHunter: (
+        staff.find((b) => b.isGuard() && b.isFree() && !b.buildsByMagic()) ??
+        staff.find((b) => b.isFree() && !b.buildsByMagic())
+      )?.cfg.name,
       woodInStore: sum(/_log$/) + Math.floor(sum(/_planks$/) / 4),
       freeHand: staff.find((b) => b.isFree() && !b.buildsByMagic())?.cfg.name,
       storehouse: Boolean(this.household.storehouse),
@@ -325,6 +335,20 @@ export class BotManager {
             { work: action.work, requestedBy: castellan.cfg.name },
             true
           )
+        return
+      }
+      case 'hunt': {
+        const hunter = by(action.by)
+        if (!hunter) return
+        this.log.info(`housekeeping: ${hunter.cfg.name} goes hunting for the court's food`)
+        void hunter.startHunt(action.animals)
+        return
+      }
+      case 'cook': {
+        const cook = by(action.by)
+        if (!cook) return
+        this.log.info(`housekeeping: ${cook.cfg.name} cooks the meat in the storehouse`)
+        void cook.startCooking()
         return
       }
       case 'errand':
@@ -1091,9 +1115,14 @@ export class BotManager {
     } else if (verb === 'hall') {
       // <bot> hall <roof|floor|light|door|beds> [for <player>] (by hand, survival)
       const work = words[2] as HallWork
-      if (!['roof', 'floor', 'light', 'door', 'beds'].includes(work))
+      if (!['roof', 'floor', 'light', 'door', 'beds', 'repair', 'furnace'].includes(work))
         return this.log.warn('usage: <bot> hall <roof|floor|light|door|beds> [for <player>]')
       void bot.startHallWork(work, requestedBy)
+    } else if (verb === 'hunt') {
+      // <bot> hunt [animals]: hunt for the court's food (survival, the King's rule)
+      void bot.startHunt(Number(words[2]) || 2)
+    } else if (verb === 'cook') {
+      void bot.startCooking()
     } else if (verb === 'bed') {
       // <bot> bed: go to bed now, as when a royal lies down at night (survival)
       void bot.goToBed()

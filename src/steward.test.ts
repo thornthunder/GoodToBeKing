@@ -12,6 +12,9 @@ const base: CourtState = {
   hall: { roof: 0, door: 0, light: 0 },
   storeHasCoal: false,
   withoutFood: [],
+  foodInStore: 10,
+  rawInStore: 0,
+  furnace: true,
   woodInStore: 20,
   freeHand: 'Bruce',
   storehouse: true,
@@ -59,13 +62,38 @@ describe("the Castellan's account", () => {
   })
 
   it('asks the royal family instead when one is near, and keeps magic for them', () => {
-    expect(plan({ ...base, royalNear: true, withoutFood: ['Dyke'] })).toEqual([
-      { kind: 'ask', what: 'food for Dyke' },
+    const empty = { ...base, foodInStore: 0, withoutFood: ['Dyke'] }
+    expect(plan({ ...empty, royalNear: true })).toContainEqual({
+      kind: 'ask',
+      what: 'food for Dyke',
+    })
+    expect(plan({ ...empty, magicLeft: 5 }).filter((a) => a.kind === 'magic')).toEqual([])
+    expect(plan({ ...empty, magicLeft: 6 })).toContainEqual({
+      kind: 'magic',
+      item: 'bread',
+      count: 4,
+      to: 'Dyke',
+      why: 'food for Dyke',
+    })
+  })
+
+  it('feeds the court by hand first: cooks what was hunted, else hunts', () => {
+    const low = { ...base, foodInStore: 2, freeHunter: 'Bruce' }
+    expect(plan({ ...low, rawInStore: 5 })).toEqual([{ kind: 'cook', by: 'Bruce' }])
+    expect(plan(low)).toEqual([{ kind: 'hunt', animals: 3, by: 'Bruce' }])
+    // No bread by magic while there is meat to cook.
+    expect(plan({ ...low, rawInStore: 5, withoutFood: ['Dyke'] })).toEqual([
+      { kind: 'cook', by: 'Bruce' },
     ])
-    expect(plan({ ...base, magicLeft: 5, withoutFood: ['Dyke'] })).toEqual([])
-    expect(plan({ ...base, magicLeft: 6, withoutFood: ['Dyke'] })).toEqual([
-      { kind: 'magic', item: 'bread', count: 4, to: 'Dyke', why: 'food for Dyke' },
-    ])
+    // No furnace yet: Merlin conjures one, and a builder puts it in.
+    expect(plan({ ...low, rawInStore: 5, furnace: false })).toContainEqual({
+      kind: 'magic',
+      item: 'furnace',
+      count: 1,
+      to: 'Henry',
+      then: 'furnace',
+      why: 'a furnace for the hall',
+    })
   })
 
   it('sends a free hand for wood when the storehouse runs low', () => {

@@ -227,6 +227,30 @@ export function repairCells(hall: Hall, names: BlockNames): HandCell[] {
   return cells
 }
 
+/** A furnace on the floor against a wall, clear of the doorway and the beds; none if there is one. */
+export function furnaceCells(hall: Hall, names: BlockNames): HandCell[] {
+  const y = hall.floorY
+  if (hall.inside.some(([x, z]) => /furnace$/.test(names(x, y, z) ?? ''))) return []
+  const isRing = new Set(hall.ring.map(([x, z]) => `${x},${z}`))
+  const sides = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ] as const
+  for (const [x, z] of hall.inside) {
+    if (!open(names(x, y, z)) || !open(names(x, y + 1, z))) continue
+    if (hall.openings.some(([ox, oz]) => Math.abs(ox - x) + Math.abs(oz - z) <= 2)) continue
+    if (sides.some(([dx, dz]) => /bed$/.test(names(x + dx, y, z + dz) ?? ''))) continue
+    const wall = sides.find(([dx, dz]) => {
+      const n = names(x + dx, y, z + dz)
+      return isRing.has(`${x + dx},${z + dz}`) && n !== undefined && !open(n) && !DOOR.test(n)
+    })
+    if (wall) return [{ x, y, z, block: 'furnace' }]
+  }
+  return []
+}
+
 /** A door in the first opening two high (the item places both halves). */
 export function doorCells(hall: Hall, names: BlockNames): HandCell[] {
   const gap = hall.openings.find(([x, z]) => !DOOR.test(names(x, hall.floorY, z) ?? ''))
