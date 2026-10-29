@@ -117,6 +117,20 @@ export class Miner {
     }
     const before = this.count('cobblestone')
     const until = Date.now() + 5 * 60_000
+    // Down the stairs dug before, to the last step: the next is dug from there, within reach.
+    if (mine.steps > 0) {
+      const last = stepAt(mine, mine.steps)
+      try {
+        await withTimeout(
+          this.bot.pathfinder.goto(new goals.GoalBlock(last.x, last.y, last.z)),
+          40_000
+        )
+      } catch (err) {
+        this.log.info(`could not walk down the mine to step ${mine.steps}: ${errMsg(err)}`)
+        this.bot.pathfinder.setGoal(null)
+        return result
+      }
+    }
     while (!this.cancelled && Date.now() < until && this.count('cobblestone') - before < want) {
       if (mine.ended) break
       if (mine.steps >= MAX_STEPS) {
