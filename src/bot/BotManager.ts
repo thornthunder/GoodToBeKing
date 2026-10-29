@@ -290,7 +290,9 @@ export class BotManager {
       freeHand: staff.find((b) => b.isFree() && !b.buildsByMagic())?.cfg.name,
       storehouse: Boolean(this.household.storehouse),
     }
-    for (const action of plan(state)) await this.carryOutHousekeeping(castellan, merlin, action)
+    const actions = plan(state)
+    this.log.debug(`housekeeping: ${JSON.stringify(state)} -> ${JSON.stringify(actions)}`)
+    for (const action of actions) await this.carryOutHousekeeping(castellan, merlin, action)
   }
 
   private async carryOutHousekeeping(
