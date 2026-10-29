@@ -105,6 +105,8 @@ export class Handbuilder {
       if (!this.cancelled) await this.placeAll(job, result)
       this.useBuildingRules(false)
       await this.clearScaffold(scaffold)
+      // What is missing, and short, before the leftovers go back.
+      this.tally(job, result)
       if (storehouse && !this.cancelled) await this.putBack(storehouse)
     } catch (err) {
       this.log.warn(`${job.title}: ${errMsg(err)}`)
@@ -114,15 +116,20 @@ export class Handbuilder {
       this.afterwards()
     }
     result.cancelled = this.cancelled
-    result.missing = job.cells.filter((c) => !this.inPlace(c)).length
-    for (const c of job.cells)
-      if (!this.inPlace(c) && this.carried(c.block) === 0)
-        result.short[c.block] = (result.short[c.block] ?? 0) + 1
     this.log.info(
       `${job.title}: placed ${result.placed}, ${result.missing} missing` +
         (Object.keys(result.short).length ? `, short of ${JSON.stringify(result.short)}` : '')
     )
     return result
+  }
+
+  /** Cells not as planned, and those for want of material. */
+  private tally(job: HandJob, result: HandResult): void {
+    result.missing = job.cells.filter((c) => !this.inPlace(c)).length
+    result.short = {}
+    for (const c of job.cells)
+      if (!this.inPlace(c) && this.carried(c.block) === 0)
+        result.short[c.block] = (result.short[c.block] ?? 0) + 1
   }
 
   /** Walking rules while building: tower up on dirt or cobblestone, never dig a way through. */

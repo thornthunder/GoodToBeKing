@@ -134,7 +134,13 @@ export function lightCells(hall: Hall, names: BlockNames): HandCell[] {
         [0, 1],
         [0, -1],
       ] as const
-    ).find(([dx, dz]) => isRing.has(`${x + dx},${z + dz}`) && !open(names(x + dx, y, z + dz)))
+    ).find(([dx, dz]) => {
+      // A solid wall: not a doorway, and not the door in it.
+      const wall = names(x + dx, y, z + dz)
+      return (
+        isRing.has(`${x + dx},${z + dz}`) && wall !== undefined && !open(wall) && !DOOR.test(wall)
+      )
+    })
     if (!wall) continue
     if (cells.some((c) => Math.abs(c.x - x) + Math.abs(c.z - z) < 5)) continue
     cells.push({ x, y, z, block: 'torch', against: [wall[0], 0, wall[1]] })

@@ -56,6 +56,15 @@ describe('the hall survey', () => {
     expect(doorCells(h, names)).toEqual([{ x: 2, y: 64, z: -1, block: 'wooden_door' }])
   })
 
+  it('never puts a torch on a door', () => {
+    // A door in the doorway: the spot inside it has the door, not a wall, beside it.
+    const names = hall({ '2,64,-1': 'wooden_door', '2,65,-1': 'wooden_door' })
+    const h = surveyHall(names, { x: 2, y: 64, z: 2 })
+    if (typeof h === 'string') throw new Error(h)
+    const torches = lightCells(h, names)
+    expect(torches.some((c) => c.x === 2 && c.z === 0 && c.against?.[2] === -1)).toBe(false)
+  })
+
   it('raises a low wall to the roof, so it closes all round', () => {
     // One stretch of the east wall is a block higher than the rest.
     const names = hall({ '5,67,3': 'dirt' })
