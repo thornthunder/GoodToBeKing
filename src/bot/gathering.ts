@@ -162,7 +162,8 @@ export class Gatherer {
   ): Promise<{ gathered: number; reason?: GatherResult['reason'] }> {
     this.cancelled = false
     // Logs high up need a pillar to climb: some dirt first.
-    if (material === 'wood' && this.carried('dirt') < 6) await this.collect('dirt', 8)
+    if (material === 'wood' && this.carried('dirt') < 12)
+      await this.collect('dirt', 16 - this.carried('dirt'))
     const start = Date.now()
     const before = this.carried(material)
     const tried = new Set<string>()
@@ -279,8 +280,8 @@ export class Gatherer {
   private async climbAndDig(material: Material, target: Vec3): Promise<boolean> {
     const dirtId = this.bot.registry.itemsByName.dirt?.id
     const dirt = this.bot.inventory.items().find((i) => i.name === 'dirt')
-    const rise = target.y - Math.floor(this.bot.entity.position.y) - 2
-    if (!dirtId || !dirt || dirt.count < Math.max(1, rise)) {
+    // Whatever dirt there is: the pathfinder knows how far it will go.
+    if (!dirtId || !dirt) {
       this.log.info(`no dirt to climb to the log at ${target}`)
       return false
     }
