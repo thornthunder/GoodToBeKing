@@ -104,3 +104,14 @@ describe('splitChatMessage', () => {
     expect(parts.length).toBeGreaterThan(1)
   })
 })
+
+describe('cleanChatReply: what the model copied from the prompt', () => {
+  it('drops an [event] tag and narration before the bot speaks', () => {
+    expect(
+      cleanChatReply('[event] Bruce has died. Bruce: I am back. I will serve soon.', 'Bruce')
+    ).toBe('I am back. I will serve soon.')
+    expect(cleanChatReply('[court] All is well, Your Majesty.', 'Festaris')).toBe(
+      'All is well, Your Majesty.'
+    )
+  })
+})

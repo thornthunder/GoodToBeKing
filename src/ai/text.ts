@@ -26,6 +26,11 @@ export function cleanChatReply(text: string, botName: string, otherLabels: strin
     out = out.slice(1, -1).trim()
   }
   const name = escapeRegExp(botName)
+  // A tag copied from the prompt ("[event] ..."), and narration before the bot's own line
+  // ("Bruce has died. Bruce: I am back.").
+  out = out.replace(/^\[[a-z]+\]\s*/i, '')
+  const own = out.match(new RegExp(`(?:^|[.!?]\\s+)${name}\\s*:\\s*(.+)$`, 'i'))
+  if (own && own.index !== undefined && own.index > 0) out = own[1]
   out = out.replace(new RegExp(`^(?:<${name}>|${name}\\s*[:>-])\\s*`, 'i'), '')
   const labels = otherLabels.filter(Boolean).map(escapeRegExp).join('|')
   if (labels) {

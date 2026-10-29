@@ -147,4 +147,16 @@ describe('repairs', () => {
     expect(fix.every((c) => c.block === 'planks')).toBe(true)
     expect(repairCells(h, whole)).toEqual([])
   })
+
+  it('fills a crater in the floor from the bottom up, planks on top', () => {
+    const whole = hall()
+    const h = surveyHall(whole, { x: 2, y: 64, z: 2 })
+    if (typeof h === 'string') throw new Error(h)
+    // A creeper blew a hole two deep where the floor was.
+    const crater = hall({ '2,63,2': 'air', '2,62,2': 'air' })
+    expect(repairCells(h, crater)).toEqual([
+      { x: 2, y: 62, z: 2, block: 'dirt' },
+      { x: 2, y: 63, z: 2, block: 'planks' },
+    ])
+  })
 })

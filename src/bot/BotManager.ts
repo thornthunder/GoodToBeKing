@@ -192,7 +192,7 @@ export class BotManager {
       const far = Math.hypot(p.x - home.x - 0.5, p.z - home.z - 0.5)
       // At night in survival everyone comes inside the hall; by day near it will do.
       const radius = bot.isNight() && !bot.buildsByMagic() ? HOME_RADIUS_NIGHT : HOME_RADIUS
-      if (far <= radius && Math.abs(p.y - home.y) < 4) {
+      if (far <= radius && Math.abs(p.y - home.y) < 2) {
         this.homeTrips.delete(bot.cfg.name)
         continue
       }
@@ -216,7 +216,6 @@ export class BotManager {
     }
   }
 
-  private lastInspection = 0
   private lastHousekeeping = 0
   private lastMagicRequest = 0
   /** What the Castellan last asked the royal family for, and when (so he does not nag). */
@@ -283,6 +282,7 @@ export class BotManager {
         roof: roofCells(hall, names).length,
         door: doorCells(hall, names).length,
         light: lightCells(hall, names).length,
+        repair: this.household.hall ? repairCells(this.household.hall, names).length : 0,
       },
       storeHasCoal: sum(/^(coal|charcoal)$/) > 0,
       withoutFood: this.bots
@@ -431,32 +431,6 @@ export class BotManager {
           setTimeout(() => void worker.startHallWork(then, castellan.cfg.name), 2_000)
       }
     }
-  }
-
-  /**
-   * The Castellan's rounds (survival): every few minutes, compare the hall with its shape as last
-   * seen whole; if walls or roof have holes (endermen take dirt, creepers blow it up), send a
-   * free builder to repair them.
-   */
-  private async inspectHall(): Promise<void> {
-    const hall = this.household.hall
-    const home = this.household.home
-    if (!hall || !home || Date.now() - this.lastInspection < INSPECT_MS) return
-    const castellan = this.bots.find(
-      (b) =>
-        !b.cfg.canBuild && this.bots.some((w) => w.cfg.reportsTo === b.cfg.name && w.cfg.canBuild)
-    )
-    // Someone close enough to see it, in survival.
-    const eyes = this.bots.find((b) => {
-      const p = b.position()
-      return p && !b.buildsByMagic() && Math.hypot(p.x - home.x, p.z - home.z) < 32
-    })
-    if (!castellan || !eyes) return
-    this.lastInspection = Date.now()
-    const holes = repairCells(hall, (x, y, z) => eyes.nameAt(x, y, z)).length
-    if (holes === 0) return
-    this.log.info(`the hall has ${holes} holes in its walls or roof`)
-    await this.sendToHall(castellan, { work: 'repair', requestedBy: castellan.cfg.name }, true)
   }
 
   /** The Castellan sets one of his builders to work on the hall: the nearest free one. */
@@ -801,7 +775,6 @@ export class BotManager {
       this.works?.tick(this.workers())
       // Whoever is still free afterwards goes home.
       this.sendHome()
-      void this.inspectHall()
       void this.keepHouse()
     }, 5_000)
   }
@@ -1229,8 +1202,6 @@ const HOUSEKEEPING_MS = 60_000
 const MAGIC_REQUEST_MS = 3 * 60_000
 /** Food a courtier may carry (see bot/survival.ts). */
 const FOOD_ITEM = new RegExp(`^(${FOODS.join('|')})$`)
-/** How often the Castellan looks the hall over for damage. */
-const INSPECT_MS = 3 * 60_000
 /** Before sending the same bot home again. */
 const HOME_RETRY_MS = 60_000
 

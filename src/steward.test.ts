@@ -9,7 +9,7 @@ const base: CourtState = {
   courtiers: 6,
   bedsInHall: 6,
   freeBuilder: 'Henry',
-  hall: { roof: 0, door: 0, light: 0 },
+  hall: { roof: 0, door: 0, light: 0, repair: 0 },
   storeHasCoal: false,
   withoutFood: [],
   foodInStore: 10,
@@ -29,11 +29,15 @@ describe("the Castellan's account", () => {
   })
 
   it('roofs the hall before anything else, then the door', () => {
-    expect(plan({ ...base, hall: { roof: 40, door: 1, light: 2 } })[0]).toEqual({
+    expect(plan({ ...base, hall: { roof: 40, door: 1, light: 2, repair: 3 } })[0]).toEqual({
+      kind: 'hallwork',
+      work: 'repair',
+    })
+    expect(plan({ ...base, hall: { roof: 40, door: 1, light: 2, repair: 0 } })[0]).toEqual({
       kind: 'hallwork',
       work: 'roof',
     })
-    expect(plan({ ...base, hall: { roof: 0, door: 1, light: 0 } })[0]).toEqual({
+    expect(plan({ ...base, hall: { roof: 0, door: 1, light: 0, repair: 0 } })[0]).toEqual({
       kind: 'hallwork',
       work: 'door',
     })

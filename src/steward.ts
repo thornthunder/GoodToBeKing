@@ -20,8 +20,8 @@ export interface CourtState {
   freeBuilder?: string
   builderWithBeds?: string
   builderWithCoal?: string
-  /** What the hall still lacks, in blocks (0 = done). */
-  hall: { roof: number; door: number; light: number }
+  /** What the hall still lacks, in blocks (0 = done); `repair`: holes against its known shape. */
+  hall: { roof: number; door: number; light: number; repair: number }
   /** The storehouse holds coal (for torches). */
   storeHasCoal: boolean
   /** Courtiers carrying no food at all. */
@@ -79,7 +79,9 @@ export function plan(s: CourtState): StewardAction[] {
   const out: StewardAction[] = []
   // The hall first: a roof keeps arrows and rain out, a door keeps monsters out.
   if (s.freeBuilder) {
-    if (s.hall.roof > 0) out.push({ kind: 'hallwork', work: 'roof' })
+    // A hall with holes lets the monsters in: mend it before anything else.
+    if (s.hall.repair > 0) out.push({ kind: 'hallwork', work: 'repair' })
+    else if (s.hall.roof > 0) out.push({ kind: 'hallwork', work: 'roof' })
     else if (s.hall.door > 0) out.push({ kind: 'hallwork', work: 'door' })
     else if (s.builderWithBeds && s.bedsInHall < s.courtiers)
       out.push({ kind: 'hallwork', work: 'beds', by: s.builderWithBeds })

@@ -210,6 +210,7 @@ export class Bot extends EventEmitter {
   /** Eating and, for guards, fighting (survival). */
   private survival?: Survival
   private died = false
+  private lastDeathWords = 0
   private surviving = false
   /** The court's home and storehouse (survival). */
   private readonly household?: Household
@@ -846,6 +847,9 @@ export class Bot extends EventEmitter {
       if (!this.died) return
       this.died = false
       this.log.info(`back after dying, at ${fmtVec(this.position() ?? { x: 0, y: 0, z: 0 })}`)
+      // Said once in a while, not at every death of a bad night.
+      if (Date.now() - this.lastDeathWords < 10 * 60_000) return
+      this.lastDeathWords = Date.now()
       setTimeout(() => {
         void this.speak(
           'You just died (in survival, monsters, falls and drowning are real) and woke up again ' +

@@ -211,6 +211,22 @@ export function bedCells(hall: Hall, names: BlockNames, count: number): HandCell
  */
 export function repairCells(hall: Hall, names: BlockNames): HandCell[] {
   const cells: HandCell[] = []
+  // The floor first, and any crater under it (a creeper's), filled from the bottom up: dirt
+  // below, planks on top; under the walls too, so they stand on something.
+  for (const [x, z] of [...hall.inside, ...hall.ring]) {
+    const top = hall.floorY - 1
+    if (!open(names(x, top, z))) continue
+    let bottom = top
+    while (bottom > top - 6 && open(names(x, bottom - 1, z))) bottom--
+    for (let y = bottom; y <= top; y++)
+      cells.push({
+        x,
+        y,
+        z,
+        block:
+          y === top && hall.inside.some(([ix, iz]) => ix === x && iz === z) ? 'planks' : 'dirt',
+      })
+  }
   const doorway = new Set(hall.openings.map(([x, z]) => `${x},${z}`))
   for (const [x, z] of hall.ring)
     for (let y = hall.floorY; y <= hall.wallTop; y++) {
