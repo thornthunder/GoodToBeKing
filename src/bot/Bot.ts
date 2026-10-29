@@ -403,7 +403,7 @@ export class Bot extends EventEmitter {
 
   /**
    * Tap a bed near home so this courtier respawns there instead of at the world spawn (in
-   * Bedrock a bed sets the respawn point by day too). Returns the bed when the server says so.
+   * Bedrock a bed sets the respawn point by day too). Returns the bed it tapped.
    */
   async setSpawnAtBed(): Promise<{ x: number; y: number; z: number } | undefined> {
     const body = this.body
@@ -419,29 +419,17 @@ export class Bot extends EventEmitter {
       .map((p) => body.blockAt(p))[0]
     if (!bed) return undefined
     const walker = body as unknown as { pathfinder: Pathfinder }
-    const set = new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => {
-        this.off('chat', listen)
-        resolve(false)
-      }, 4_000)
-      const listen = (e: ChatEvent) => {
-        if (e.notice?.key !== 'tile.bed.respawnSet') return
-        clearTimeout(timer)
-        this.off('chat', listen)
-        resolve(true)
-      }
-      this.on('chat', listen)
-    })
     try {
       const p = bed.position
       await withTimeout(walker.pathfinder.goto(new goals.GoalNear(p.x, p.y, p.z, 2)), 30_000)
+      // The server's "Respawn point set" comes as a pop-up the court does not read; a tap that
+      // went through sets it (tried: a bot killed after tapping by day woke by the bed).
       await body.activateBlock(bed)
     } catch (err) {
       walker.pathfinder.setGoal(null)
       this.log.info(`could not get to a bed to set my spawn: ${errMsg(err)}`)
       return undefined
     }
-    if (!(await set)) return void this.log.info('tapped a bed, but the spawn point was not set')
     this.log.info(`respawn point set at the bed at ${bed.position}`)
     return { x: bed.position.x, y: bed.position.y, z: bed.position.z }
   }
