@@ -186,14 +186,24 @@ export class Miner {
   }
 
   private async digAt(p: Vec3): Promise<void> {
-    const block = this.bot.blockAt(p)
-    if (!block || /^(air|cave_air)$/.test(block.name) || block.name === 'torch') return
-    await this.toolFor(block.name)
-    try {
-      await withTimeout(this.bot.dig(block, true), 15_000)
-    } catch (err) {
-      this.log.info(`could not dig ${block.name} at ${p}: ${errMsg(err)}`)
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const block = this.bot.blockAt(p)
+      if (!block || /^(air|cave_air)$/.test(block.name) || block.name === 'torch') return
+      // A pickaxe wears out (a wooden one after some sixty blocks): make another when it is gone.
+      if ((STONE.test(block.name) || ORE.test(block.name)) && !this.hasPick()) await this.pickaxe()
+      await this.toolFor(block.name)
+      try {
+        await withTimeout(this.bot.dig(block, true), 15_000)
+        return
+      } catch (err) {
+        this.log.info(`could not dig ${block.name} at ${p} (try ${attempt + 1}): ${errMsg(err)}`)
+        await sleep(300)
+      }
     }
+  }
+
+  private hasPick(): boolean {
+    return this.bot.inventory.items().some((i) => /_pickaxe$/.test(i.name))
   }
 
   /** Pickaxe for stone and ore, hands (or a shovel) for dirt. */

@@ -1292,11 +1292,15 @@ export class Bot extends EventEmitter {
       // A pickaxe, sticks, some wood (for a pickaxe and a crafting table) and torches.
       await gatherer?.withChest(chest, async (window) => {
         for (const item of window.containerItems()) {
+          // Cobblestone for a stone pickaxe, which lasts far longer than a wooden one.
+          const stonePick = this.carries(/^stone_pickaxe$/) > 0
           const n = /_pickaxe$|^torch$|^stick$/.test(item.name)
             ? item.count
             : /_log$/.test(item.name) && this.carries(/_log$|_planks$/) < 4
               ? Math.min(3, item.count)
-              : 0
+              : item.name === 'cobblestone' && !stonePick && this.carries(/^cobblestone$/) < 3
+                ? Math.min(3, item.count)
+                : 0
           if (n > 0) await withTimeout(window.withdraw(item.type, item.metadata, n), 5_000)
         }
         return 0

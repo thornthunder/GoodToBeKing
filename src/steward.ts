@@ -143,7 +143,8 @@ export function plan(s: CourtState): StewardAction[] {
   if (s.builderWithFurnace && !s.furnace) jobs.push({ work: 'furnace', by: s.builderWithFurnace })
   else if (!s.furnace && s.cobblestone >= 8 && s.storehouse) jobs.push({ work: 'furnace' })
   // Stone for the dirt in walls and roof (endermen, creepers), with stone to spare after the furnace.
-  if ((s.hall.earth ?? 0) > 0 && s.cobblestone >= (s.furnace ? 8 : 16) && s.storehouse)
+  // (Only once the furnace stands: its eight cobblestone come first.)
+  if ((s.hall.earth ?? 0) > 0 && s.furnace && s.cobblestone >= 8 && s.storehouse)
     jobs.push({ work: 'reinforce' })
   for (const job of jobs) {
     if (rests(`hallwork:${job.work}`)) continue
