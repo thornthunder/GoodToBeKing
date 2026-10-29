@@ -17,6 +17,8 @@ const base: CourtState = {
   furnace: true,
   farm: { exists: true, work: 0 },
   seeds: 8,
+  cobblestone: 40,
+  mineEnded: false,
   woodInStore: 20,
   freeHand: 'Bruce',
   storehouse: true,
@@ -43,8 +45,16 @@ describe("the Castellan's account", () => {
     })
   })
 
-  it('has Merlin conjure swords, then beds for a builder to put up', () => {
-    const unarmed = plan({ ...base, guardsUnarmed: ['Bruce'], bedsInHall: 0 })
+  it('has guards make their own swords; Merlin conjures them only with nothing to make one of', () => {
+    expect(plan({ ...base, guardsUnarmed: ['Bruce'] })).toContainEqual({ kind: 'arm', by: 'Bruce' })
+    const bare = {
+      ...base,
+      cobblestone: 0,
+      woodInStore: 0,
+      guardsUnarmed: ['Bruce'],
+      bedsInHall: 0,
+    }
+    const unarmed = plan(bare)
     expect(unarmed).toContainEqual({
       kind: 'magic',
       item: 'iron_sword',
@@ -92,8 +102,13 @@ describe("the Castellan's account", () => {
     expect(plan({ ...low, rawInStore: 5, withoutFood: ['Dyke'] })).toEqual([
       { kind: 'cook', by: 'Bruce' },
     ])
-    // No furnace yet: Merlin conjures one, and a builder puts it in.
+    // No furnace yet: the builders make one of cobblestone; Merlin's only when there is no stone.
     expect(plan({ ...low, rawInStore: 5, furnace: false })).toContainEqual({
+      kind: 'hallwork',
+      work: 'furnace',
+    })
+    const noStone = { ...low, rawInStore: 5, furnace: false, cobblestone: 0, mineEnded: true }
+    expect(plan(noStone)).toContainEqual({
       kind: 'magic',
       item: 'furnace',
       count: 1,
@@ -133,15 +148,21 @@ describe("the Castellan's account", () => {
       freeBuilder: undefined,
     }
     expect(plan(dark)).toContainEqual({ kind: 'charcoal', by: 'Bruce' })
-    // No furnace: Merlin's furnace comes first (charcoal after), not his coal.
+    // No furnace: one is made first (of cobblestone), and charcoal after; no magic coal.
     expect(plan({ ...dark, furnace: false, freeBuilder: 'Henry' })).toContainEqual({
-      kind: 'magic',
-      item: 'furnace',
-      count: 1,
-      to: 'Henry',
-      then: 'furnace',
-      why: 'a furnace for the hall',
+      kind: 'hallwork',
+      work: 'furnace',
     })
+  })
+
+  it('mines for stone by day when the storehouse runs short, and stops for good where the mine ended', () => {
+    expect(plan({ ...base, cobblestone: 4 })).toContainEqual({
+      kind: 'mine',
+      by: 'Bruce',
+      want: 24,
+    })
+    expect(plan({ ...base, cobblestone: 4, night: true })).toEqual([])
+    expect(plan({ ...base, cobblestone: 4, mineEnded: true })).toEqual([])
   })
 
   it('sends nobody out at night: no field, no hunt, no wood; cooking indoors goes on', () => {

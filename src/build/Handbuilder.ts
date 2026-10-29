@@ -186,6 +186,12 @@ export class Handbuilder {
     if (doors > 0) want.set('planks', (want.get('planks') ?? 0) + 6 * doors + 4)
     const chests = want.get('chest') ?? 0
     if (chests > 0) want.set('planks', (want.get('planks') ?? 0) + 8 * chests + 4)
+    // A furnace is eight cobblestone, at a crafting table.
+    const furnaces = want.get('furnace') ?? 0
+    if (furnaces > 0) {
+      want.set('cobblestone', (want.get('cobblestone') ?? 0) + 8 * furnaces)
+      want.set('planks', (want.get('planks') ?? 0) + 4)
+    }
     // A few blocks to tower up on, in case a spot is out of reach.
     want.set('dirt', Math.max(0, (want.get('dirt') ?? 0) + 6 - this.carried('dirt')))
     return want
@@ -234,6 +240,9 @@ export class Handbuilder {
     for (let i = 0; i < doors && !this.cancelled; i++) await this.makeDoor()
     const chests = this.needs(job).get('chest') ?? 0
     if (chests > 0 && !this.cancelled) await craft(this.bot, this.log, 'chest', chests)
+    const furnaces = this.needs(job).get('furnace') ?? 0
+    if (furnaces > 0 && this.carried('cobblestone') >= 8 && !this.cancelled)
+      await craft(this.bot, this.log, 'furnace', furnaces)
   }
 
   /** Take up to `count` matching items out of the chest; returns how many it could not find. */

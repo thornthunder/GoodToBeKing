@@ -300,6 +300,8 @@ export class BotManager {
       furnace: hall.inside.some(([x, z]) => /furnace$/.test(names(x, hall.floorY, z) ?? '')),
       builderWithFurnace: carrying(/^furnace$/),
       farm: { exists: Boolean(this.household.farm), work: this.farmWork(names) },
+      cobblestone: sum(/^(cobblestone|cobbled_deepslate)$/),
+      mineEnded: Boolean(this.household.mine?.ended),
       seeds: sum(/^wheat_seeds$/) + this.bots.reduce((n, b) => n + b.carries(/^wheat_seeds$/), 0),
       // Guards first: they carry swords. Then anyone of the staff.
       freeHunter: (
@@ -370,6 +372,20 @@ export class BotManager {
         if (!hunter) return
         this.log.info(`housekeeping: ${hunter.cfg.name} goes hunting for the court's food`)
         void hunter.startHunt(action.animals)
+        return
+      }
+      case 'mine': {
+        const miner = by(action.by)
+        if (!miner) return
+        this.log.info(`housekeeping: ${miner.cfg.name} goes down the mine for stone`)
+        void miner.startMining(action.want)
+        return
+      }
+      case 'arm': {
+        const guard = by(action.by)
+        if (!guard) return
+        this.log.info(`housekeeping: ${guard.cfg.name} makes himself a sword`)
+        void guard.startArming()
         return
       }
       case 'charcoal': {
@@ -1138,6 +1154,10 @@ export class BotManager {
       void bot.startHunt(Number(words[2]) || 2)
     } else if (verb === 'cook') {
       void bot.startCooking()
+    } else if (verb === 'mine') {
+      void bot.startMining(Number(words[2]) || 16)
+    } else if (verb === 'arm') {
+      void bot.startArming()
     } else if (verb === 'charcoal') {
       void bot.startCharcoal()
     } else if (verb === 'farm') {

@@ -40,6 +40,10 @@ export interface CourtState {
   farm: { exists: boolean; work: number }
   /** Wheat seeds the court has (storehouse and pockets). */
   seeds: number
+  /** Cobblestone in the storehouse. */
+  cobblestone: number
+  /** The court's mine has ended for good (water, lava, a cave, deep enough): no more stone from it. */
+  mineEnded: boolean
   /** Wood in the storehouse, in logs (four planks count as one). */
   woodInStore: number
   /** A free member of the staff for errands. */
@@ -65,6 +69,10 @@ export type StewardAction =
   | { kind: 'cook'; by: string }
   /** Charcoal from the storehouse's logs (for torches, without coal). */
   | { kind: 'charcoal'; by: string }
+  /** Dig the court's mine on for cobblestone (and ore). */
+  | { kind: 'mine'; by: string; want: number }
+  /** A guard makes himself a sword (stone, or wood without cobblestone). */
+  | { kind: 'arm'; by: string }
   /** Lay out the wheat field, or tend it (till, plant, harvest, bake). */
   | { kind: 'farm'; by: string }
 
@@ -74,6 +82,8 @@ export const MAGIC_RESERVE = 2
 export const WOOD_RESERVE = 12
 /** Below this many meals in the storehouse, someone cooks or hunts. */
 export const FOOD_RESERVE = 8
+/** Below this much cobblestone in the storehouse, someone mines. */
+export const STONE_RESERVE = 32
 
 /**
  * What to do now: at most one piece of hall work, one piece of magic (or a request to the royal
@@ -94,6 +104,9 @@ export function plan(s: CourtState): StewardAction[] {
       out.push({ kind: 'hallwork', work: 'light', by: s.builderWithCoal })
     else if (s.builderWithFurnace && !s.furnace)
       out.push({ kind: 'hallwork', work: 'furnace', by: s.builderWithFurnace })
+    // The court's own furnace: eight cobblestone.
+    else if (!s.furnace && s.cobblestone >= 8 && s.storehouse)
+      out.push({ kind: 'hallwork', work: 'furnace' })
   }
   // Light without coal: charcoal from the court's own logs, in the furnace (indoor work).
   const coal = s.storeHasCoal || Boolean(s.builderWithCoal)
@@ -117,10 +130,14 @@ export function plan(s: CourtState): StewardAction[] {
     else if (s.rawInStore < FOOD_RESERVE && !s.night)
       out.push({ kind: 'hunt', animals: 3, by: s.freeHunter })
   }
+  // Guards arm themselves: a stone sword (or a wooden one) from the storehouse's materials.
+  const canArm = s.storehouse && (s.cobblestone >= 2 || s.woodInStore >= 1)
+  if (canArm && s.guardsUnarmed[0]) out.push({ kind: 'arm', by: s.guardsUnarmed[0] })
   // Magic: swords, beds, coal, food; only for what the court cannot get by hand.
   const wants: Array<Omit<Extract<StewardAction, { kind: 'magic' }>, 'kind'>> = []
-  for (const guard of s.guardsUnarmed)
-    wants.push({ item: 'iron_sword', count: 1, to: guard, why: `a sword for ${guard}` })
+  if (!canArm)
+    for (const guard of s.guardsUnarmed)
+      wants.push({ item: 'iron_sword', count: 1, to: guard, why: `a sword for ${guard}` })
   const bedsWanted = s.courtiers - s.bedsInHall
   if (bedsWanted > 0 && !s.builderWithBeds && s.freeBuilder)
     wants.push({
@@ -133,8 +150,8 @@ export function plan(s: CourtState): StewardAction[] {
   // Seeds, once, to start the field (after that it gives its own).
   if (!s.farm.exists && s.seeds === 0 && s.freeHand && s.storehouse)
     wants.push({ item: 'wheat_seeds', count: 8, to: s.freeHand, why: 'seeds for a wheat field' })
-  // A furnace, once, so the meat can be cooked.
-  if (!s.furnace && !s.builderWithFurnace && s.freeBuilder && s.storehouse)
+  // A furnace by magic only when the court cannot mine the stone for one.
+  if (!s.furnace && !s.builderWithFurnace && s.freeBuilder && s.storehouse && s.mineEnded)
     wants.push({
       item: 'furnace',
       count: 1,
@@ -161,6 +178,10 @@ export function plan(s: CourtState): StewardAction[] {
     else if (s.merlinAwake && s.magicLeft - first.count >= MAGIC_RESERVE)
       out.push({ kind: 'magic', ...first })
   }
+  // Stone: the mine, by day (a free hand not farming).
+  const miner = s.freeHand !== farmer ? s.freeHand : undefined
+  if (s.storehouse && miner && !s.night && !s.mineEnded && s.cobblestone < STONE_RESERVE)
+    out.push({ kind: 'mine', by: miner, want: 24 })
   // Wood for the next repairs and planks.
   if (s.storehouse && s.freeHand && s.woodInStore < WOOD_RESERVE && !s.night)
     out.push({ kind: 'errand', material: 'wood', count: 16 })

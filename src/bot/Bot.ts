@@ -54,7 +54,9 @@ import {
 } from '../build/hall'
 import type { Household } from '../household'
 import { Cook } from './cooking'
+import { craft, makePlanks } from './crafting'
 import { Farmer } from './farming'
+import { Miner, chooseMine } from './mining'
 import { Gatherer, type Material } from './gathering'
 import { GAME, Hunter, SPOILS } from './hunting'
 import { FOODS, Survival, isNight } from './survival'
@@ -210,6 +212,7 @@ export class Bot extends EventEmitter {
   private hunter?: Hunter
   private cook?: Cook
   private farmer?: Farmer
+  private miner?: Miner
   /** Eating and, for guards, fighting (survival). */
   private survival?: Survival
   private died = false
@@ -824,6 +827,7 @@ export class Bot extends EventEmitter {
     this.hunter = new Hunter(body, this.log.child('hunt'), (name) => this.isBot(name))
     this.cook = new Cook(body, this.log.child('cook'), this.gatherer)
     this.farmer = new Farmer(body, this.log.child('farm'), this.gatherer)
+    this.miner = new Miner(body, this.log.child('mine'))
     this.handbuilder = new Handbuilder(body, this.log.child('hands'), this.gatherer, () =>
       this.movement?.configure()
     )
@@ -1205,6 +1209,106 @@ export class Bot extends EventEmitter {
       if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
     } catch (err) {
       this.log.warn(`farming failed: ${errMsg(err)}`)
+    } finally {
+      this.gathering = false
+    }
+  }
+
+  /**
+   * Dig the court's mine on (a staircase near home, chosen once) for cobblestone and ore: a
+   * pickaxe and wood from the storehouse, the stone and ore back into it, and the pickaxe too.
+   */
+  async startMining(want: number): Promise<void> {
+    const miner = this.miner
+    const body = this.body
+    const home = this.household?.home
+    const chest = this.household?.storehouse
+    if (!miner || !body || !home || !chest || this.gathering || !byHand(this.gameMode())) return
+    let mine = this.household?.mine
+    if (!mine) {
+      const names = (x: number, y: number, z: number) => body.blockAt(new WorldVec(x, y, z))?.name
+      const hall = this.household?.hall
+      const clear: Array<[number, number]> = [
+        ...(hall ? [...hall.ring, ...hall.inside] : [[home.x, home.z] as [number, number]]),
+        ...(this.household?.farm?.cells ?? []),
+      ]
+      mine = chooseMine(names, home, clear)
+      if (!mine) return void this.log.info('found no place near home to start a mine')
+      this.household?.setMine(mine)
+      this.log.info(`started the court's mine at ${mine.x},${mine.y},${mine.z}`)
+    }
+    this.gathering = true
+    this.pauseWorks()
+    this.dutyFollowing = false
+    this.movement?.stop()
+    const gatherer = this.gatherer
+    try {
+      // A pickaxe, sticks, some wood (for a pickaxe and a crafting table) and torches.
+      await gatherer?.withChest(chest, async (window) => {
+        for (const item of window.containerItems()) {
+          const n = /_pickaxe$|^torch$|^stick$/.test(item.name)
+            ? item.count
+            : /_log$/.test(item.name) && this.carries(/_log$|_planks$/) < 4
+              ? Math.min(3, item.count)
+              : 0
+          if (n > 0) await withTimeout(window.withdraw(item.type, item.metadata, n), 5_000)
+        }
+        return 0
+      })
+      const result = await miner.dig(mine, want)
+      this.household?.setMine(mine)
+      await gatherer?.withChest(chest, async (window) => {
+        for (const item of this.body?.inventory.items() ?? [])
+          if (
+            /^(cobblestone|cobbled_deepslate|coal|raw_iron|raw_copper|dirt|andesite|diorite|granite)$|_pickaxe$/.test(
+              item.name
+            )
+          )
+            await withTimeout(window.deposit(item.type, item.metadata, item.count), 5_000)
+        return 0
+      })
+      if (gatherer?.lastStock) this.household?.noteStock(gatherer.lastStock)
+      if (result.ended) this.log.info(`the court's mine is done: ${result.ended}`)
+    } catch (err) {
+      this.log.warn(`mining failed: ${errMsg(err)}`)
+    } finally {
+      this.gathering = false
+    }
+  }
+
+  /** A guard makes himself a sword: stone with cobblestone from the storehouse, else wood. */
+  async startArming(): Promise<void> {
+    const chest = this.household?.storehouse
+    const body = this.body
+    if (!chest || !body || this.gathering || this.carries(/_(sword|axe)$/) > 0) return
+    this.gathering = true
+    try {
+      await this.gatherer?.withChest(chest, async (window) => {
+        const take = async (items: RegExp, n: number) => {
+          for (const item of window.containerItems().filter((i) => items.test(i.name))) {
+            if (n <= 0) return
+            const k = Math.min(n, item.count)
+            await withTimeout(window.withdraw(item.type, item.metadata, k), 5_000)
+            n -= k
+          }
+        }
+        await take(/^cobblestone$/, 2)
+        await take(/^stick$/, 1)
+        // Wood for a stick, a wooden blade without cobblestone, and a crafting table.
+        await take(/_log$/, 2)
+        return 0
+      })
+      const log = this.log.child('arms')
+      if (this.carries(/^stick$/) < 1) {
+        await makePlanks(body, log, 2)
+        await craft(body, log, 'stick', 1)
+      }
+      const sword = this.carries(/^cobblestone$/) >= 2 ? 'stone_sword' : 'wooden_sword'
+      if (sword === 'wooden_sword') await makePlanks(body, log, 2)
+      if (await craft(body, log, sword, 1))
+        this.log.info(`made myself a ${sword.replace('_', ' ')}`)
+    } catch (err) {
+      this.log.warn(`arming failed: ${errMsg(err)}`)
     } finally {
       this.gathering = false
     }
@@ -1827,6 +1931,8 @@ export class Bot extends EventEmitter {
       this.hunter = undefined
       this.cook = undefined
       this.farmer = undefined
+      this.miner?.cancel()
+      this.miner = undefined
       clearInterval(this.dutyTimer)
       this.dutyFollowing = false
       this.floor?.setOnline(this.cfg.name, false)
