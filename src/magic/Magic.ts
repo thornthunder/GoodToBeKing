@@ -6,10 +6,12 @@ import {
   CREATURES,
   EFFECTS,
   GIFTS,
-  GiftsSpent,
-  ITEMS_PER_HOUR,
+  MAGIC_PER_HOUR,
+  MagicSpent,
+  castingCost,
   commandsFor,
-  cooldownOf,
+  conjures,
+  isTravel,
   needs,
   spellProblems,
   type Spell,
@@ -47,7 +49,7 @@ const GIVE_UP_MS = 7 * DAY
 /** How often taking a gift back is tried again. */
 const RETRY_MS = 30 * 60_000
 
-/** Things given at one time, counted against the hour's gifts. */
+/** Magic done at one time (things conjured, or one casting), counted against the hour's. */
 interface Given {
   at: number
   items: number
@@ -61,15 +63,14 @@ interface Saved {
 }
 
 /**
- * Merlin's magic: the spells he knows (built in, and taught by the King), their cooldowns, and
- * the gifts he still has to take back. File-backed.
+ * Merlin's magic: the spells he knows (built in, and taught by the King), how much of the hour's
+ * magic is used, and the gifts he still has to take back. File-backed.
  */
 export class Magic {
   private learned: Spell[] = []
   private gifts: Gift[] = []
   private given: Given[] = []
   private next = 1
-  private readonly lastCast = new Map<string, number>()
   private readonly lastTry = new Map<string, number>()
   /**
    * Whether the server lets Merlin run commands right now (checked after each spawn). Offline
@@ -118,35 +119,29 @@ export class Magic {
     return this.places().find((p) => p.name.toLowerCase() === key)
   }
 
-  /** How long until the spell can be cast again; 0 when it is ready. */
-  wait(spell: Spell, now = Date.now()): number {
-    const last = this.lastCast.get(spell.id)
-    return last === undefined ? 0 : Math.max(0, last + cooldownOf(spell) - now)
-  }
-
-  /** Things Merlin may still give this hour: at most ITEMS_PER_HOUR in any hour, all gifts together. */
-  itemsLeft(now = Date.now()): number {
+  /** Magic left this hour: at most MAGIC_PER_HOUR in any real hour, all spells together. */
+  magicLeft(now = Date.now()): number {
     const used = this.given.filter((g) => now - g.at < HOUR).reduce((n, g) => n + g.items, 0)
-    return Math.max(0, ITEMS_PER_HOUR - used)
+    return Math.max(0, MAGIC_PER_HOUR - used)
   }
 
-  /** Why nothing more can be given now; undefined while something is left this hour. */
-  private spent(now: number): string | undefined {
-    if (this.itemsLeft(now) > 0) return undefined
+  /** Why this spell cannot be cast for want of magic; undefined when enough is left. */
+  private spent(spell: Spell, now: number): string | undefined {
+    if (isTravel(spell)) return undefined
+    const need = castingCost(spell) + (conjures(spell) ? 1 : 0)
+    if (this.magicLeft(now) >= need) return undefined
     const oldest = Math.min(...this.given.filter((g) => now - g.at < HOUR).map((g) => g.at))
     const minutes = Math.max(1, Math.ceil((oldest + HOUR - now) / 60_000))
     return (
-      `the gift magic is spent (at most ${ITEMS_PER_HOUR} things an hour); it gathers again in ` +
-      `${minutes} minute${minutes > 1 ? 's' : ''}`
+      `the magic is spent (at most ${MAGIC_PER_HOUR} spells and things an hour, travel is free); ` +
+      `it gathers again in ${minutes} minute${minutes > 1 ? 's' : ''}`
     )
   }
 
   /** What is wrong with a request for this spell, in plain words; undefined when it can be cast. */
   check(spell: Spell, args: SpellArgs, now = Date.now()): string | undefined {
-    if (spell.steps.some((s) => s.kind === 'give' || s.kind === 'saddle')) {
-      const spent = this.spent(now)
-      if (spent) return spent
-    }
+    const spent = this.spent(spell, now)
+    if (spent) return spent
     for (const need of needs(spell)) {
       if (need === 'place' && !this.place(args.place))
         return `it needs a place Merlin knows (${args.place ? `not "${args.place}"` : 'none was named'})`
@@ -194,7 +189,7 @@ export class Magic {
     return learned
   }
 
-  /** Cast a spell: run its commands in order, keep its gifts, start its cooldown. */
+  /** Cast a spell: run its commands in order, keep its gifts, count it against the hour. */
   async cast(
     spell: Spell,
     args: SpellArgs,
@@ -202,7 +197,11 @@ export class Magic {
     run: RunCommand,
     now = Date.now()
   ): Promise<{ ok: boolean; reason?: string }> {
+    const spent = this.spent(spell, now)
+    if (spent) return { ok: false, reason: spent }
     const giftId = String(this.next++)
+    // The casting itself is paid at the end; what it conjures may use the rest.
+    const cost = castingCost(spell)
     let casts
     try {
       casts = commandsFor(spell, {
@@ -211,10 +210,10 @@ export class Magic {
         placeOf: (name) => this.place(name),
         args,
         giftId,
-        itemsLeft: this.itemsLeft(now),
+        magicLeft: isTravel(spell) ? undefined : this.magicLeft(now) - cost,
       })
     } catch (err) {
-      if (err instanceof GiftsSpent) return { ok: false, reason: this.spent(now) ?? err.message }
+      if (err instanceof MagicSpent) return { ok: false, reason: err.message }
       return { ok: false, reason: err instanceof Error ? err.message : String(err) }
     }
     for (const cast of casts) {
@@ -249,8 +248,11 @@ export class Magic {
         this.save()
       }
     }
-    // The magic needs time to gather again only after it worked.
-    this.lastCast.set(spell.id, now)
+    // The casting counts only once it worked.
+    if (cost) {
+      this.given.push({ at: now, items: cost })
+      this.save()
+    }
     return { ok: true }
   }
 

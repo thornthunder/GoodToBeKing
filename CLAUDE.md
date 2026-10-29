@@ -147,8 +147,9 @@ Windows, killing a background `npx` shell does not kill its node children at all
   time, summon, particle, sound, give, saddle) with their allowlists, the built-in spells and
   `commandsFor`, which writes the commands; the model only picks a spell and its target, place,
   item or creature (in the order reading), and nothing it writes is run. `Magic.ts` keeps learned
-  spells and gifts in `.state/magic-<bot>.json`, cooldowns (teleports none, effects 2 min,
-  weather, time and gifts 10 min, creatures 5 min, sparkles 30 s), and takes gifts back after a
+  spells and gifts in `.state/magic-<bot>.json`, holds to the King's limit (`MAGIC_PER_HOUR`: at
+  most 10 a real hour, all spells together; each casting counts one, each thing conjured, a gift
+  or a creature, counts one; travel is free; kept across restarts), and takes gifts back after a
   day (`clear`, or the saddle off the horse it tagged). `places.ts` names a free spot in every
   room of the castles built and being built. Spells only for royals and courtiers, never on a
   royal who outranks the one asking; only the King teaches a spell, and Merlin learns it after

@@ -7,8 +7,9 @@ import { Magic, type CommandResult } from './Magic'
 import { castlePlaces } from './places'
 import {
   BUILTIN_SPELLS,
+  castingCost,
   commandsFor,
-  cooldownOf,
+  isTravel,
   spellProblems,
   tidySteps,
   type Spell,
@@ -75,12 +76,25 @@ describe('spells', () => {
     ])
   })
 
-  it('teleports are free, everything else needs a while', () => {
-    expect(cooldownOf(spell('blink'))).toBe(0)
-    expect(cooldownOf(spell('gather'))).toBe(0)
-    expect(cooldownOf(spell('heal'))).toBe(2 * 60_000)
-    expect(cooldownOf(spell('gift'))).toBe(10 * 60_000)
-    expect(cooldownOf(spell('fireworks'))).toBe(30_000)
+  it('travel is free; a casting counts one, and conjured things count one by one', () => {
+    expect(isTravel(spell('blink'))).toBe(true)
+    expect(castingCost(spell('gather'))).toBe(0)
+    expect(castingCost(spell('heal'))).toBe(1)
+    expect(castingCost(spell('fair_weather'))).toBe(1)
+    expect(castingCost(spell('fireworks'))).toBe(1)
+    expect(castingCost(spell('sparkles'))).toBe(1)
+    // A gift or a creature costs what it conjures, nothing more.
+    expect(castingCost(spell('gift'))).toBe(0)
+    expect(castingCost(spell('summon_creature'))).toBe(0)
+    const horses = commandsFor(spell('summon_creature'), {
+      ...ctx,
+      args: { creature: 'horse', count: 5 },
+      magicLeft: 2,
+    })
+    // Five horses asked for, two left this hour: two come.
+    expect(horses.filter((c) => c.command.includes('summon horse')).map((c) => c.items)).toEqual([
+      1, 1,
+    ])
   })
 
   it('tidies a spell the model squeezed into one step', () => {
@@ -132,7 +146,7 @@ describe('the magic keeper', () => {
     const who = { requester: 'LittleOne42', target: 'LittleOne42', merlin: 'Merlin' }
     const t0 = 1_000_000
     expect(await magic.cast(spell('gift'), { item: 'cake' }, who, ok, t0)).toEqual({ ok: true })
-    expect(magic.wait(spell('gift'), t0 + 60_000)).toBe(9 * 60_000)
+    expect(magic.magicLeft(t0 + 60_000)).toBe(9)
     expect(magic.pendingGifts).toHaveLength(1)
 
     const online = () => true
@@ -143,7 +157,7 @@ describe('the magic keeper', () => {
     expect(magic.pendingGifts).toHaveLength(0)
   })
 
-  it('gives at most ten things an hour, all gifts together, even after a restart', async () => {
+  it('does at most ten things an hour, all spells together, even after a restart', async () => {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'magic-')), 'magic.json')
     const magic = new Magic({ file })
     const who = { requester: 'LittleOne42', target: 'Henry', merlin: 'Merlin' }
@@ -153,23 +167,32 @@ describe('the magic keeper', () => {
       ok: true,
     })
     expect(ran.filter((c) => c.startsWith('give')).at(-1)).toBe('give "Henry" cookie 8')
-    expect(magic.itemsLeft(t0)).toBe(2)
+    expect(magic.magicLeft(t0)).toBe(2)
     // Only two of the four loaves are left to give this hour.
     const bread = { item: 'bread', count: 4 }
     expect(await magic.cast(spell('gift'), bread, who, ok, t0 + 600_000)).toEqual({ ok: true })
     expect(ran.filter((c) => c.startsWith('give')).at(-1)).toBe('give "Henry" bread 2')
-    expect(magic.check(spell('gift'), { item: 'oak_log' }, t0 + 1_800_000)).toBe(
-      'the gift magic is spent (at most 10 things an hour); it gathers again in 30 minutes'
+    const spentLine =
+      'the magic is spent (at most 10 spells and things an hour, travel is free); it gathers again in 30 minutes'
+    expect(magic.check(spell('gift'), { item: 'oak_log' }, t0 + 1_800_000)).toBe(spentLine)
+    expect(magic.check(spell('fair_weather'), {}, t0 + 1_800_000)).toBe(spentLine)
+    const spent = await magic.cast(spell('fair_weather'), {}, who, ok, t0 + 1_800_000)
+    expect(spent.reason).toBe(spentLine)
+    // Travel is free, however much magic was done.
+    expect(magic.check(spell('portal'), { place: 'anywhere' }, t0 + 1_800_000)).not.toContain(
+      'spent'
     )
-    const spent = await magic.cast(spell('gift'), { item: 'oak_log' }, who, ok, t0 + 1_800_000)
-    expect(spent.reason).toContain('the gift magic is spent')
-    // Spells that give nothing are not held back.
-    expect(magic.check(spell('fair_weather'), {}, t0 + 1_800_000)).toBeUndefined()
+    expect(await magic.cast(spell('gather'), {}, who, ok, t0 + 1_800_000)).toEqual({ ok: true })
 
     const restarted = new Magic({ file })
-    expect(restarted.itemsLeft(t0 + 1_800_000)).toBe(0)
-    expect(restarted.itemsLeft(t0 + 3_600_000)).toBe(8)
-    expect(restarted.itemsLeft(t0 + 4_200_000)).toBe(10)
+    expect(restarted.magicLeft(t0 + 1_800_000)).toBe(0)
+    expect(restarted.magicLeft(t0 + 3_600_000)).toBe(8)
+    // The weather changed once more after the cookies' hour.
+    expect(await restarted.cast(spell('fair_weather'), {}, who, ok, t0 + 3_700_000)).toEqual({
+      ok: true,
+    })
+    expect(restarted.magicLeft(t0 + 3_700_000)).toBe(7)
+    expect(restarted.magicLeft(t0 + 4_200_000)).toBe(9)
   })
 
   it('says why a spell failed', async () => {

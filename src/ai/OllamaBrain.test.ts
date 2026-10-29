@@ -816,7 +816,7 @@ describe('OllamaBrain court behaviour', () => {
       expect(calls).toHaveLength(0)
     })
 
-    it('casts a spell a royal asks for, and says when its magic is still gathering', async () => {
+    it('casts a spell a royal asks for, and says when the magic of the hour is spent', async () => {
       const magic = new Magic()
       const { brain, calls, readings } = makeBrain('Behold!', {}, new HailLog(), { magic })
       const sparkles = { spells: [{ id: 'sparkles', target: 'speaker' }], lasting: false }
@@ -838,11 +838,14 @@ describe('OllamaBrain court behaviour', () => {
       const ok = async () => ({ ok: true, count: 1, output: [] })
       const spell = magic.find('sparkles')!
       const who = { requester: 'LittleOne42', target: 'LittleOne42', merlin: 'Merlin' }
+      // Nine more sparkles: the hour's ten are spent.
+      for (let i = 0; i < 9; i++) await magic.cast(spell, {}, who, ok)
+      expect(magic.magicLeft()).toBe(1)
       await magic.cast(spell, {}, who, ok)
       readings.push(order('Cast sparkles on the Princess.', sparkles))
       const again = await brain.onChat(chat('LittleOne42', 'again!'), ctx('LittleOne42'))
       expect(again?.action).toBeUndefined()
-      expect(calls[1].at(-1)?.content).toContain('still gathering')
+      expect(calls[1].at(-1)?.content).toContain('the magic is spent')
     })
 
     it('casts several spells in the order asked: both of us to the castle, then the court', async () => {

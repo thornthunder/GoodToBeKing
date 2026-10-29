@@ -47,7 +47,7 @@ import {
 } from './orders'
 import type { Magic } from '../magic/Magic'
 import {
-  ITEMS_PER_HOUR,
+  MAGIC_PER_HOUR,
   needs,
   stepGuide,
   tidySteps,
@@ -596,14 +596,6 @@ export class OllamaBrain implements Brain {
       const problem = magic.check(spell, args)
       if (problem) {
         refused.push(`${spell.name}: ${problem}`)
-        continue
-      }
-      const wait = magic.wait(spell)
-      if (wait > 0) {
-        const minutes = Math.ceil(wait / 60_000)
-        refused.push(
-          `${spell.name}: its magic is still gathering, ready again in ${minutes} minute${minutes > 1 ? 's' : ''}`
-        )
         continue
       }
       casts.push({ spell: spell.id, args, target })
@@ -1342,8 +1334,10 @@ export class OllamaBrain implements Brain {
           .map((s) => s.name)
           .join(', ')}. You cast a spell when ` +
           'the royal family asks; the magic happens by itself, so just talk about it. You know no ' +
-          `other spells, but the King can teach you new ones. By the King's own rule your gifts are ` +
-          `at most ${ITEMS_PER_HOUR} things an hour, all together (${this.magic.itemsLeft()} left now).`,
+          `other spells, but the King can teach you new ones. By the King's own rule your magic ` +
+          `does at most ${MAGIC_PER_HOUR} things an hour, all spells together: each casting counts ` +
+          'one and so does each thing you conjure (a gift, a creature), but travel spells are free ' +
+          `(${this.magic.magicLeft()} left now).`,
       `- You still cannot build anything outside ${this.magic ? 'your spellbook' : 'that list'}, fetch or carry items, or find ` +
         'places by name. If asked to, never agree or promise to do it. Kindly explain in ' +
         'character that this magic is not ready yet and offer something else.',

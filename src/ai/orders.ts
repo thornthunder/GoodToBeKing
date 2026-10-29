@@ -370,7 +370,7 @@ export function readingPrompt(bot: string, role: string, magic?: MagicInfo): str
       '  "the King" or "Bruce".',
       `place, for a spell that needs one, exactly as written here: ${magic.places.join('; ')}.`,
       'item, creature, effect: for a spell that needs them, as its line lists.',
-      'count: for a gift, how many were asked for; leave it out when no number was said.',
+      'count: for a gift or creatures, how many were asked for; leave it out when no number was said.',
       'A request for magic that none of these spells can do is an "order" with one spell of id',
       '"unknown".',
       `The King may teach ${bot} a new spell by describing it. Then the type is "teach", and`,

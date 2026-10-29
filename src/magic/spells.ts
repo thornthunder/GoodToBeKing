@@ -46,7 +46,7 @@ export type Creature = (typeof CREATURES)[number]
 
 /**
  * Gifts, with how many may be given at once. They are taken back after a day. Food and building
- * materials help the court in survival, but sparingly: see ITEMS_PER_HOUR.
+ * materials help the court in survival, but sparingly: see MAGIC_PER_HOUR.
  */
 export const GIFTS: Record<string, number> = {
   cake: 1,
@@ -84,13 +84,17 @@ export const GIFTS: Record<string, number> = {
   chest: 1,
 }
 
-/** Merlin gives at most this many things an hour, all gifts together (the King's rule). */
-export const ITEMS_PER_HOUR = 10
+/**
+ * The King's rule: Merlin's magic does at most this much in any real hour, all spells together.
+ * Each thing conjured (a gift, a creature, a saddle) counts one; any other casting (weather, time,
+ * an effect, sparkles) counts one; travel spells are free. See castingCost.
+ */
+export const MAGIC_PER_HOUR = 10
 
-/** Thrown when a spell would give more than is left of this hour's gifts. */
-export class GiftsSpent extends Error {
+/** Thrown when a spell would do more than is left of this hour's magic. */
+export class MagicSpent extends Error {
   constructor() {
-    super('the gift magic is spent for this hour')
+    super('the magic is spent for this hour')
   }
 }
 
@@ -140,27 +144,44 @@ export interface SpellArgs {
   target?: string
   place?: string
   item?: string
-  /** How many of the item were asked for (a gift); its own limit and the hour's still apply. */
+  /** How many were asked for (a gift, creatures); their own limits and the hour's still apply. */
   count?: number
   creature?: string
   effect?: string
 }
 
-const MINUTE = 60_000
-
-/** Teleports are free; everything else needs a while to gather again (per spell). */
-export function cooldownOf(spell: Spell): number {
-  const kinds = new Set(spell.steps.map((s) => s.kind))
-  if ([...kinds].every((k) => k === 'teleport')) return 0
-  if (kinds.has('give') || kinds.has('saddle') || kinds.has('weather') || kinds.has('time'))
-    return 10 * MINUTE
-  if (
-    kinds.has('summon') &&
-    !spell.steps.some((s) => s.kind === 'summon' && s.creature === 'fireworks_rocket')
+/** Travel (teleports, with sparkles or sounds at most) is free of the hourly limit. */
+export function isTravel(spell: Spell): boolean {
+  return (
+    spell.steps.some((s) => s.kind === 'teleport') &&
+    spell.steps.every((s) => s.kind === 'teleport' || s.kind === 'particle' || s.kind === 'sound')
   )
-    return 5 * MINUTE
-  if (kinds.has('effect')) return 2 * MINUTE
-  return 30_000
+}
+
+/** Conjures things that count one by one: gifts, saddles, creatures (not a fireworks show). */
+export function conjures(spell: Spell): boolean {
+  return spell.steps.some(
+    (s) =>
+      s.kind === 'give' ||
+      s.kind === 'saddle' ||
+      (s.kind === 'summon' && s.creature !== 'fireworks_rocket')
+  )
+}
+
+/**
+ * What one casting costs of the hour's magic besides the things it conjures (which count one by
+ * one): travel nothing, a spell that only conjures nothing more, any other spell one.
+ */
+export function castingCost(spell: Spell): number {
+  if (isTravel(spell)) return 0
+  const plain = spell.steps.some(
+    (s) =>
+      s.kind === 'weather' ||
+      s.kind === 'time' ||
+      s.kind === 'effect' ||
+      (s.kind === 'summon' && s.creature === 'fireworks_rocket')
+  )
+  return plain || !conjures(spell) ? 1 : 0
 }
 
 /** The spells Merlin knows from the start. */
@@ -418,7 +439,7 @@ export interface Cast {
   undo?: string[]
   /** Set on a saddle: the tag command must find a horse, or the spell fails. */
   mustFind?: string
-  /** How many things it gives (counted against ITEMS_PER_HOUR). */
+  /** How many things it conjures (each counted against MAGIC_PER_HOUR). */
   items?: number
 }
 
@@ -432,8 +453,8 @@ export interface CastContext {
   args: SpellArgs
   /** A fresh id per cast, for tagging what a gift is put on. */
   giftId: string
-  /** Things that may still be given this hour (no limit when unset). */
-  itemsLeft?: number
+  /** Things that may still be conjured this hour (no limit when unset). */
+  magicLeft?: number
 }
 
 const q = (name: string) => `"${name.replace(/"/g, '')}"`
@@ -445,7 +466,7 @@ export function commandsFor(spell: Spell, ctx: CastContext): Cast[] {
       ? ctx.court
       : [w === 'merlin' ? ctx.merlin : w === 'requester' ? ctx.requester : ctx.target]
   const out: Cast[] = []
-  let left = ctx.itemsLeft ?? Infinity
+  let left = ctx.magicLeft ?? Infinity
   for (const step of spell.steps) {
     switch (step.kind) {
       case 'teleport': {
@@ -486,11 +507,21 @@ export function commandsFor(spell: Spell, ctx: CastContext): Cast[] {
         const creature = step.creature === '$creature' ? ctx.args.creature : step.creature
         if (!creature || !CREATURES.includes(creature as Creature))
           throw new Error(`no such creature: ${String(creature)}`)
-        for (const who of whom(step.at))
-          for (let i = 0; i < step.count; i++) {
+        // A fireworks show is one spell; creatures count one by one, three at most at a time.
+        const show = creature === 'fireworks_rocket'
+        const asked = step.creature === '$creature' && ctx.args.count ? ctx.args.count : step.count
+        for (const who of whom(step.at)) {
+          const count = show ? step.count : Math.min(Math.floor(asked), 3, left)
+          if (count < 1) throw new MagicSpent()
+          if (!show) left -= count
+          for (let i = 0; i < count; i++) {
             const dx = (i % 3) - 1
-            out.push({ command: `execute at ${q(who)} run summon ${creature} ~${dx} ~ ~1` })
+            out.push({
+              command: `execute at ${q(who)} run summon ${creature} ~${dx} ~ ~1`,
+              ...(show ? {} : { items: 1 }),
+            })
           }
+        }
         break
       }
       case 'particle':
@@ -507,7 +538,7 @@ export function commandsFor(spell: Spell, ctx: CastContext): Cast[] {
         const asked = step.item === '$item' && ctx.args.count ? ctx.args.count : step.count
         for (const who of whom(step.who)) {
           const count = Math.min(Math.floor(asked), max, left)
-          if (count < 1) throw new GiftsSpent()
+          if (count < 1) throw new MagicSpent()
           left -= count
           out.push({
             command: `give ${q(who)} ${item} ${count}`,
@@ -520,7 +551,7 @@ export function commandsFor(spell: Spell, ctx: CastContext): Cast[] {
       case 'saddle': {
         const tag = `merlin_gift_${ctx.giftId}`
         for (const who of whom(step.who)) {
-          if (left < 1) throw new GiftsSpent()
+          if (left < 1) throw new MagicSpent()
           left -= 1
           const find =
             `execute at ${q(who)} run tag @e[type=horse,r=8,c=1,` +
