@@ -333,7 +333,12 @@ export class Bot extends EventEmitter {
     const chest = this.household?.storehouse
     const gatherer = this.gatherer
     if (!chest || !gatherer || !this.isFree()) return 0
-    const before = this.body?.inventory.items().filter((i) => FOOD_ITEM.test(i.name)).length ?? 0
+    const count = () =>
+      this.body?.inventory
+        .items()
+        .filter((i) => FOOD_ITEM.test(i.name))
+        .reduce((n, i) => n + i.count, 0) ?? 0
+    const before = count()
     await gatherer.withChest(chest, async (window) => {
       let left = 4
       for (const item of window.containerItems().filter((i) => FOOD_ITEM.test(i.name))) {
@@ -345,8 +350,7 @@ export class Bot extends EventEmitter {
       return 0
     })
     if (gatherer.lastStock) this.household?.noteStock(gatherer.lastStock)
-    const after = this.body?.inventory.items().filter((i) => FOOD_ITEM.test(i.name)).length ?? 0
-    return Math.max(0, after - before)
+    return Math.max(0, count() - before)
   }
 
   /** Night in this bot's world (monsters about). */

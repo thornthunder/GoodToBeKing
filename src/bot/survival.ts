@@ -62,7 +62,7 @@ export class Survival {
   private readonly bot: SurvivalBot
   private eating = false
   private fighting = false
-  private lastFoodTrip = 0
+  private lastEmptyTrip = 0
   private lastHungryWords = 0
 
   constructor(
@@ -111,12 +111,21 @@ export class Survival {
   private async fight(foe: ReturnType<typeof this.monsters>[number]): Promise<void> {
     this.fighting = true
     this.log.info(`fighting a ${foe.name} at ${foe.position.floored()}`)
+    let strikes = 0
+    let outcome = 'gave up after 30 seconds'
     try {
       await this.takeUpWeapon()
       const start = Date.now()
-      while (Date.now() - start < FIGHT_MS && this.bot.entities[foe.id] && foe.isValid !== false) {
+      while (Date.now() - start < FIGHT_MS) {
+        if (!this.bot.entities[foe.id] || foe.isValid === false) {
+          outcome = 'it is gone'
+          break
+        }
         const gap = foe.position.distanceTo(this.bot.entity.position)
-        if (gap > GUARD_RANGE + 6) break
+        if (gap > GUARD_RANGE + 6) {
+          outcome = 'it got away'
+          break
+        }
         if (gap > STRIKE) {
           this.bot.pathfinder.setGoal(new goals.GoalFollow(foe, 1.5), true)
           await sleep(300)
@@ -124,14 +133,16 @@ export class Survival {
         }
         await this.bot.lookAt(foe.position.offset(0, (foe.height ?? 1.8) * 0.8, 0)).catch(() => {})
         this.bot.attack(foe)
+        strikes++
         // The weapon needs a moment to swing back for full damage.
         await sleep(650)
       }
     } catch (err) {
-      this.log.info(`fight broke off: ${errMsg(err)}`)
+      outcome = `broke off: ${errMsg(err)}`
     } finally {
       this.bot.pathfinder.setGoal(null)
       this.fighting = false
+      this.log.info(`fight with a ${foe.name}: ${strikes} strikes, ${outcome}`)
     }
   }
 
@@ -150,10 +161,11 @@ export class Survival {
     const food = this.bot.food
     if (food === undefined || food >= HUNGRY || this.eating) return
     let item = this.bestFood()
-    if (!item && Date.now() - this.lastFoodTrip > 5 * 60_000) {
-      this.lastFoodTrip = Date.now()
+    // After a trip that found nothing, wait a while before looking again.
+    if (!item && Date.now() - this.lastEmptyTrip > 5 * 60_000) {
       const took = await this.opts.fetchFood().catch(() => 0)
       if (took > 0) this.log.info(`took ${took} food from the storehouse`)
+      else this.lastEmptyTrip = Date.now()
       item = this.bestFood()
     }
     if (!item) {
