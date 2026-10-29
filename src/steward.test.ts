@@ -126,6 +126,24 @@ describe("the Castellan's account", () => {
     })
   })
 
+  it('makes charcoal for the torches from its own logs, magic coal only without a furnace', () => {
+    const dark = {
+      ...base,
+      hall: { roof: 0, door: 0, light: 6, repair: 0 },
+      freeBuilder: undefined,
+    }
+    expect(plan(dark)).toContainEqual({ kind: 'charcoal', by: 'Bruce' })
+    // No furnace: Merlin's furnace comes first (charcoal after), not his coal.
+    expect(plan({ ...dark, furnace: false, freeBuilder: 'Henry' })).toContainEqual({
+      kind: 'magic',
+      item: 'furnace',
+      count: 1,
+      to: 'Henry',
+      then: 'furnace',
+      why: 'a furnace for the hall',
+    })
+  })
+
   it('sends nobody out at night: no field, no hunt, no wood; cooking indoors goes on', () => {
     const night = { ...base, night: true, foodInStore: 2, freeHunter: 'Dyke', woodInStore: 3 }
     expect(plan({ ...night, farm: { exists: true, work: 4 } })).toEqual([])

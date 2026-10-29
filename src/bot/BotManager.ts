@@ -372,6 +372,13 @@ export class BotManager {
         void hunter.startHunt(action.animals)
         return
       }
+      case 'charcoal': {
+        const maker = by(action.by)
+        if (!maker) return
+        this.log.info(`housekeeping: ${maker.cfg.name} makes charcoal for torches`)
+        void maker.startCharcoal()
+        return
+      }
       case 'farm': {
         const farmer = by(action.by)
         if (!farmer) return
@@ -1131,6 +1138,8 @@ export class BotManager {
       void bot.startHunt(Number(words[2]) || 2)
     } else if (verb === 'cook') {
       void bot.startCooking()
+    } else if (verb === 'charcoal') {
+      void bot.startCharcoal()
     } else if (verb === 'farm') {
       void bot.startFarming()
     } else if (verb === 'bed') {

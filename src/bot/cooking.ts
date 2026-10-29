@@ -7,20 +7,27 @@ import type { Gatherer } from './gathering'
 
 /** Raw meat, and what it becomes in the furnace. */
 export const RAW = /^(beef|porkchop|mutton|chicken|rabbit|cod|salmon)$/
+/** Logs become charcoal: fuel, and torches with a stick. */
+const LOGS = /_log$/
+/** Ores the furnace turns into ingots. */
+export const ORES = /^(raw_iron|raw_gold|raw_copper|iron_ore|gold_ore|copper_ore)$/
 /** Fuel the court has plenty of: planks first, then logs (coal is kept for torches). */
 const FUEL = [/_planks$/, /_log$/]
 /** Items one piece of fuel smelts (planks and logs: one and a half). */
 const SMELTS_PER_FUEL = 1.5
-/** A furnace cooks one item in ten seconds. */
-const COOK_MS = 10_000
-/** At most this much meat at a time (a wait of a minute and a half). */
+/** A furnace smelts one item in ten seconds. */
+const SMELT_MS = 10_000
+/** At most this much at a time (a wait of a minute and a half). */
 const BATCH = 8
+/** What comes back to the storehouse afterwards: the furnace's work, and what was left over. */
+const AFTER = /^cooked_|^charcoal$|_ingot$|_planks$|_log$|^raw_/
 
 type CookBot = MineflayerBot & { pathfinder: Pathfinder }
 
 /**
- * Cooks the storehouse's raw meat in the hall's furnace, with wood for fuel, and puts the cooked
- * food back. Raw chicken is never eaten, and cooked meat fills twice as much.
+ * The court's furnace work: cooking raw meat (raw chicken is never eaten, and cooked meat fills
+ * twice as much), charcoal from logs (fuel, and torches without any coal), ingots from ore. Fuel
+ * is the court's own wood; the work goes back into the storehouse.
  */
 export class Cook {
   private readonly bot: CookBot
@@ -40,19 +47,38 @@ export class Cook {
       .reduce((n, i) => n + i.count, 0)
   }
 
-  /** Returns how many it cooked. */
-  async cook(furnace: Vec3, storehouse: { x: number; y: number; z: number }): Promise<number> {
-    // Meat and fuel out of the storehouse.
+  /** Cook the storehouse's raw meat. Returns how much it cooked. */
+  cook(furnace: Vec3, storehouse: { x: number; y: number; z: number }): Promise<number> {
+    return this.smelt(furnace, storehouse, RAW, FUEL)
+  }
+
+  /** Charcoal from the storehouse's logs, with planks for fuel. Returns how much it made. */
+  charcoal(furnace: Vec3, storehouse: { x: number; y: number; z: number }): Promise<number> {
+    return this.smelt(furnace, storehouse, LOGS, [/_planks$/])
+  }
+
+  /** Ingots from the storehouse's ore. */
+  ingots(furnace: Vec3, storehouse: { x: number; y: number; z: number }): Promise<number> {
+    return this.smelt(furnace, storehouse, ORES, FUEL)
+  }
+
+  /** Take up to a batch of `input` and fuel from the storehouse, smelt it, put the work back. */
+  async smelt(
+    furnace: Vec3,
+    storehouse: { x: number; y: number; z: number },
+    input: RegExp,
+    fuels: RegExp[]
+  ): Promise<number> {
     await this.gatherer.withChest(storehouse, async (chest) => {
-      let meat = BATCH - this.count(RAW)
-      for (const item of chest.containerItems().filter((i) => RAW.test(i.name))) {
-        if (meat <= 0) break
-        const n = Math.min(meat, item.count)
+      let want = BATCH - this.count(input)
+      for (const item of chest.containerItems().filter((i) => input.test(i.name))) {
+        if (want <= 0) break
+        const n = Math.min(want, item.count)
         await withTimeout(chest.withdraw(item.type, item.metadata, n), 5_000)
-        meat -= n
+        want -= n
       }
-      let fuel = Math.ceil(Math.min(BATCH, this.count(RAW)) / SMELTS_PER_FUEL)
-      for (const kind of FUEL) {
+      let fuel = Math.ceil(Math.min(BATCH, this.count(input)) / SMELTS_PER_FUEL)
+      for (const kind of fuels) {
         fuel -= this.count(kind)
         for (const item of chest.containerItems().filter((i) => kind.test(i.name))) {
           if (fuel <= 0) break
@@ -63,8 +89,8 @@ export class Cook {
       }
       return 0
     })
-    const raw = this.bot.inventory.items().filter((i) => RAW.test(i.name))
-    if (raw.length === 0) return 0
+    const stuff = this.bot.inventory.items().find((i) => input.test(i.name))
+    if (!stuff) return 0
     try {
       await withTimeout(
         this.bot.pathfinder.goto(new goals.GoalNear(furnace.x, furnace.y, furnace.z, 2)),
@@ -84,41 +110,41 @@ export class Cook {
       this.log.info(`could not open the furnace: ${errMsg(err)}`)
       return 0
     }
-    let cooked = 0
+    let made = 0
     try {
-      const fuel = this.bot.inventory.items().find((i) => FUEL.some((f) => f.test(i.name)))
-      const meat = raw[0]
-      const n = Math.min(BATCH, meat.count)
+      const fuel = this.bot.inventory
+        .items()
+        .find((i) => fuels.some((f) => f.test(i.name)) && i !== stuff)
+      const n = Math.min(BATCH, stuff.count)
       if (fuel)
         await window.putFuel(
           fuel.type,
           fuel.metadata,
           Math.min(fuel.count, Math.ceil(n / SMELTS_PER_FUEL))
         )
-      await window.putInput(meat.type, meat.metadata, n)
-      this.log.info(`cooking ${n} ${meat.name}`)
-      const done = Date.now() + n * COOK_MS + 8_000
+      await window.putInput(stuff.type, stuff.metadata, n)
+      this.log.info(`smelting ${n} ${stuff.name}`)
+      const done = Date.now() + n * SMELT_MS + 8_000
       while (Date.now() < done && (window.outputItem()?.count ?? 0) < n) await sleep(1_000)
       if (window.outputItem()) {
-        cooked = window.outputItem()?.count ?? 0
+        made = window.outputItem()?.count ?? 0
         await window.takeOutput()
       }
-      // Whatever did not cook comes back out with us.
+      // Whatever did not smelt comes back out with us.
       if (window.inputItem()) await window.takeInput().catch(() => {})
     } catch (err) {
-      this.log.info(`cooking went wrong: ${errMsg(err)}`)
+      this.log.info(`the furnace work went wrong: ${errMsg(err)}`)
     } finally {
       window.close()
     }
-    // Cooked food and leftover wood back into the storehouse.
     await this.gatherer.withChest(storehouse, async (chest) => {
       for (const item of this.bot.inventory.items()) {
-        if (/^cooked_|_planks$|_log$/.test(item.name) || RAW.test(item.name))
+        if (AFTER.test(item.name) || RAW.test(item.name) || ORES.test(item.name))
           await withTimeout(chest.deposit(item.type, item.metadata, item.count), 5_000)
       }
       return 0
     })
-    this.log.info(`cooked ${cooked}`)
-    return cooked
+    this.log.info(`smelted ${made}`)
+    return made
   }
 }

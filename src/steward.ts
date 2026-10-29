@@ -63,6 +63,8 @@ export type StewardAction =
   | { kind: 'hunt'; animals: number; by: string }
   /** Cook the storehouse's raw meat in the hall's furnace. */
   | { kind: 'cook'; by: string }
+  /** Charcoal from the storehouse's logs (for torches, without coal). */
+  | { kind: 'charcoal'; by: string }
   /** Lay out the wheat field, or tend it (till, plant, harvest, bake). */
   | { kind: 'farm'; by: string }
 
@@ -93,9 +95,18 @@ export function plan(s: CourtState): StewardAction[] {
     else if (s.builderWithFurnace && !s.furnace)
       out.push({ kind: 'hallwork', work: 'furnace', by: s.builderWithFurnace })
   }
+  // Light without coal: charcoal from the court's own logs, in the furnace (indoor work).
+  const coal = s.storeHasCoal || Boolean(s.builderWithCoal)
+  if (s.hall.light > 0 && !coal && s.furnace && s.woodInStore >= 2 && s.freeHand && s.storehouse)
+    out.push({ kind: 'charcoal', by: s.freeHand })
   // The field first: bread is the court's food for good (hunting thins the animals out).
+  const charcoaling = out.some((a) => a.kind === 'charcoal')
   const farmer =
-    !s.night && s.storehouse && s.freeHand && (s.farm.exists ? s.farm.work > 0 : s.seeds > 0)
+    !charcoaling &&
+    !s.night &&
+    s.storehouse &&
+    s.freeHand &&
+    (s.farm.exists ? s.farm.work > 0 : s.seeds > 0)
       ? s.freeHand
       : undefined
   if (farmer) out.push({ kind: 'farm', by: farmer })
@@ -131,7 +142,8 @@ export function plan(s: CourtState): StewardAction[] {
       then: 'furnace',
       why: 'a furnace for the hall',
     })
-  if (s.hall.light > 0 && !s.storeHasCoal && !s.builderWithCoal && s.freeBuilder)
+  // Coal by magic only when there is no furnace to make charcoal in.
+  if (s.hall.light > 0 && !coal && !s.furnace && s.freeBuilder)
     wants.push({
       item: 'coal',
       count: 1,

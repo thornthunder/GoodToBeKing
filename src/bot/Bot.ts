@@ -1210,8 +1210,24 @@ export class Bot extends EventEmitter {
     }
   }
 
+  /** Make charcoal in the hall's furnace from the storehouse's logs (for torches). */
+  startCharcoal(): Promise<number> {
+    return this.atFurnace((cook, furnace, chest) => cook.charcoal(furnace, chest))
+  }
+
   /** Cook the storehouse's raw meat in the hall's furnace. Returns how much it cooked. */
-  async startCooking(): Promise<number> {
+  startCooking(): Promise<number> {
+    return this.atFurnace((cook, furnace, chest) => cook.cook(furnace, chest))
+  }
+
+  /** Furnace work: find the hall's furnace, and do it there (busy meanwhile). */
+  private async atFurnace(
+    work: (
+      cook: Cook,
+      furnace: WorldVec,
+      chest: { x: number; y: number; z: number }
+    ) => Promise<number>
+  ): Promise<number> {
     const cook = this.cook
     const body = this.body
     const chest = this.household?.storehouse
@@ -1229,11 +1245,11 @@ export class Bot extends EventEmitter {
     this.dutyFollowing = false
     this.movement?.stop()
     try {
-      const cooked = await cook.cook(furnace, chest)
+      const made = await work(cook, furnace, chest)
       if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
-      return cooked
+      return made
     } catch (err) {
-      this.log.warn(`cooking failed: ${errMsg(err)}`)
+      this.log.warn(`furnace work failed: ${errMsg(err)}`)
       return 0
     } finally {
       this.gathering = false

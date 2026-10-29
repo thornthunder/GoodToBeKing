@@ -61,7 +61,14 @@ describe('the hall survey', () => {
     expect(floor.every((c) => c.y === 63 && c.replace)).toBe(true)
     const torches = lightCells(h, names)
     expect(torches.length).toBeGreaterThan(1)
-    expect(torches.every((c) => c.block === 'torch' && c.y === 65 && c.against)).toBe(true)
+    expect(torches.every((c) => c.block === 'torch' && c.against)).toBe(true)
+    // On the inside walls at head height, and standing on the ground outside (one above it).
+    const inside = torches.filter((c) => c.x >= 0 && c.x <= 4 && c.z >= 0 && c.z <= 4)
+    expect(inside.length).toBeGreaterThan(0)
+    expect(inside.every((c) => c.y === 65)).toBe(true)
+    const outside = torches.filter((c) => !inside.includes(c))
+    expect(outside.length).toBeGreaterThan(3)
+    expect(outside.every((c) => c.y === 64 && c.against?.[1] === -1)).toBe(true)
     // With those torches up, none are wanted any more.
     const lit = hall(Object.fromEntries(torches.map((c) => [`${c.x},${c.y},${c.z}`, 'torch'])))
     expect(lightCells(h, lit)).toEqual([])

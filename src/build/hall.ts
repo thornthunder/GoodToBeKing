@@ -132,7 +132,7 @@ export function floorCells(hall: Hall, names: BlockNames): HandCell[] {
 }
 
 /** Torches on the inside of the walls, about every five blocks, at head height. */
-export function lightCells(hall: Hall, names: BlockNames): HandCell[] {
+function insideLights(hall: Hall, names: BlockNames): HandCell[] {
   const y = hall.floorY + 1
   const isRing = new Set(hall.ring.map(([x, z]) => `${x},${z}`))
   const cells: HandCell[] = []
@@ -158,6 +158,49 @@ export function lightCells(hall: Hall, names: BlockNames): HandCell[] {
     if (!wall) continue
     if (cells.some((c) => Math.abs(c.x - x) + Math.abs(c.z - z) < 5)) continue
     cells.push({ x, y, z, block: 'torch', against: [wall[0], 0, wall[1]] })
+  }
+  return cells
+}
+
+/**
+ * Light inside and around the hall: torches on the inside walls, and a ring of torches on the
+ * ground three blocks out, one every four. Monsters do not spawn near light.
+ */
+export function lightCells(hall: Hall, names: BlockNames): HandCell[] {
+  return [...insideLights(hall, names), ...outsideLights(hall, names)]
+}
+
+/** Torches standing on the ground around the hall, three blocks out from the walls. */
+function outsideLights(hall: Hall, names: BlockNames): HandCell[] {
+  const xs = hall.ring.map(([x]) => x)
+  const zs = hall.ring.map(([, z]) => z)
+  const [x0, x1, z0, z1] = [
+    Math.min(...xs) - 3,
+    Math.max(...xs) + 3,
+    Math.min(...zs) - 3,
+    Math.max(...zs) + 3,
+  ]
+  const spots: Array<[number, number]> = []
+  for (let x = x0; x <= x1; x += 4) spots.push([x, z0], [x, z1])
+  for (let z = z0 + 4; z < z1; z += 4) spots.push([x0, z], [x1, z])
+  const cells: HandCell[] = []
+  for (const [x, z] of spots) {
+    // The ground there: solid, with room above, not the field.
+    let y: number | undefined
+    for (let h = hall.floorY + 2; h >= hall.floorY - 3; h--) {
+      const ground = names(x, h, z)
+      if (ground && !open(ground) && open(names(x, h + 1, z))) {
+        y = h
+        break
+      }
+    }
+    if (y === undefined || /farmland|water|lava|leaves/.test(names(x, y, z) ?? '')) continue
+    let lit = false
+    for (let dx = -3; dx <= 3 && !lit; dx++)
+      for (let dz = -3; dz <= 3 && !lit; dz++)
+        for (let dy = -1; dy <= 2 && !lit; dy++)
+          lit = /torch/.test(names(x + dx, y + dy, z + dz) ?? '')
+    if (!lit) cells.push({ x, y: y + 1, z, block: 'torch', against: [0, -1, 0] })
   }
   return cells
 }
