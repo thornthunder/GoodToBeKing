@@ -310,6 +310,8 @@ export class Bot extends EventEmitter {
 
   /** Free to take a work order from the court's building works. */
   canWork(): boolean {
+    // Put down for a while after a royal's request: the castle works wait (other work does not).
+    if (Date.now() < this.worksPausedUntil) return false
     return Boolean(this.cfg.works) && this.buildsByMagic() && this.isFree()
   }
 
@@ -332,7 +334,6 @@ export class Bot extends EventEmitter {
     if (this.building || this.mason.busy || this.gathering || this.handbuilder?.busy) return false
     if (this.onHallWork) return false
     if (this.survival?.busy) return false
-    if (Date.now() < this.worksPausedUntil) return false
     const walking = this.movement?.current()
     if (walking && !this.dutyFollowing && walking.kind !== 'going') return false
     if (this.cfg.duty?.auto && this.dutyTarget() && Date.now() >= this.dutyPausedUntil) return false
