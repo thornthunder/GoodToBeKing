@@ -1,4 +1,4 @@
-# The royal court on Ava. Copy .env, config/court.json and .state here first, then:
+# The royal court on its Linux VM, next to the game server. Copy .env, config/court.json and .state here first, then:
 #   docker compose up -d --build        start (or rebuild after a git pull)
 #   docker compose logs -f              watch the court
 #   docker compose stop                 every bot says goodbye properly
