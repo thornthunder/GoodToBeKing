@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   declineLine,
+  detectBuildRequest,
   detectMissingAbility,
   detectMoveCommand,
   detectWorksRequest,
@@ -35,6 +36,17 @@ describe('detectMoveCommand', () => {
     expect(detectMoveCommand("don't follow me", true)).toBe('stop')
     expect(detectMoveCommand('stop following me Merlin', true)).toBe('stop')
     expect(detectMoveCommand("don't follow me", false)).toBeNull()
+  })
+})
+
+describe('detectBuildRequest, asked the Castellan way', () => {
+  it('hears "have it built" as a request, but not a question about who built something', () => {
+    expect(detectBuildRequest('Festaris, please have a flower garden built for me here')).toEqual({
+      blueprint: 'garden',
+    })
+    expect(detectBuildRequest("I'd like a tower built over there")).toEqual({ blueprint: 'tower' })
+    expect(detectBuildRequest('who built this lovely tower?')).toBeNull()
+    expect(detectMissingAbility('can you get a fountain built here')).toBe('build')
   })
 })
 

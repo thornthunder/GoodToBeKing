@@ -30,8 +30,12 @@ export function detectMoveCommand(message: string, moving: boolean): MoveCommand
   return null
 }
 
+/** "Please have a garden built", "I'd like a tower built here", but not "who built this?" */
+const BUILT_FOR_ME = /\b(have|get|want|like|need)\b[^.!?]{0,40}\bbuilt\b/i
+
 const REQUEST_PATTERNS: Array<[MissingAbility, RegExp]> = [
   ['build', /\b(build|construct|craft|make (me|us))\b/i],
+  ['build', BUILT_FOR_ME],
   ['fetch', /\b(bring|fetch|get) (me|us)\b/i],
   ['travel', /\b(go to|run to|fly to|take me to|teleport|tp to)\b/i],
 ]
@@ -53,7 +57,7 @@ const ANYTHING = /\b(something|anything|whatever)\b/i
  * something"); null when it names something the spellbook does not hold.
  */
 export function detectBuildRequest(message: string): { blueprint: BlueprintId | null } | null {
-  if (!BUILD_VERB.test(message)) return null
+  if (!BUILD_VERB.test(message) && !BUILT_FOR_ME.test(message)) return null
   const named = matchBlueprint(message)
   if (named) return { blueprint: named }
   return { blueprint: ANYTHING.test(message) ? 'tower' : null }
