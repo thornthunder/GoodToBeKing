@@ -193,6 +193,28 @@ export function bedCells(hall: Hall, names: BlockNames, count: number): HandCell
   return cells
 }
 
+/**
+ * What is missing from the hall as it was last seen whole: wall blocks (doorways stay open) and,
+ * if it has a roof, holes in it. Planks, which endermen cannot carry off as they do dirt.
+ */
+export function repairCells(hall: Hall, names: BlockNames): HandCell[] {
+  const cells: HandCell[] = []
+  const doorway = new Set(hall.openings.map(([x, z]) => `${x},${z}`))
+  for (const [x, z] of hall.ring)
+    for (let y = hall.floorY; y <= hall.wallTop; y++) {
+      if (doorway.has(`${x},${z}`) && y <= hall.floorY + 1) continue
+      if (open(names(x, y, z))) cells.push({ x, y, z, block: 'planks' })
+    }
+  const roofY = hall.wallTop + 1
+  const roof = [...hall.ring, ...hall.inside]
+  const covered = roof.filter(([x, z]) => !open(names(x, roofY, z))).length
+  // Mostly roofed: then the gaps are damage, not a roof never built.
+  if (covered > roof.length / 2)
+    for (const [x, z] of roof)
+      if (open(names(x, roofY, z))) cells.push({ x, y: roofY, z, block: 'planks' })
+  return cells
+}
+
 /** A door in the first opening two high (the item places both halves). */
 export function doorCells(hall: Hall, names: BlockNames): HandCell[] {
   const gap = hall.openings.find(([x, z]) => !DOOR.test(names(x, hall.floorY, z) ?? ''))

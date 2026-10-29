@@ -43,6 +43,7 @@ import {
   doorCells,
   floorCells,
   lightCells,
+  repairCells,
   roofCells,
   surveyHall,
   type Hall,
@@ -116,6 +117,7 @@ const HALL_WORK_TITLES: Record<HallWork, string> = {
   light: 'torches',
   door: 'a door',
   beds: 'beds',
+  repair: 'repairs',
 }
 const HALL_WORK_CELLS: Record<
   HallWork,
@@ -127,6 +129,7 @@ const HALL_WORK_CELLS: Record<
   door: doorCells,
   // As many beds as the builder carries or the storehouse holds (one for each courtier, at most).
   beds: (hall, names) => bedCells(hall, names, 8),
+  repair: repairCells,
 }
 
 /** bedboo reads a bed's state from its block (not in mineflayer-bedrock's types). */
@@ -1013,7 +1016,13 @@ export class Bot extends EventEmitter {
     }
     const body = this.body
     const names = (x: number, y: number, z: number) => body.blockAt(new WorldVec(x, y, z))?.name
-    const hall = surveyHall(names, home)
+    const surveyed = surveyHall(names, home)
+    // Whole: remember its shape. Damaged: the shape last seen whole says where it was.
+    if (typeof surveyed !== 'string') this.household?.setHall(surveyed)
+    const saved = this.household?.hall
+    const hall: Hall | string = typeof surveyed === 'string' && saved ? saved : surveyed
+    if (typeof surveyed === 'string' && saved)
+      this.log.info(`the hall is damaged (${surveyed}); working from its shape as last seen`)
     if (typeof hall === 'string') {
       this.log.info(`cannot survey the hall: ${hall}`)
       await this.speak(
@@ -1091,6 +1100,11 @@ export class Bot extends EventEmitter {
   /** Walk to a spot (home) if nothing else is going on. */
   goTo(spot: Point, label: string): void {
     this.movement?.goTo(spot, label)
+  }
+
+  /** The name of the block at a spot as this bot sees it; undefined where nothing is loaded. */
+  nameAt(x: number, y: number, z: number): string | undefined {
+    return this.body?.blockAt(new WorldVec(x, y, z))?.name
   }
 
   /** Whether the server lets this bot's magic work right now. */

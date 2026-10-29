@@ -74,6 +74,7 @@ const STOREHOUSE = [
 ]
 
 const HALL_WORK: Array<[HallWork, RegExp]> = [
+  ['repair', /\b(repair|mend|fix|patch)\b/i],
   ['roof', /\broof\b/i],
   ['floor', /\bfloor(ing)?\b/i],
   ['door', /\bdoor\b/i],
@@ -81,7 +82,7 @@ const HALL_WORK: Array<[HallWork, RegExp]> = [
   ['light', /\b(light|torch|torches|lamps?)\b/i],
 ]
 const HALL_VERB =
-  /\b(put|build|make|add|give|lay|cover|fit|hang|place|need|light|finish|set|could|can|please)\b/i
+  /\b(put|build|make|add|give|lay|cover|fit|hang|place|need|light|finish|set|could|can|please|repair|mend|fix|patch)\b/i
 
 /** "Put a roof on the hall", "lay a floor", "light the hall", "make us a door". */
 export function detectHallWork(message: string): HallWork | null {

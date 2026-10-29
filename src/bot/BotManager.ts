@@ -32,6 +32,7 @@ import { errMsg, sleep } from '../util'
 import { Bot } from './Bot'
 import { MATERIALS, type Material } from './gathering'
 import { Household } from '../household'
+import { repairCells } from '../build/hall'
 import type { HallWork } from '../ai/Brain'
 import { ChatFloor } from './ChatFloor'
 
@@ -194,7 +195,9 @@ export class BotManager {
       const trip = this.homeTrips.get(bot.cfg.name) ?? { at: 0, walks: 0 }
       if (now - trip.at < HOME_RETRY_MS) continue
       const merlin = this.bots.find((b) => b.magicAwake())
-      if ((far > HOME_WALK || trip.walks >= 2) && merlin) {
+      // By night nobody walks through the dark: Merlin brings them in.
+      const dark = bot.isNight() && !bot.buildsByMagic()
+      if ((far > HOME_WALK || trip.walks >= 2 || dark) && merlin) {
         this.homeTrips.set(bot.cfg.name, { at: now, walks: 0 })
         this.log.info(`${merlin.cfg.name} sends ${bot.cfg.name} home by portal`)
         void merlin.castCommand('portal', {
@@ -209,8 +212,40 @@ export class BotManager {
     }
   }
 
+  private lastInspection = 0
+
+  /**
+   * The Castellan's rounds (survival): every few minutes, compare the hall with its shape as last
+   * seen whole; if walls or roof have holes (endermen take dirt, creepers blow it up), send a
+   * free builder to repair them.
+   */
+  private async inspectHall(): Promise<void> {
+    const hall = this.household.hall
+    const home = this.household.home
+    if (!hall || !home || Date.now() - this.lastInspection < INSPECT_MS) return
+    const castellan = this.bots.find(
+      (b) =>
+        !b.cfg.canBuild && this.bots.some((w) => w.cfg.reportsTo === b.cfg.name && w.cfg.canBuild)
+    )
+    // Someone close enough to see it, in survival.
+    const eyes = this.bots.find((b) => {
+      const p = b.position()
+      return p && !b.buildsByMagic() && Math.hypot(p.x - home.x, p.z - home.z) < 32
+    })
+    if (!castellan || !eyes) return
+    this.lastInspection = Date.now()
+    const holes = repairCells(hall, (x, y, z) => eyes.nameAt(x, y, z)).length
+    if (holes === 0) return
+    this.log.info(`the hall has ${holes} holes in its walls or roof`)
+    await this.sendToHall(castellan, { work: 'repair', requestedBy: castellan.cfg.name }, true)
+  }
+
   /** The Castellan sets one of his builders to work on the hall: the nearest free one. */
-  private async sendToHall(from: Bot, job: { work: HallWork; requestedBy: string }): Promise<void> {
+  private async sendToHall(
+    from: Bot,
+    job: { work: HallWork; requestedBy: string },
+    quiet = false
+  ): Promise<void> {
     const boss = from.cfg.name.toLowerCase()
     const home = this.household.home
     const distance = (b: Bot) => {
@@ -222,6 +257,7 @@ export class BotManager {
       .filter((b) => b.isFree() && !b.buildsByMagic())
       .sort((a, b) => distance(a) - distance(b))[0]
     if (!builder) {
+      if (quiet) return
       await from.speak(
         `None of your builders is free for the hall just now. Say so kindly in one short sentence.`,
         'Alas, the builders are all busy just now.'
@@ -546,6 +582,7 @@ export class BotManager {
       this.works?.tick(this.workers())
       // Whoever is still free afterwards goes home.
       this.sendHome()
+      void this.inspectHall()
     }, 5_000)
   }
 
@@ -960,6 +997,8 @@ const HOME_RADIUS = 10
 const HOME_RADIUS_NIGHT = 2.5
 /** Farther than this, Merlin portals them home rather than letting them walk. */
 const HOME_WALK = 96
+/** How often the Castellan looks the hall over for damage. */
+const INSPECT_MS = 3 * 60_000
 /** Before sending the same bot home again. */
 const HOME_RETRY_MS = 60_000
 

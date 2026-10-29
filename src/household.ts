@@ -10,9 +10,20 @@ export interface Spot {
   at: number
 }
 
+/** The home hall as the court last saw it whole (see build/hall.ts). */
+export interface SavedHall {
+  floorY: number
+  inside: Array<[number, number]>
+  ring: Array<[number, number]>
+  wallTop: number
+  openings: Array<[number, number]>
+  at: number
+}
+
 interface Saved {
   home?: Spot
   storehouse?: Spot
+  hall?: SavedHall
   /** What was in the storehouse when a courtier last opened it: item name -> count. */
   stock?: Record<string, number>
   stockAt?: number
@@ -43,7 +54,19 @@ export class Household {
     return this.data.storehouse
   }
 
+  /** The hall as last seen whole, for repairs. */
+  get hall(): SavedHall | undefined {
+    return this.data.hall
+  }
+
+  setHall(hall: Omit<SavedHall, 'at'>, now = Date.now()): void {
+    this.data.hall = { ...hall, at: now }
+    this.save()
+  }
+
   setHome(p: { x: number; y: number; z: number }, setBy: string, now = Date.now()): Spot {
+    // A new home: the old hall's shape says nothing about it.
+    this.data.hall = undefined
     this.data.home = { x: Math.floor(p.x), y: Math.floor(p.y), z: Math.floor(p.z), setBy, at: now }
     this.save()
     return this.data.home

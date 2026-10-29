@@ -76,6 +76,7 @@ const HALL_WORK_WORDS: Record<HallWork, string> = {
   light: 'torches on the walls',
   door: 'a door',
   beds: 'beds along the walls',
+  repair: 'repairs to the walls and roof',
 }
 
 /** How a fetched material is named in speech: "16 dirt", "16 logs". */

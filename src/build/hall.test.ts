@@ -4,6 +4,7 @@ import {
   bedCells,
   doorCells,
   floorCells,
+  repairCells,
   lightCells,
   roofCells,
   surveyHall,
@@ -112,5 +113,19 @@ describe('beds', () => {
       expect(Math.abs(b.x + dx - 2) + Math.abs(b.z + dz + 1)).toBeGreaterThan(2)
     }
     expect(bedCells(h, names, 1)).toHaveLength(1)
+  })
+})
+
+describe('repairs', () => {
+  it('fills the holes in walls and roof with planks, but keeps the doorway open', () => {
+    const whole = hall()
+    const h = surveyHall(whole, { x: 2, y: 64, z: 2 })
+    if (typeof h === 'string') throw new Error(h)
+    // An enderman took two wall blocks; no roof yet, so nothing for the roof.
+    const damaged = hall({ '5,65,2': 'air', '-1,66,4': 'air' })
+    const fix = repairCells(h, damaged)
+    expect(fix.map((c) => `${c.x},${c.y},${c.z}`).sort()).toEqual(['-1,66,4', '5,65,2'])
+    expect(fix.every((c) => c.block === 'planks')).toBe(true)
+    expect(repairCells(h, whole)).toEqual([])
   })
 })
