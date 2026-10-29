@@ -60,12 +60,36 @@ const NUMBERS: Record<string, number> = {
   dozen: 12,
 }
 
+const TO_STORE = /\b(storehouse|stores|store ?room|larder|in(to)? the chest)\b/i
+const HOME = [
+  /\b(make|call|name)\b[^.!?]{0,30}\bour (new )?home\b/i,
+  /\b(this|here)\b[^.!?]{0,30}\b(is|shall be|will be|becomes)\b[^.!?]{0,10}\bour (new )?home\b/i,
+  /\bour (new )?home is here\b/i,
+]
+const STOREHOUSE = [
+  /\b(this|that|the)\s+(chest|barrel)\b[^.!?]{0,30}\b(storehouse|store|storage|larder|stores)\b/i,
+  /\b(use|make)\b[^.!?]{0,20}\b(chest|barrel)\b[^.!?]{0,30}\b(storehouse|store|storage|larder|stores)\b/i,
+  /\b(this|here)\b[^.!?]{0,10}\b(is|shall be|will be)\b[^.!?]{0,10}\b(the|our) (storehouse|larder|stores)\b/i,
+]
+
+/** "This hall is our home", "make it our home". */
+export function detectHomeRequest(message: string): boolean {
+  return HOME.some((p) => p.test(message))
+}
+
+/** "This chest is our storehouse", "use this chest for storage". */
+export function detectStorehouseRequest(message: string): boolean {
+  return STOREHOUSE.some((p) => p.test(message))
+}
+
 /** Fetched when no number is said, and the most for one errand. */
 export const FETCH_DEFAULT = 16
 export const FETCH_MAX = 64
 
 /** "Henry, fetch me 10 dirt", "chop some wood for us", "get me a stack of sand". */
-export function detectGatherRequest(message: string): { material: Material; count: number } | null {
+export function detectGatherRequest(
+  message: string
+): { material: Material; count: number; toStore?: boolean } | null {
   if (!GATHER_VERB.test(message) || QUESTION.test(message)) return null
   const hit = MATERIAL_WORDS.find(([, words]) => words.test(message))
   if (!hit) return null
@@ -82,7 +106,10 @@ export function detectGatherRequest(message: string): { material: Material; coun
         ? 64
         : NUMBERS[word[1]]
       : FETCH_DEFAULT
-  return { material: hit[0], count: Math.max(1, Math.min(FETCH_MAX, asked)) }
+  const count = Math.max(1, Math.min(FETCH_MAX, asked))
+  return TO_STORE.test(message)
+    ? { material: hit[0], count, toStore: true }
+    : { material: hit[0], count }
 }
 
 /** "Please have a garden built", "I'd like a tower built here", but not "who built this?" */

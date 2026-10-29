@@ -3,6 +3,8 @@ import {
   declineLine,
   detectBuildRequest,
   detectGatherRequest,
+  detectHomeRequest,
+  detectStorehouseRequest,
   detectMissingAbility,
   detectMoveCommand,
   detectWorksRequest,
@@ -70,6 +72,27 @@ describe('detectGatherRequest', () => {
     expect(detectGatherRequest('where can I get wood?')).toBeNull()
     expect(detectGatherRequest('Henry come here')).toBeNull()
     expect(detectGatherRequest('this dirt hall is lovely')).toBeNull()
+  })
+})
+
+describe('the household', () => {
+  it('hears a royal choosing the home', () => {
+    expect(detectHomeRequest('Let us now make it our home')).toBe(true)
+    expect(detectHomeRequest('this hall is our home now')).toBe(true)
+    expect(detectHomeRequest('our home is here')).toBe(true)
+    expect(detectHomeRequest('I miss my home')).toBe(false)
+    expect(detectHomeRequest('go home Henry')).toBe(false)
+  })
+
+  it('hears a royal choosing the storehouse, but not an errand to it', () => {
+    expect(detectStorehouseRequest('this chest is our storehouse')).toBe(true)
+    expect(detectStorehouseRequest('use this chest for storage please')).toBe(true)
+    expect(detectStorehouseRequest('put the dirt in the chest')).toBe(false)
+    expect(detectGatherRequest('Henry, fetch 20 dirt for the storehouse')).toEqual({
+      material: 'dirt',
+      count: 20,
+      toStore: true,
+    })
   })
 })
 

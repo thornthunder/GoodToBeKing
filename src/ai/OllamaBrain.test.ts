@@ -11,6 +11,7 @@ import { CourtRules, OrderBook, type Reading } from './orders'
 import { Magic } from '../magic/Magic'
 import { CommissionBook } from '../build/Commissions'
 import { DEFAULT_PALETTE } from '../build/blueprints'
+import { Household } from '../household'
 
 const court = new CourtRoster({
   realm: 'Testland',
@@ -493,6 +494,45 @@ describe('OllamaBrain court behaviour', () => {
         count: 16,
         requestedBy: 'BigDad',
       })
+    })
+
+    it('takes the home and storehouse the King chooses, and fetches for the storehouse', async () => {
+      const household = new Household()
+      const { brain } = castellan('Gladly, Your Majesty.')
+      const withHouse = new OllamaBrain(
+        { ...defaultBotConfig(), name: 'Festaris', role: 'Castellan', canBuild: false },
+        { chat: async () => ({ message: { role: 'assistant', content: 'Gladly!' } }) as never },
+        court,
+        createLogger('test'),
+        { staff, household }
+      )
+      const survival = { ...at('BigDad'), gameMode: 'survival' as const }
+      const home = await brain.onChat(chat('BigDad', 'Festaris, let us make it our home'), survival)
+      expect(home?.action).toEqual({ type: 'home', requestedBy: 'BigDad' })
+      const store = await brain.onChat(chat('BigDad', 'this chest is our storehouse'), survival)
+      expect(store?.action).toEqual({ type: 'storehouse', requestedBy: 'BigDad' })
+
+      // No storehouse yet: nothing to fetch for.
+      const early = await withHouse.onChat(
+        chat('BigDad', 'Festaris, fetch 20 dirt for the storehouse'),
+        survival
+      )
+      expect(early?.action).toBeUndefined()
+      household.setStorehouse({ x: 1, y: 64, z: 2 }, 'BigDad')
+      household.setHome({ x: 3, y: 64, z: 4 }, 'BigDad')
+      const later = await withHouse.onChat(
+        chat('BigDad', 'Festaris, fetch 20 dirt for the storehouse'),
+        survival
+      )
+      expect(later?.action).toMatchObject({
+        type: 'gather',
+        count: 20,
+        toStore: true,
+        delegate: true,
+      })
+      const prompt = withHouse.systemPrompt(survival)
+      expect(prompt).toContain("The court's home (chosen by the King) is at 3, 64, 4")
+      expect(prompt).toContain('nobody has looked inside yet')
     })
 
     it('in survival promises no build, palace or undo, and says why', async () => {

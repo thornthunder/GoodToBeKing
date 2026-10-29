@@ -5,7 +5,10 @@ import type { Logger } from '../logger'
 
 /** What the bot is doing with its legs right now. */
 export type Activity =
-  { kind: 'following'; target: string } | { kind: 'coming'; target: string } | null
+  | { kind: 'following'; target: string }
+  | { kind: 'coming'; target: string }
+  | { kind: 'going'; target: string }
+  | null
 
 export type MoveResult = 'ok' | 'not_visible'
 
@@ -40,7 +43,7 @@ export class Movement {
     // The pathfinder's events are not in mineflayer-bedrock's typed event map.
     const events = bot as unknown as EventEmitter
     events.on('goal_reached', () => {
-      if (this.activity?.kind === 'coming') {
+      if (this.activity?.kind === 'coming' || this.activity?.kind === 'going') {
         this.log.info(`arrived at ${this.activity.target}`)
         this.activity = null
       }
@@ -63,6 +66,12 @@ export class Movement {
     })
     events.on('path_update', (result: { status: string }) => {
       const change = this.stuck.update(result.status)
+      // No way to a spot (home): give up; whoever sent the bot tries another way.
+      if (change === 'stuck' && this.activity?.kind === 'going') {
+        this.log.info(`cannot find a way ${this.activity.target}`)
+        this.stop()
+        return
+      }
       const target = this.activity?.target
       if (change === 'stuck' && target) {
         this.log.info(`cannot find a way to ${target}; waiting for them to come within reach`)
@@ -120,6 +129,15 @@ export class Movement {
     this.bot.pathfinder.setGoal(new goals.GoalNear(x, y, z, COME_DISTANCE))
     this.log.info(`walking to ${player}`)
     return 'ok'
+  }
+
+  /** Walk to a spot ("home"), then stop. */
+  goTo(spot: { x: number; y: number; z: number }, label: string): void {
+    this.stuck.reset()
+    this.quiet = true
+    this.activity = { kind: 'going', target: label }
+    this.bot.pathfinder.setGoal(new goals.GoalNear(spot.x, spot.y, spot.z, 3))
+    this.log.info(`walking ${label}`)
   }
 
   stop(): void {

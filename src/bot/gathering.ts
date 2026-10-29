@@ -1,4 +1,4 @@
-import type { Bot as MineflayerBot } from 'mineflayer-bedrock'
+import type { Chest, Bot as MineflayerBot } from 'mineflayer-bedrock'
 import { goals, type Pathfinder } from 'mineflayer-pathfinder'
 import { Vec3 } from 'vec3'
 import type { Logger } from '../logger'
@@ -93,6 +93,11 @@ export function untouched(
   return below !== undefined && GROUND.test(below)
 }
 
+/** Where the fetched things go: to a player, or into the storehouse chest. */
+export type Destination = { player: string } | { chest: { x: number; y: number; z: number } }
+
+const CONTAINER = /^(chest|trapped_chest|barrel)$/
+
 export interface GatherResult {
   /** How many it dug up and picked up. */
   gathered: number
@@ -135,7 +140,10 @@ export class Gatherer {
       .reduce((n, i) => n + i.count, 0)
   }
 
-  async fetch(material: Material, want: number, player: string): Promise<GatherResult> {
+  /** What the storehouse held when this bot last opened it. */
+  lastStock?: Record<string, number>
+
+  async fetch(material: Material, want: number, to: Destination): Promise<GatherResult> {
     this.cancelled = false
     const start = Date.now()
     const before = this.carried(material)
@@ -169,7 +177,10 @@ export class Gatherer {
     const gathered = Math.max(0, this.carried(material) - before)
     this.log.info(`gathered ${gathered} of ${want} ${material}${reason ? ` (${reason})` : ''}`)
     if (gathered === 0 || this.cancelled) return { gathered, delivered: 0, reason }
-    const delivered = await this.deliver(material, gathered, player)
+    const delivered =
+      'player' in to
+        ? await this.deliver(material, gathered, to.player)
+        : await this.store(material, gathered, to.chest)
     return { gathered, delivered, reason: delivered < gathered ? 'not_delivered' : reason }
   }
 
@@ -266,6 +277,69 @@ export class Gatherer {
       }
     }
     await sleep(400)
+  }
+
+  /** Put the things in the storehouse chest. Returns how many went in; notes what it holds. */
+  async store(
+    material: Material,
+    count: number,
+    chest: { x: number; y: number; z: number }
+  ): Promise<number> {
+    const items = MATERIAL_INFO[material].items
+    return this.withChest(chest, async (window) => {
+      let left = count
+      for (const item of this.bot.inventory.items().filter((i) => items.test(i.name))) {
+        if (left <= 0) break
+        const n = Math.min(left, item.count)
+        await withTimeout(window.deposit(item.type, item.metadata, n), 5_000)
+        left -= n
+      }
+      return count - left
+    })
+  }
+
+  /**
+   * Walk to the storehouse chest, open it, do the work, note what it holds and close it. Returns
+   * the work's answer, or 0 when the chest could not be reached or opened.
+   */
+  async withChest(
+    chest: { x: number; y: number; z: number },
+    work: (window: Chest) => Promise<number>
+  ): Promise<number> {
+    const pos = new Vec3(chest.x, chest.y, chest.z)
+    try {
+      await withTimeout(
+        this.bot.pathfinder.goto(new goals.GoalNear(pos.x, pos.y, pos.z, 2)),
+        60_000
+      )
+    } catch (err) {
+      this.log.info(`could not walk to the storehouse: ${errMsg(err)}`)
+      this.bot.pathfinder.setGoal(null)
+    }
+    const block = this.bot.blockAt(pos)
+    if (!block || !CONTAINER.test(block.name)) {
+      this.log.info(`the storehouse at ${pos} is ${block?.name ?? 'out of sight'}, not a chest`)
+      return 0
+    }
+    let window: Chest
+    try {
+      window = (await withTimeout(this.bot.openContainer(block), 8_000)) as Chest
+    } catch (err) {
+      this.log.info(`could not open the storehouse: ${errMsg(err)}`)
+      return 0
+    }
+    try {
+      return await work(window)
+    } catch (err) {
+      this.log.info(`storehouse work failed: ${errMsg(err)}`)
+      return 0
+    } finally {
+      const stock: Record<string, number> = {}
+      for (const item of window.containerItems())
+        stock[item.name] = (stock[item.name] ?? 0) + item.count
+      this.lastStock = stock
+      await Promise.resolve(window.close()).catch(() => {})
+    }
   }
 
   /** Bring the things to the player and toss them over. Returns how many were handed over. */

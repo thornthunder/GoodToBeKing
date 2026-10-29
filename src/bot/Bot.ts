@@ -28,6 +28,7 @@ import { findSite, type Point, type Site } from '../build/site'
 import { SEE_THROUGH } from '../build/sites'
 import { Vec3 as WorldVec } from 'vec3'
 import type { ChatFloor } from './ChatFloor'
+import type { Household } from '../household'
 import { Gatherer, type Material } from './gathering'
 import { Movement } from './movement'
 import type { CommandResult, Magic } from '../magic/Magic'
@@ -97,6 +98,8 @@ export interface BotOptions {
   works?: () => string | undefined
   /** Spells this bot can cast (Merlin; needs operator rights and cheats on). */
   magic?: Magic
+  /** The court's home and storehouse (survival), shared by the court. */
+  household?: Household
 }
 
 export interface BotState {
@@ -136,6 +139,8 @@ export class Bot extends EventEmitter {
   /** Out fetching something for a royal (survival). */
   private gatherer?: Gatherer
   private gathering = false
+  /** The court's home and storehouse (survival). */
+  private readonly household?: Household
   /** A royal asked for something else: no work orders until then. */
   private worksPausedUntil = 0
   private readonly worksSummary?: () => string | undefined
@@ -168,6 +173,7 @@ export class Bot extends EventEmitter {
     this.court = opts.court
     this.magic = opts.magic
     this.worksSummary = opts.works
+    this.household = opts.household
   }
 
   /** May this bot speak for the court right now (hails, notices)? Always, without a floor. */
@@ -652,7 +658,18 @@ export class Bot extends EventEmitter {
       case 'gather':
         // The Castellan's errands go to whichever of his staff is free (see BotManager).
         if (action.delegate) this.emit('gather', { ...action, from: this.cfg.name })
-        else void this.startGather(action.material, action.count, action.requestedBy)
+        else
+          void this.startGather(action.material, action.count, action.requestedBy, action.toStore)
+        return
+      case 'home':
+        // The court keeps it (see BotManager): where the royal stands, or failing that, here.
+        this.emit('home', {
+          requestedBy: action.requestedBy,
+          at: this.playerPosition(action.requestedBy) ?? this.position(),
+        })
+        return
+      case 'storehouse':
+        void this.chooseStorehouse(action.requestedBy)
         return
       case 'stay':
         // A standing order: no works and no escort while it stands (see post()).
@@ -683,9 +700,16 @@ export class Bot extends EventEmitter {
    * Fetch a material by hand for a royal (survival): dig it from untouched land well away from
    * everyone, bring it back, toss it over, and say how it went.
    */
-  async startGather(material: Material, count: number, requestedBy: string): Promise<void> {
+  async startGather(
+    material: Material,
+    count: number,
+    requestedBy: string,
+    toStore = false
+  ): Promise<void> {
     const gatherer = this.gatherer
     if (!gatherer || this.gathering) return
+    const chest = toStore ? this.household?.storehouse : undefined
+    if (toStore && !chest) return void this.log.warn('no storehouse to fetch for')
     this.gathering = true
     this.pauseWorks()
     this.dutyFollowing = false
@@ -694,10 +718,27 @@ export class Bot extends EventEmitter {
     const who = member ? `the ${member.title}` : requestedBy
     const name = material === 'wood' ? 'logs' : material
     try {
-      this.log.info(`fetching ${count} ${material} for ${requestedBy}`)
-      const result = await gatherer.fetch(material, count, requestedBy)
+      this.log.info(`fetching ${count} ${material} for ${chest ? 'the storehouse' : requestedBy}`)
+      const result = await gatherer.fetch(
+        material,
+        count,
+        chest ? { chest } : { player: requestedBy }
+      )
+      if (gatherer.lastStock) this.household?.noteStock(gatherer.lastStock)
       if (result.reason === 'cancelled') return
-      if (result.delivered > 0) {
+      if (chest && result.delivered > 0) {
+        await this.speak(
+          `You fetched ${result.delivered} ${name}, dug by hand, and put them in the storehouse ` +
+            `as ${who} asked. It now holds ${this.household?.stockWords() ?? 'that'}. Say so in one short sentence.`,
+          `${result.delivered} ${name} are in the storehouse now!`
+        )
+      } else if (chest && result.gathered > 0) {
+        await this.speak(
+          `You gathered ${result.gathered} ${name} for the storehouse but could not put them in ` +
+            'the chest (it is gone, or out of reach); you keep them. Say so in one short sentence.',
+          `I have the ${name}, but I could not get them into the storehouse.`
+        )
+      } else if (result.delivered > 0) {
         await this.speak(
           `You fetched ${result.delivered} ${name} for ${who}, dug by hand, and have just tossed ` +
             `them over. Say so in one short, cheerful sentence${result.delivered < count ? ' (it is all you could find nearby)' : ''}.`,
@@ -721,6 +762,40 @@ export class Bot extends EventEmitter {
     } finally {
       this.gathering = false
     }
+  }
+
+  /** The chest closest to the royal (within 6 blocks) becomes the storehouse. */
+  private async chooseStorehouse(requestedBy: string): Promise<void> {
+    const body = this.body
+    const near = this.playerPosition(requestedBy)
+    if (!body || !near) return
+    const found = body.findBlocks({
+      matching: (b: { name: string }) => /^(chest|trapped_chest|barrel)$/.test(b.name),
+      point: new WorldVec(near.x, near.y, near.z),
+      maxDistance: 6,
+      count: 1,
+    })[0]
+    const member = this.court?.find(requestedBy)
+    const who = member ? `the ${member.title}` : requestedBy
+    if (!found) {
+      await this.speak(
+        `${who} wants a chest to be the storehouse, but you see no chest near them. Ask kindly in ` +
+          'one short sentence for a chest to be placed, then to say it again beside it.',
+        'I see no chest here: place one, and tell me again beside it!'
+      )
+      return
+    }
+    this.emit('storehouse', { requestedBy, at: { x: found.x, y: found.y, z: found.z } })
+  }
+
+  /** Walk to a spot (home) if nothing else is going on. */
+  goTo(spot: Point, label: string): void {
+    this.movement?.goTo(spot, label)
+  }
+
+  /** Whether the server lets this bot's magic work right now. */
+  magicAwake(): boolean {
+    return this.magic?.available === true
   }
 
   /** A royal wants something else: put down the work order for a while. */

@@ -31,6 +31,7 @@ import type { Logger } from '../logger'
 import { errMsg, sleep } from '../util'
 import { Bot } from './Bot'
 import { MATERIALS, type Material } from './gathering'
+import { Household } from '../household'
 import { ChatFloor } from './ChatFloor'
 
 /** Runtime state that should survive restarts (git-ignored). */
@@ -113,6 +114,7 @@ export class BotManager {
           })
         : undefined
       const brain = new OllamaBrain(botCfg, ai, court, botLog.child('brain'), {
+        household: this.household,
         hails,
         // Each bot remembers only what it heard itself, so one can keep a secret and news
         // travels by being told.
@@ -136,6 +138,7 @@ export class BotManager {
         court,
         works: () => this.worksLine(),
         magic,
+        household: this.household,
       })
       bot.on('chat', (event: { from: string }) => {
         if (court.find(event.from)) this.lastRoyalLine = Date.now()
@@ -143,11 +146,60 @@ export class BotManager {
       bot.on('commission', (request: CommissionRequest) => this.commission(bot, request))
       bot.on('works', (order: WorksOrder) => void this.orderWorks(bot, order))
       bot.on('gather', (errand: Errand) => void this.sendOnErrand(bot, errand))
+      bot.on('home', (h: { requestedBy: string; at?: Point }) => {
+        if (!h.at) return
+        const home = this.household.setHome(h.at, h.requestedBy)
+        this.placesCache = undefined
+        this.log.info(`${h.requestedBy} made ${home.x},${home.y},${home.z} the court's home`)
+      })
+      bot.on('storehouse', (s: { requestedBy: string; at: Point }) => {
+        if (this.household.storehouse && samePoint(this.household.storehouse, s.at)) return
+        this.household.setStorehouse(s.at, s.requestedBy)
+        this.placesCache = undefined
+        this.log.info(
+          `${s.requestedBy} made the chest at ${s.at.x},${s.at.y},${s.at.z} the storehouse`
+        )
+      })
       this.bots.push(bot)
     }
     // Carry on with whatever the court was last building (the overlord's design, once there is one).
     const current = this.courtWorks().current ?? cfg.worksDesign
     if (current) this.startWorks(current)
+  }
+
+  /**
+   * Courtiers with nothing to do go home: on foot when it is near, by Merlin's portal (travel is
+   * free) when it is far or the walk failed twice.
+   */
+  private sendHome(): void {
+    const home = this.household.home
+    if (!home) return
+    const now = Date.now()
+    for (const bot of this.bots) {
+      if (!bot.isFree()) continue
+      const p = bot.position()
+      if (!p) continue
+      const far = Math.hypot(p.x - home.x - 0.5, p.z - home.z - 0.5)
+      if (far <= HOME_RADIUS && Math.abs(p.y - home.y) < 4) {
+        this.homeTrips.delete(bot.cfg.name)
+        continue
+      }
+      const trip = this.homeTrips.get(bot.cfg.name) ?? { at: 0, walks: 0 }
+      if (now - trip.at < HOME_RETRY_MS) continue
+      const merlin = this.bots.find((b) => b.magicAwake())
+      if ((far > HOME_WALK || trip.walks >= 2) && merlin) {
+        this.homeTrips.set(bot.cfg.name, { at: now, walks: 0 })
+        this.log.info(`${merlin.cfg.name} sends ${bot.cfg.name} home by portal`)
+        void merlin.castCommand('portal', {
+          target: bot.cfg.name,
+          requestedBy: merlin.cfg.name,
+          args: { place: 'home' },
+        })
+      } else if (far <= HOME_WALK) {
+        this.homeTrips.set(bot.cfg.name, { at: now, walks: trip.walks + 1 })
+        bot.goTo(home, 'home')
+      }
+    }
   }
 
   /**
@@ -183,6 +235,10 @@ export class BotManager {
   }
 
   private placesCache?: { at: number; places: Place[] }
+  /** The court's home and storehouse (survival). */
+  private readonly household = new Household(path.resolve(STATE_DIR, 'household.json'))
+  /** When each bot was last sent home, and how many walks in a row did not get it there. */
+  private readonly homeTrips = new Map<string, { at: number; walks: number }>()
 
   /** Named places of the castles built and being built (for Merlin's portal), cached a while. */
   private places(): Place[] {
@@ -194,6 +250,16 @@ export class BotManager {
       path.resolve(f.replace(/\\/g, '/'))
     )
     const places = placesFromFiles([...new Set(files)])
+    // The household's own places, for Merlin's portal: "take us home".
+    const { home, storehouse } = this.household
+    if (home) places.push({ name: 'home', x: home.x + 0.5, y: home.y, z: home.z + 0.5 })
+    if (storehouse)
+      places.push({
+        name: 'the storehouse',
+        x: storehouse.x + 0.5,
+        y: storehouse.y + 1,
+        z: storehouse.z + 0.5,
+      })
     this.placesCache = { at: Date.now(), places }
     return places
   }
@@ -448,6 +514,8 @@ export class BotManager {
       // The royal family's wishes first, then the castle.
       this.assignCommissions()
       this.works?.tick(this.workers())
+      // Whoever is still free afterwards goes home.
+      this.sendHome()
     }, 5_000)
   }
 
@@ -838,6 +906,17 @@ export class BotManager {
 }
 
 /** A royal's order for great works, as the bot that took it heard it (see Bot.act). */
+/** Courtiers within this many blocks of home are at home. */
+const HOME_RADIUS = 10
+/** Farther than this, Merlin portals them home rather than letting them walk. */
+const HOME_WALK = 96
+/** Before sending the same bot home again. */
+const HOME_RETRY_MS = 60_000
+
+function samePoint(a: Point, b: Point): boolean {
+  return a.x === b.x && a.y === b.y && a.z === b.z
+}
+
 /** A royal's errand the Castellan hands to his staff. */
 interface Errand {
   material: Material

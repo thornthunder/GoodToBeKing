@@ -71,14 +71,22 @@ export type BotAction =
   | { type: 'undo'; requestedBy: string }
   /** A royal orders great works: a new palace or castle, where they stand or at `at`. */
   | { type: 'works'; what: string; requestedBy: string; at?: { x: number; y?: number; z: number } }
-  /** Fetch a material by hand for a royal (survival); `delegate`: one of the staff goes. */
+  /**
+   * Fetch a material by hand for a royal (survival); `delegate`: one of the staff goes;
+   * `toStore`: it goes into the storehouse chest instead of to the royal.
+   */
   | {
       type: 'gather'
       material: Material
       count: number
       requestedBy: string
       delegate?: boolean
+      toStore?: boolean
     }
+  /** A royal makes the spot where they stand the court's home. */
+  | { type: 'home'; requestedBy: string }
+  /** A royal makes the chest beside them the court's storehouse. */
+  | { type: 'storehouse'; requestedBy: string }
 
 /** How a build went, for the brain to talk about. */
 export interface BuildOutcome {

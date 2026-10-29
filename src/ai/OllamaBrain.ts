@@ -16,12 +16,15 @@ import type {
 } from './Brain'
 import { byHand } from './Brain'
 import type { Material } from '../bot/gathering'
+import type { Household } from '../household'
 import {
   abilityNote,
   declineLine,
   detectBuildRequest,
   detectGatherRequest,
+  detectHomeRequest,
   detectMissingAbility,
+  detectStorehouseRequest,
   detectMoveCommand,
   detectUndoRequest,
   detectWorksRequest,
@@ -169,6 +172,7 @@ export class OllamaBrain implements Brain {
   private readonly magic?: Magic
   /** The builds the royal family asked for (shared by the court). */
   private readonly commissions?: CommissionBook
+  private readonly household?: Household
   /** An order or rule from the King that clashes with others, waiting for "yes" or "no". */
   private pendingOrder?: {
     member: CourtMember
@@ -193,6 +197,7 @@ export class OllamaBrain implements Brain {
     this.rules = opts.rules ?? new CourtRules()
     this.magic = opts.magic
     this.commissions = opts.commissions
+    this.household = opts.household
   }
 
   /** Writes down what was heard now and resolves once every extraction has finished (for tests). */
@@ -413,6 +418,7 @@ export class OllamaBrain implements Brain {
   /** What the line asks of the body. Building takes precedence over walking ("come and build"). */
   private actionTurn(event: ChatEvent, member: CourtMember | undefined, ctx: BrainContext): Turn {
     return (
+      this.householdTurn(event, member) ??
       this.gatherTurn(event, member, ctx) ??
       this.buildTurn(event, member, ctx) ??
       this.moveTurn(event, member, ctx)
@@ -513,6 +519,34 @@ export class OllamaBrain implements Brain {
       }
     }
     return this.keep(member, reading, turn, verdict.replaces, event.message)
+  }
+
+  /** "the King" for a royal, the player name for anyone else. */
+  private titleOf(player: string): string {
+    const member = this.court.find(player)
+    return member ? `the ${member.title}` : player
+  }
+
+  /** The court's home and storehouse, as far as the royal family has chosen them. */
+  private householdSection(): string | undefined {
+    const h = this.household
+    if (!h?.home && !h?.storehouse) return undefined
+    const lines: string[] = []
+    if (h.home) {
+      lines.push(
+        `- The court's home (chosen by ${this.titleOf(h.home.setBy)}) is at ${h.home.x}, ` +
+          `${h.home.y}, ${h.home.z}. Courtiers with nothing to do gather there.`
+      )
+    }
+    if (h.storehouse) {
+      const seen = h.stock.at
+        ? `when last opened it held ${h.stockWords()}`
+        : 'nobody has looked inside yet'
+      lines.push(
+        `- The court's storehouse is the chest at ${h.storehouse.x}, ${h.storehouse.y}, ${h.storehouse.z}: ${seen}.`
+      )
+    }
+    return lines.join('\n')
   }
 
   /** The King describes a new spell: check it, repeat it back, and learn it on "yes". */
@@ -834,6 +868,33 @@ export class OllamaBrain implements Brain {
     return lines.join('\n')
   }
 
+  /** A royal makes this spot the court's home, or the chest beside them its storehouse. */
+  private householdTurn(event: ChatEvent, member: CourtMember | undefined): Turn | null {
+    const home = detectHomeRequest(event.message)
+    const store = !home && detectStorehouseRequest(event.message)
+    if (!home && !store) return null
+    const who = member ? `the ${member.title}` : event.from
+    if (!member) {
+      return {
+        note: `(Only the royal family chooses the court's home and stores. Decline ${who} kindly.)`,
+      }
+    }
+    if (home) {
+      return {
+        action: { type: 'home', requestedBy: event.from },
+        note:
+          `(${who} makes this place the court's home: from now on courtiers with nothing to do ` +
+          'gather here. Say so gladly in one short sentence.)',
+      }
+    }
+    return {
+      action: { type: 'storehouse', requestedBy: event.from },
+      note:
+        `(${who} makes the chest beside them the court's storehouse: what the court fetches for ` +
+        'it goes in there. Say so gladly in one short sentence.)',
+    }
+  }
+
   /**
    * Errands in survival: fetch dirt, wood, sand or gravel, dug by hand from untouched land. The
    * Castellan sends one of his staff; the wizard does not dig. Null when the line is no errand.
@@ -851,6 +912,15 @@ export class OllamaBrain implements Brain {
       return { note: `(Only the royal family may send you on errands. Decline ${who} kindly.)` }
     }
     const what = `${request.count} ${MATERIAL_NAMES[request.material]}`
+    const store = request.toStore ? this.household?.storehouse : undefined
+    if (request.toStore && !store) {
+      return {
+        note:
+          `(The court has no storehouse yet: ask ${who} kindly to show you a chest and say "this ` +
+          'chest is our storehouse". Do not promise to store anything before that.)',
+      }
+    }
+    const goesTo = store ? 'the storehouse' : who
     const me = this.cfg.name.toLowerCase()
     const staff = this.staff.filter((s) => s.reportsTo?.toLowerCase() === me).map((s) => s.name)
     if (this.magic) {
@@ -866,19 +936,20 @@ export class OllamaBrain implements Brain {
       material: request.material,
       count: request.count,
       requestedBy: event.from,
+      ...(store ? { toStore: true } : {}),
     }
     if (staff.length) {
       return {
         action: { ...action, delegate: true },
         note:
-          `(You send one of your staff, ${listWords(staff, 'or')}, to fetch ${what} for ${who} ` +
+          `(You send one of your staff, ${listWords(staff, 'or')}, to fetch ${what} for ${goesTo} ` +
           'from untouched land nearby. Say so gladly in one short sentence; it takes a few minutes.)',
       }
     }
     return {
       action,
       note:
-        `(You now go and fetch ${what} for ${who} from untouched land nearby, dug by hand, and ` +
+        `(You now go and fetch ${what} for ${goesTo} from untouched land nearby, dug by hand, and ` +
         'bring it back. Say so gladly in one short sentence; it takes a few minutes.)',
     }
   }
@@ -1386,6 +1457,7 @@ export class OllamaBrain implements Brain {
               'designs it for the spot they choose, anywhere they like, and the whole crew builds it.'
             : `- You do not build yourself; ${listWords(this.staff.filter((s) => s.canBuild).map((s) => s.name)) || 'others'} build for the court.`,
       this.commissionsSection(),
+      this.householdSection(),
       !handWork &&
         (this.cfg.canBuild || this.builders().length > 0) &&
         '- The court builds wherever the royal family asks, never breaking anything anyone made.',
@@ -1521,6 +1593,8 @@ export interface BrainOptions {
   magic?: Magic
   /** The builds the royal family asked for, shared by the court. */
   commissions?: CommissionBook
+  /** The court's home and storehouse (survival), shared by the court. */
+  household?: Household
 }
 
 export interface StaffMember {
