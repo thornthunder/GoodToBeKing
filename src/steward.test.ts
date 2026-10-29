@@ -134,6 +134,20 @@ describe("the Castellan's account", () => {
     })
   })
 
+  it('gives each free builder the next hall job: one mends while the other makes the chest', () => {
+    const both = {
+      ...base,
+      storehouse: false,
+      storehouseLost: true,
+      hall: { roof: 0, door: 0, light: 0, repair: 4 },
+      freeBuilders: ['Henry', 'George'],
+    }
+    expect(plan(both).filter((a) => a.kind === 'hallwork')).toEqual([
+      { kind: 'hallwork', work: 'repair' },
+      { kind: 'hallwork', work: 'chest' },
+    ])
+  })
+
   it('has a new chest made when the storehouse was blown up, after the repairs', () => {
     expect(plan({ ...base, storehouse: false, storehouseLost: true })[0]).toEqual({
       kind: 'hallwork',

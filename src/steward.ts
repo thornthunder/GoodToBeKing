@@ -18,6 +18,8 @@ export interface CourtState {
   bedsInHall: number
   /** A free builder, and one already carrying beds or coal. */
   freeBuilder?: string
+  /** Every free builder: each takes the next hall job down the list in the same round. */
+  freeBuilders?: string[]
   builderWithBeds?: string
   builderWithCoal?: string
   /** The storehouse chest was there once and is gone (blown up): a new one is wanted. */
@@ -91,23 +93,26 @@ export const STONE_RESERVE = 32
  */
 export function plan(s: CourtState): StewardAction[] {
   const out: StewardAction[] = []
-  // The hall first: a roof keeps arrows and rain out, a door keeps monsters out.
-  if (s.freeBuilder) {
-    // A hall with holes lets the monsters in: mend it before anything else.
-    if (s.hall.repair > 0) out.push({ kind: 'hallwork', work: 'repair' })
-    else if (s.storehouseLost) out.push({ kind: 'hallwork', work: 'chest' })
-    else if (s.hall.roof > 0) out.push({ kind: 'hallwork', work: 'roof' })
-    else if (s.hall.door > 0) out.push({ kind: 'hallwork', work: 'door' })
-    else if (s.builderWithBeds && s.bedsInHall < s.courtiers)
-      out.push({ kind: 'hallwork', work: 'beds', by: s.builderWithBeds })
-    else if (s.hall.light > 0 && (s.storeHasCoal || s.builderWithCoal))
-      out.push({ kind: 'hallwork', work: 'light', by: s.builderWithCoal })
-    else if (s.builderWithFurnace && !s.furnace)
-      out.push({ kind: 'hallwork', work: 'furnace', by: s.builderWithFurnace })
-    // The court's own furnace: eight cobblestone.
-    else if (!s.furnace && s.cobblestone >= 8 && s.storehouse)
-      out.push({ kind: 'hallwork', work: 'furnace' })
-  }
+  // The hall first, most urgent first; each free builder takes the next job down the list.
+  const jobs: Array<Extract<StewardAction, { kind: 'hallwork' }>> = []
+  // A hall with holes lets the monsters in: mend it before anything else.
+  if (s.hall.repair > 0) jobs.push({ kind: 'hallwork', work: 'repair' })
+  // Without a storehouse nothing else can be kept: mining, farming, cooking all wait for it.
+  if (s.storehouseLost) jobs.push({ kind: 'hallwork', work: 'chest' })
+  // A roof keeps arrows and rain out, a door keeps monsters out.
+  if (s.hall.roof > 0) jobs.push({ kind: 'hallwork', work: 'roof' })
+  if (s.hall.door > 0) jobs.push({ kind: 'hallwork', work: 'door' })
+  if (s.builderWithBeds && s.bedsInHall < s.courtiers)
+    jobs.push({ kind: 'hallwork', work: 'beds', by: s.builderWithBeds })
+  if (s.hall.light > 0 && (s.storeHasCoal || s.builderWithCoal))
+    jobs.push({ kind: 'hallwork', work: 'light', by: s.builderWithCoal })
+  if (s.builderWithFurnace && !s.furnace)
+    jobs.push({ kind: 'hallwork', work: 'furnace', by: s.builderWithFurnace })
+  // The court's own furnace: eight cobblestone.
+  else if (!s.furnace && s.cobblestone >= 8 && s.storehouse)
+    jobs.push({ kind: 'hallwork', work: 'furnace' })
+  const builders = s.freeBuilders ?? (s.freeBuilder ? [s.freeBuilder] : [])
+  out.push(...jobs.slice(0, builders.length))
   // Light without coal: charcoal from the court's own logs, in the furnace (indoor work).
   const coal = s.storeHasCoal || Boolean(s.builderWithCoal)
   if (s.hall.light > 0 && !coal && s.furnace && s.woodInStore >= 2 && s.freeHand && s.storehouse)

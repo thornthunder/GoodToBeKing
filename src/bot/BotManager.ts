@@ -283,6 +283,9 @@ export class BotManager {
       // A bed is two blocks.
       bedsInHall: Math.floor(beds / 2),
       freeBuilder: freeBuilder?.cfg.name,
+      freeBuilders: staff
+        .filter((b) => b.cfg.canBuild && b.isFree() && !b.buildsByMagic())
+        .map((b) => b.cfg.name),
       builderWithBeds: carrying(/^bed$/),
       builderWithCoal: carrying(/^(coal|charcoal)$/),
       hall: {
@@ -327,7 +330,11 @@ export class BotManager {
     }
     const actions = plan(state)
     this.log.debug(`housekeeping: ${JSON.stringify(state)} -> ${JSON.stringify(actions)}`)
-    for (const action of actions) await this.carryOutHousekeeping(castellan, merlin, action)
+    for (const action of actions) {
+      await this.carryOutHousekeeping(castellan, merlin, action)
+      // The next hall job goes to the next builder: let this one get busy first.
+      if (action.kind === 'hallwork') await sleep(500)
+    }
   }
 
   /** Squares of the field that want tilling, planting or harvesting now. */

@@ -206,6 +206,8 @@ export class Bot extends EventEmitter {
   /** Out fetching something for a royal (survival). */
   private gatherer?: Gatherer
   private gathering = false
+  /** Taken a hall job (busy from the moment it takes it, not only once it builds). */
+  private onHallWork = false
   /** Builds by hand in survival (the hall's roof, floor, light and door). */
   private handbuilder?: Handbuilder
   /** Hunting and cooking for the court's food (survival). */
@@ -325,6 +327,7 @@ export class Bot extends EventEmitter {
   isFree(): boolean {
     if (this.state.status !== 'spawned' || !this.body || !this.mason) return false
     if (this.building || this.mason.busy || this.gathering || this.handbuilder?.busy) return false
+    if (this.onHallWork) return false
     if (this.survival?.busy) return false
     if (Date.now() < this.worksPausedUntil) return false
     const walking = this.movement?.current()
@@ -1070,7 +1073,22 @@ export class Bot extends EventEmitter {
   async startHallWork(work: HallWork, requestedBy: string): Promise<void> {
     const builder = this.handbuilder
     const home = this.household?.home
-    if (!builder || builder.busy || !home || !this.body) return
+    if (!builder || builder.busy || this.onHallWork || !home || !this.body) return
+    this.onHallWork = true
+    try {
+      await this.hallWork(builder, home, work, requestedBy)
+    } finally {
+      this.onHallWork = false
+    }
+  }
+
+  private async hallWork(
+    builder: Handbuilder,
+    home: { x: number; y: number; z: number },
+    work: HallWork,
+    requestedBy: string
+  ): Promise<void> {
+    if (!this.body) return
     const member = this.court?.find(requestedBy)
     const who = member ? `the ${member.title}` : requestedBy
     const title = HALL_WORK_TITLES[work]
