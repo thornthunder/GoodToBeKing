@@ -1183,13 +1183,13 @@ export class Bot extends EventEmitter {
       )
     } else if (result.missing === 0) {
       await this.speak(
-        `You have finished ${title} for the hall, by hand (${result.placed} blocks). Tell ${who} ` +
+        `You have finished ${title} for the hall, by hand (${result.placed} put in place). Tell ${who} ` +
           'so in one short, proud sentence.',
         `${title[0].toUpperCase()}${title.slice(1)} for the hall is done!`
       )
     } else {
       await this.speak(
-        `You made part of ${title} for the hall (${result.placed} blocks); ${result.missing} are ` +
+        `You made part of ${title} for the hall (${result.placed} put in place); ${result.missing} are ` +
           `still missing${short ? ` for want of ${short}` : ''}. Tell ${who} so honestly in one ` +
           'short sentence.',
         `I made part of it, but ${result.missing} blocks are still missing.`

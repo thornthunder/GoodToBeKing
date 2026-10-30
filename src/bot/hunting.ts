@@ -3,6 +3,7 @@ import { goals, type Pathfinder } from 'mineflayer-pathfinder'
 import type { Vec3 } from 'vec3'
 import type { Logger } from '../logger'
 import { errMsg, sleep, withTimeout } from '../util'
+import { foundAt, scout, SCOUT_LEGS } from './scouting'
 
 /**
  * The only animals the court hunts (the King's rule: never a named or tame animal). Kinds that
@@ -89,6 +90,7 @@ export class Hunter {
     const before = this.meatCarried()
     const passed = new Set<number>()
     let killed = 0
+    let legs = 0
     let reason: HuntResult['reason']
     while (killed < animals) {
       if (this.cancelled) {
@@ -99,11 +101,17 @@ export class Hunter {
         reason = 'too_long'
         break
       }
-      const prey = this.prey(passed)
+      let prey = this.prey(passed)
+      // None near: walk out to look for game further off (where some was found last, first).
+      while (!prey && legs < SCOUT_LEGS && !this.cancelled) {
+        await scout(this.bot, this.log, 'game', legs++)
+        prey = this.prey(passed)
+      }
       if (!prey) {
         reason = 'none_found'
         break
       }
+      foundAt('game', prey.position)
       passed.add(prey.id)
       if (await this.take(prey)) killed++
     }
