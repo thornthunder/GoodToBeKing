@@ -531,9 +531,12 @@ export class Bot extends EventEmitter {
     return duskFallen(this.body?.time?.timeOfDay)
   }
 
-  /** Out on an errand of its own accord (the court's, not a royal's post or escort). */
+  /** A royal's errand is under way (it goes on after dusk, wherever it leads). */
+  private royalErrand = false
+
+  /** Out on the court's own errand (not a royal's errand, post or escort). */
   onErrand(): boolean {
-    return this.gathering && !this.dutyFollowing && !this.brain.post?.()
+    return this.gathering && !this.royalErrand && !this.dutyFollowing && !this.brain.post?.()
   }
 
   isNight(): boolean {
@@ -1074,6 +1077,7 @@ export class Bot extends EventEmitter {
       this.log.info(`fetching ${count} ${material} for ${chest ? 'the storehouse' : requestedBy}`)
       // A royal's errand goes on after dusk; the court's own end then.
       gatherer.allNight = Boolean(member)
+      this.royalErrand = Boolean(member)
       const result = await gatherer.fetch(
         material,
         count,
@@ -1120,6 +1124,7 @@ export class Bot extends EventEmitter {
       return 0
     } finally {
       this.gathering = false
+      this.royalErrand = false
     }
   }
 
