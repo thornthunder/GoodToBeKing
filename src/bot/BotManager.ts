@@ -350,6 +350,15 @@ export class BotManager {
       seeds: seedsHad,
       grove: this.groveWork(names),
       woolInStore: sum(/_wool$/),
+      oreInStore: sum(/^(raw_iron|raw_copper|raw_gold|iron_ore|copper_ore|gold_ore)$/),
+      ironInStore: sum(/^iron_ingot$/),
+      guardsToOutfit: staff
+        .filter((b) => b.isGuard() && b.position())
+        .filter((b) => {
+          const want = b.outfitWanted(sum(/^iron_ingot$/))
+          return want.sword || want.armour.length > 0
+        })
+        .map((b) => b.cfg.name),
       fishing: {
         rod:
           sum(/^fishing_rod$/) > 0 ||
@@ -481,8 +490,18 @@ export class BotManager {
       case 'arm': {
         const guard = by(action.by)
         if (!guard) return
-        this.log.info(`housekeeping: ${guard.cfg.name} makes himself a sword`)
-        void guard.startArming()
+        this.log.info(`housekeeping: ${guard.cfg.name} arms himself`)
+        this.doing('arm', guard.startArming())
+        return
+      }
+      case 'smelt': {
+        const smith = by(action.by)
+        if (!smith) return
+        this.log.info(`housekeeping: ${smith.cfg.name} smelts the storehouse's ore`)
+        this.doing(
+          'smelt',
+          smith.startSmelting().then((n) => n > 0)
+        )
         return
       }
       case 'charcoal': {

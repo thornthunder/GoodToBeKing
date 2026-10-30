@@ -60,6 +60,11 @@ export interface CourtState {
   saplings?: number
   /** Fishing: a rod to hand (storehouse or a free courtier), string in the storehouse (two make one). */
   fishing?: { rod: boolean; string: number }
+  /** Ore in the storehouse to smelt (raw iron, copper, gold), and iron ingots. */
+  oreInStore?: number
+  ironInStore?: number
+  /** Guards an iron sword or a piece of iron armour would make better (iron to be had). */
+  guardsToOutfit?: string[]
   /** Wool in the storehouse: three make a bed (with three planks). */
   woolInStore?: number
   /** A courtier carrying saplings: the one to plant them. */
@@ -102,6 +107,8 @@ export type StewardAction =
   | { kind: 'cook'; by: string }
   /** Charcoal from the storehouse's logs (for torches, without coal). */
   | { kind: 'charcoal'; by: string }
+  /** Smelt the storehouse's ore into ingots in the hall's furnace. */
+  | { kind: 'smelt'; by: string }
   /** Dig the court's mine on for cobblestone (and ore). */
   | { kind: 'mine'; by: string; want: number }
   /** A guard makes himself a sword (stone, or wood without cobblestone). */
@@ -231,11 +238,26 @@ export function plan(s: CourtState): StewardAction[] {
       if (by) out.push({ kind: 'hunt', animals: 3, by })
     }
   }
-  // Guards arm themselves: a stone sword (or a wooden one) from the storehouse's materials.
+  // The iron age: ore from the mine smelted into ingots (indoor work, by night too).
+  if (
+    (s.oreInStore ?? 0) > 0 &&
+    s.furnace &&
+    s.woodInStore >= 1 &&
+    s.storehouse &&
+    !rests('smelt')
+  ) {
+    const by = anyone()
+    if (by) out.push({ kind: 'smelt', by })
+  }
+  // Guards arm themselves: a stone sword (or a wooden one) from the storehouse's materials, and
+  // with iron to be had an iron sword and iron armour.
   const canArm = s.storehouse && (s.cobblestone >= 2 || s.woodInStore >= 1)
-  const armer = canArm
-    ? s.guardsUnarmed.find((g) => free.has(g) || !(s.freeHands ?? []).length)
-    : undefined
+  const outfit = s.storehouse && (s.ironInStore ?? 0) >= 2 ? (s.guardsToOutfit ?? []) : []
+  const armer = rests('arm')
+    ? undefined
+    : ((canArm
+        ? s.guardsUnarmed.find((g) => free.has(g) || !(s.freeHands ?? []).length)
+        : undefined) ?? outfit.find((g) => free.has(g)))
   if (armer) {
     take(armer)
     out.push({ kind: 'arm', by: armer })

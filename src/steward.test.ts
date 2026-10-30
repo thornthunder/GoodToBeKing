@@ -297,6 +297,17 @@ describe("the Castellan's account", () => {
     })
   })
 
+  it('smelts the ore from the mine, and outfits the guards in iron once there is iron', () => {
+    expect(plan({ ...base, oreInStore: 5 })).toContainEqual({ kind: 'smelt', by: 'Henry' })
+    expect(plan({ ...base, oreInStore: 5, furnace: false }).some((a) => a.kind === 'smelt')).toBe(
+      false
+    )
+    const iron = { ...base, ironInStore: 10, guardsToOutfit: ['Dyke'] }
+    expect(plan(iron)).toContainEqual({ kind: 'arm', by: 'Dyke' })
+    expect(plan({ ...iron, ironInStore: 1 }).some((a) => a.kind === 'arm')).toBe(false)
+    expect(plan({ ...iron, resting: ['arm'] }).some((a) => a.kind === 'arm')).toBe(false)
+  })
+
   it('sends a free hand for wood when the storehouse runs low', () => {
     expect(plan({ ...base, woodInStore: 3 })).toEqual([
       { kind: 'errand', material: 'wood', count: 16, by: 'Henry' },

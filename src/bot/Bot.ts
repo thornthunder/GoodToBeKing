@@ -124,6 +124,17 @@ const DUTY_PAUSE_MS = 10 * 60_000
 
 const FOOD_ITEM = new RegExp(`^(${FOODS.join('|')})$`)
 
+/** Iron armour, best first, and the iron each piece takes. */
+const ARMOUR = { chestplate: 8, leggings: 7, helmet: 5, boots: 4 } as const
+const ARMOUR_SLOT = {
+  chestplate: 'torso',
+  leggings: 'legs',
+  helmet: 'head',
+  boots: 'feet',
+} as const
+/** Inventory slots of the armour worn (mineflayer's numbering). */
+const ARMOUR_INDEX = { helmet: 5, chestplate: 6, leggings: 7, boots: 8 } as const
+
 /** Hall work as the builder speaks of it, and the cells it takes. */
 const HALL_WORK_TITLES: Record<HallWork, string> = {
   roof: 'a roof',
@@ -1452,12 +1463,22 @@ export class Bot extends EventEmitter {
   }
 
   /** A guard makes himself a sword: stone with cobblestone from the storehouse, else wood. */
-  async startArming(): Promise<void> {
+  /**
+   * Arm and outfit itself from the storehouse: a sword (iron, else stone, else wood), and for a
+   * guard iron armour, a piece at a time as the iron allows (chestplate, leggings, helmet,
+   * boots); the old sword and what is left over go back. Whether it made anything.
+   */
+  async startArming(): Promise<boolean> {
     const chest = this.household?.storehouse
     const body = this.body
-    if (!chest || !body || this.gathering || this.carries(/_(sword|axe)$/) > 0) return
+    if (!chest || !body || this.gathering) return false
+    const wanted = this.outfitWanted()
+    if (!wanted.sword && wanted.armour.length === 0) return false
     this.gathering = true
+    const log = this.log.child('arms')
+    let made = 0
     try {
+      const iron = wanted.armour.reduce((n, piece) => n + ARMOUR[piece], wanted.sword ? 2 : 0)
       await this.gatherer?.withChest(chest, async (window) => {
         const take = async (items: RegExp, n: number) => {
           for (const item of window.containerItems().filter((i) => items.test(i.name))) {
@@ -1467,31 +1488,98 @@ export class Bot extends EventEmitter {
             n -= k
           }
         }
-        await take(/^cobblestone$/, 2)
-        await take(/^stick$/, 1)
-        // Wood for a stick, a wooden blade without cobblestone, and a crafting table.
+        await take(/^iron_ingot$/, iron)
+        if (wanted.sword) {
+          await take(/^cobblestone$/, 2)
+          await take(/^stick$/, 1)
+        }
+        // Wood for a stick, a wooden blade without cobblestone, and a crafting table (or the
+        // storehouse's own, to put down and take back).
         await take(/_log$/, 2)
+        await take(/_planks$/, 4)
+        await take(/^crafting_table$/, 1)
         return 0
       })
-      const log = this.log.child('arms')
-      if (this.carries(/^stick$/) < 1) {
-        await makePlanks(body, log, 2)
-        await craft(body, log, 'stick', 1)
+      if (wanted.sword) {
+        if (this.carries(/^stick$/) < 1) {
+          await makePlanks(body, log, 2)
+          await craft(body, log, 'stick', 1)
+        }
+        const sword =
+          this.carries(/^iron_ingot$/) >= 2
+            ? 'iron_sword'
+            : this.carries(/^cobblestone$/) >= 2
+              ? 'stone_sword'
+              : 'wooden_sword'
+        const better = sword === 'iron_sword' || this.carries(/_(sword|axe)$/) === 0
+        if (better && sword === 'wooden_sword') await makePlanks(body, log, 2)
+        if (better && (await craft(body, log, sword, 1))) {
+          made++
+          this.log.info(`made myself a ${sword.replace('_', ' ')}`)
+        }
       }
-      const sword = this.carries(/^cobblestone$/) >= 2 ? 'stone_sword' : 'wooden_sword'
-      if (sword === 'wooden_sword') await makePlanks(body, log, 2)
-      if (await craft(body, log, sword, 1))
-        this.log.info(`made myself a ${sword.replace('_', ' ')}`)
+      for (const piece of wanted.armour) {
+        if (this.carries(/^iron_ingot$/) < ARMOUR[piece]) break
+        const name = `iron_${piece}`
+        if (!(await craft(body, log, name, 1))) break
+        const item = body.inventory.items().find((i) => i.name === name)
+        if (item)
+          await body
+            .equip(item, ARMOUR_SLOT[piece])
+            .catch((err) => log.info(`could not put on the ${piece}: ${errMsg(err)}`))
+        made++
+        this.log.info(`made myself an iron ${piece}`)
+      }
+      // The old blade and what is left over go back.
+      await this.gatherer?.withChest(chest, async (window) => {
+        const best = body.inventory.items().find((i) => i.name === 'iron_sword')
+        for (const item of body.inventory.items()) {
+          const spare =
+            /^(iron_ingot|cobblestone|stick|crafting_table)$|_log$|_planks$/.test(item.name) ||
+            (best !== undefined && /^(stone|wooden)_sword$/.test(item.name))
+          if (spare) await withTimeout(window.deposit(item.type, item.metadata, item.count), 5_000)
+        }
+        return 0
+      })
     } catch (err) {
       this.log.warn(`arming failed: ${errMsg(err)}`)
     } finally {
       this.gathering = false
     }
+    return made > 0
+  }
+
+  /** What it still lacks: a sword (any, or iron when iron is to be had), and a guard's armour. */
+  outfitWanted(ironInStore = this.household?.stock.items.iron_ingot ?? 0): {
+    sword: boolean
+    armour: Array<keyof typeof ARMOUR>
+  } {
+    const body = this.body
+    const armed = this.carries(/_(sword|axe)$/) > 0
+    const ironSword = this.carries(/^iron_sword$/) > 0
+    const sword = !armed || (!ironSword && ironInStore >= 2)
+    const worn = (piece: keyof typeof ARMOUR) =>
+      body?.inventory.slots[ARMOUR_INDEX[piece]]?.name === `iron_${piece}` ||
+      this.carries(new RegExp(`^iron_${piece}$`)) > 0
+    let iron = ironInStore - (sword && !ironSword ? 2 : 0)
+    const armour: Array<keyof typeof ARMOUR> = []
+    if (this.isGuard())
+      for (const piece of Object.keys(ARMOUR) as Array<keyof typeof ARMOUR>)
+        if (!worn(piece) && iron >= ARMOUR[piece]) {
+          armour.push(piece)
+          iron -= ARMOUR[piece]
+        }
+    return { sword, armour }
   }
 
   /** Make charcoal in the hall's furnace from the storehouse's logs (for torches). */
   startCharcoal(): Promise<number> {
     return this.atFurnace((cook, furnace, chest) => cook.charcoal(furnace, chest))
+  }
+
+  /** Smelt the storehouse's ore into ingots in the hall's furnace. Returns how many. */
+  startSmelting(): Promise<number> {
+    return this.atFurnace((cook, furnace, chest) => cook.ingots(furnace, chest))
   }
 
   /** Cook the storehouse's raw meat in the hall's furnace. Returns how much it cooked. */
