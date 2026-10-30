@@ -244,6 +244,13 @@ export class Handbuilder {
           if (block === 'planks' && left > 0)
             await this.withdraw(chest, /_log$/, Math.ceil(left / 4))
           // Torches are made from coal and sticks, four at a time; sticks from a log's planks.
+          // Beds are made of three wool and three planks, at a crafting table.
+          if (block === 'bed' && left > 0) {
+            await this.withdraw(chest, /_wool$/, 3 * left)
+            const planks = 3 * left - this.carried('planks')
+            if (planks > 0 && (await this.withdraw(chest, /_planks$/, planks)) > 0)
+              await this.withdraw(chest, /_log$/, Math.ceil(planks / 4))
+          }
           if (block === 'torch' && left > 0) {
             const batches = Math.ceil(left / 4)
             await this.withdraw(chest, /^(coal|charcoal)$/, batches)
@@ -281,6 +288,15 @@ export class Handbuilder {
     // At the hall's crafting table if there is one, else at one put down and taken back.
     const doors = this.needs(job).get('wooden_door') ?? 0
     if (doors > 0 && !this.cancelled) await craft(this.bot, this.log, 'wooden_door', 1)
+    const beds = Math.min(
+      this.needs(job).get('bed') ?? 0,
+      Math.floor(this.carriedAny(/_wool$/) / 3)
+    )
+    if (beds > 0 && !this.cancelled) {
+      if (this.carried('planks') < 3 * beds)
+        await this.makePlanks(3 * beds - this.carried('planks'))
+      await craft(this.bot, this.log, 'bed', beds)
+    }
     const chests = this.needs(job).get('chest') ?? 0
     if (chests > 0 && !this.cancelled) await craft(this.bot, this.log, 'chest', chests)
     const tables = this.needs(job).get('crafting_table') ?? 0
@@ -341,7 +357,8 @@ export class Handbuilder {
 
   /** What is left of the materials goes back into the storehouse (a little dirt is kept). */
   private async putBack(storehouse: { x: number; y: number; z: number }): Promise<void> {
-    const leftovers = /(_planks|_log)$|^(coal|charcoal|stick|torch|crafting_table|wooden_door)$/
+    const leftovers =
+      /(_planks|_log|_wool)$|^(coal|charcoal|stick|torch|crafting_table|wooden_door)$/
     if (!this.bot.inventory.items().some((i) => leftovers.test(i.name))) return
     await this.gatherer.withChest(storehouse, async (chest) => {
       for (const item of this.bot.inventory.items().filter((i) => leftovers.test(i.name)))

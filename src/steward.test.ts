@@ -96,6 +96,12 @@ describe("the Castellan's account", () => {
     })
   })
 
+  it('makes beds of the wool the hunt brought home, before asking Merlin for any', () => {
+    const woolly = { ...base, bedsInHall: 2, woolInStore: 9 }
+    expect(plan(woolly)).toContainEqual({ kind: 'hallwork', work: 'beds', by: 'Henry' })
+    expect(plan(woolly).some((a) => a.kind === 'magic')).toBe(false)
+  })
+
   it('asks the royal family instead when one is near, and keeps magic for them', () => {
     const empty = {
       ...base,

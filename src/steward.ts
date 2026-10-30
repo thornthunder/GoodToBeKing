@@ -58,6 +58,8 @@ export interface CourtState {
   grove?: { exists: boolean; fell: number; plant: number }
   /** Saplings the court has (storehouse and pockets). */
   saplings?: number
+  /** Wool in the storehouse: three make a bed (with three planks). */
+  woolInStore?: number
   /** A courtier carrying saplings: the one to plant them. */
   withSaplings?: string
   /** Cobblestone in the storehouse (the furnace and stone tools need it). */
@@ -150,7 +152,9 @@ export function plan(s: CourtState): StewardAction[] {
   if (s.hall.door > 0) jobs.push({ work: 'door' })
   // A crafting table in the hall: everyone crafts at it instead of making their own each time.
   if (s.hall.table === false && s.storehouse && s.woodInStore >= 1) jobs.push({ work: 'table' })
-  if (s.builderWithBeds && s.bedsInHall < s.courtiers)
+  // Beds, so the court wakes at home after a bad night: carried ones, or made of the hunt's wool.
+  const woolForBeds = (s.woolInStore ?? 0) >= 3 && s.woodInStore >= 1 && s.storehouse
+  if ((s.builderWithBeds || woolForBeds) && s.bedsInHall < s.courtiers)
     jobs.push({ work: 'beds', by: s.builderWithBeds })
   if (s.hall.light > 0 && (s.storeHasCoal || s.builderWithCoal))
     jobs.push({ work: 'light', by: s.builderWithCoal })
@@ -250,7 +254,7 @@ export function plan(s: CourtState): StewardAction[] {
     for (const guard of s.guardsUnarmed)
       wants.push({ item: 'iron_sword', count: 1, to: guard, why: `a sword for ${guard}` })
   const bedsWanted = s.courtiers - s.bedsInHall
-  if (bedsWanted > 0 && !s.builderWithBeds && someBuilder)
+  if (bedsWanted > 0 && !s.builderWithBeds && !woolForBeds && someBuilder)
     wants.push({
       item: 'bed',
       count: Math.min(6, bedsWanted),

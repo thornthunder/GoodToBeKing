@@ -349,6 +349,7 @@ export class BotManager {
       mineEnded: Boolean(this.household.mine?.ended && this.household.mine.ended !== 'deep enough'),
       seeds: seedsHad,
       grove: this.groveWork(names),
+      woolInStore: sum(/_wool$/),
       saplings: sum(/_sapling$/) + this.bots.reduce((n, b) => n + b.carries(/_sapling$/), 0),
       withSaplings: staff.find((b) => b.isFree() && !b.buildsByMagic() && b.carries(/_sapling$/))
         ?.cfg.name,
