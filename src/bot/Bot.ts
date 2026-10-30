@@ -1245,7 +1245,7 @@ export class Bot extends EventEmitter {
     )
     const result = await builder.build(
       { title: `${title} for the hall`, cells },
-      this.household?.storehouse,
+      this.materials(),
       !royal && this.isNight()
     )
     if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
@@ -1321,7 +1321,7 @@ export class Bot extends EventEmitter {
       this.log.info(`${title} for the estate: ${cells.length} blocks`)
       const result = await builder.build(
         { title: `${title} for the estate`, cells },
-        this.household?.storehouse,
+        this.materials(),
         this.isNight()
       )
       if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
@@ -1399,6 +1399,14 @@ export class Bot extends EventEmitter {
     } finally {
       this.gathering = false
     }
+  }
+
+  /**
+   * Where a builder takes its materials from: the storehouse, or right after the court moved
+   * (no chest at the new home yet) the one left behind, rather than chopping wood for a chest.
+   */
+  private materials(): { x: number; y: number; z: number } | undefined {
+    return this.household?.storehouse ?? this.household?.formerStore
   }
 
   /**

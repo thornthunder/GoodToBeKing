@@ -370,17 +370,25 @@ export class BotManager {
       return
     }
     const plans = [
-      estate.doorless.length && `hang doors in the ways in that have none`,
+      estate.doorless.length &&
+        `hang doors in the ${estate.doorless.length} ways in that have none`,
       dark && 'light the dark corners with torches so no monster spawns there',
-      'mend any damage to it',
+      'mend any damage',
       this.household.formerStore && 'carry the old storehouse over',
     ].filter(Boolean)
+    const rooms = estate.buildings.flatMap((b) => b.rooms)
+    const kinds = [...new Set(rooms.map((r) => r.kind))]
+    const found =
+      `${estate.buildings.length === 1 ? 'one building' : `${estate.buildings.length} buildings`}` +
+      ` with ${rooms.length} room${rooms.length === 1 ? '' : 's'}` +
+      (kinds.length ? ` (${kinds.map((k) => `a ${k}`).join(', ')})` : '')
     await speaker.speak(
-      `You have just walked round the court's new home, which ${who} chose. What stands there: ` +
-        `${words} Tell ${who} in two or three short sentences what you found, and that the court ` +
-        'keeps it as it stands and looks after it, pulling nothing down and building nothing anew ' +
-        `that is there already: it will ${plans.join(', ')}.`,
-      `I have looked round our new home. We shall keep it as it stands, light it and mend it.`
+      `You have just walked round the court's new home, which ${who} chose. In short you found ` +
+        `${found}. In detail: ${words} Tell ${who} in two or three short sentences what you ` +
+        'found (how many rooms, and what they are), and what the court will do: it keeps the ' +
+        'place as it stands, pulls nothing down and builds nothing that is there already, and ' +
+        `it will ${plans.join(', ')}. Do not say it was planned or built by the court.`,
+      `I have looked round our new home: ${found}. We shall keep it as it stands, light it and mend it.`
     )
   }
 
