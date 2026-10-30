@@ -939,6 +939,8 @@ export class Bot extends EventEmitter {
     })
     body.on('death', () => {
       this.log.info('died')
+      // Where (the court counts deaths at home: an overrun home is no place to send anyone).
+      this.emit('died', this.position())
       this.died = true
       this.gatherer?.cancel()
       this.handbuilder?.cancel()

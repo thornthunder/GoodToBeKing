@@ -74,6 +74,14 @@ const ESTATE_MS = 10 * 60_000
 /** A block gone this close to where a royal was lately is taken for the royals' doing. */
 const ROYAL_NEAR = 12
 const ROYAL_TRAIL_MS = 2 * ESTATE_MS
+/**
+ * This many of the court dead at home within OVERRUN_MS, by night: the home is overrun (a dark
+ * house full of monsters), and nobody is sent back into it till morning. Merlin's portals once
+ * brought the dead straight back to die again, a dozen times in two minutes.
+ */
+const OVERRUN_DEATHS = 3
+const OVERRUN_MS = 5 * 60_000
+const OVERRUN_NEAR = 32
 
 /** A new palace or castle a royal ordered, waiting for its plans. */
 interface OrderedWorks {
@@ -198,9 +206,15 @@ export class BotManager {
         )
       })
       // Far out with the storehouse to reach: Merlin brings the courtier home (travel is free).
+      bot.on('died', (at?: Point) => {
+        const home = this.household.home
+        if (at && home && Math.hypot(at.x - home.x, at.z - home.z) < OVERRUN_NEAR)
+          this.deathsAtHome.push(Date.now())
+      })
       bot.portalHome = async () => {
         const merlin = this.bots.find((b) => b.magicAwake())
         if (!merlin || bot.buildsByMagic() || !this.household.home) return false
+        if (this.homeOverrun(bot)) return false
         this.log.info(`${merlin.cfg.name} brings ${bot.cfg.name} home from afar by portal`)
         await merlin.castCommand('portal', {
           target: bot.cfg.name,
@@ -253,6 +267,22 @@ export class BotManager {
     this.log.info(
       `${by} made ${home.x},${home.y},${home.z} the court's home${moving ? ': the court moves house' : ''}`
     )
+  }
+
+  /** When courtiers died at home lately. */
+  private deathsAtHome: number[] = []
+  private overrunSaid = false
+
+  /** Several of the court died at home lately, and it is still dark: no place to send anyone. */
+  private homeOverrun(bot: Bot): boolean {
+    const now = Date.now()
+    this.deathsAtHome = this.deathsAtHome.filter((t) => now - t < OVERRUN_MS)
+    const dark = bot.isNight() || !bot.outdoorTime()
+    if (!dark) {
+      this.deathsAtHome = []
+      this.overrunSaid = false
+    }
+    return dark && this.deathsAtHome.length >= OVERRUN_DEATHS
   }
 
   /** The Castellan: no builder himself, with staff who report to him. */
@@ -412,6 +442,12 @@ export class BotManager {
     for (const bot of this.bots) {
       const p = bot.position()
       if (!p) continue
+      // Overrun by night: whoever is away (woken at the world spawn) stays away till morning.
+      if (this.homeOverrun(bot) && Math.hypot(p.x - home.x, p.z - home.z) > OVERRUN_NEAR) {
+        if (!this.overrunSaid) this.log.info('the home is overrun: nobody goes back till morning')
+        this.overrunSaid = true
+        continue
+      }
       const far = Math.hypot(p.x - home.x - 0.5, p.z - home.z - 0.5)
       // Dusk: whoever is still far out on the court's errands is brought home (travel is free).
       const busy = !bot.isFree()
