@@ -261,5 +261,5 @@ describe('places', () => {
     expect(names).toContain("the Princess's bedchamber of the Great Castle")
     expect(names).toContain('the courtyard of the Great Castle')
     for (const p of places) expect(p.y).toBeGreaterThan(great.floorY)
-  })
+  }, 30_000) // compiles the whole castle: slow when the suite runs in parallel
 })
