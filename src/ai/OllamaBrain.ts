@@ -51,6 +51,7 @@ import {
   type Order,
   type Post,
   type Reading,
+  type SpellRequest,
 } from './orders'
 import type { Magic } from '../magic/Magic'
 import {
@@ -64,7 +65,13 @@ import {
 import { guessedRiddle, pickRiddle, wantsRiddle, type Riddle } from './riddles'
 import { HailLog } from './HailLog'
 import type { ChatMessage, ChatModel } from './OllamaClient'
-import { SILENT_TOKEN, cleanChatReply, mentionsName, mentionsNameLoosely } from './text'
+import {
+  SILENT_TOKEN,
+  cleanChatReply,
+  isGetMeHome,
+  mentionsName,
+  mentionsNameLoosely,
+} from './text'
 
 /** Do not hail the same player again if they rejoin within this window. */
 export const REHAIL_AFTER_MS = 10 * 60_000
@@ -310,6 +317,17 @@ export class OllamaBrain implements Brain {
     if (ctx.hears !== false) {
       const whispered = event.kind === 'whisper' ? `(whispered to ${ctx.botName} alone) ` : ''
       this.hear(`${whispered}${this.court.label(event.from)}: ${event.message}`, member)
+    }
+    // "GMH" (Get Me Home), the King's signal: Merlin portals him to the hall at once, without
+    // the model reading the line first (it may be said with a creeper at his heels).
+    if (
+      member &&
+      this.magic &&
+      ctx.hears !== false &&
+      rankOf(member.role) >= this.topRank() &&
+      isGetMeHome(event.message)
+    ) {
+      return this.getMeHome(member, ctx)
     }
     // Royal orders are read by the bot that answers, by every bot named, and by everyone who
     // hears a call to the whole court.
@@ -612,9 +630,8 @@ export class OllamaBrain implements Brain {
    * it needs and whether it is ready. Those that can be cast are; the note says what was cast and
    * why the others were not.
    */
-  private spellTurn(member: CourtMember, reading: Reading): Turn {
+  private spellTurn(member: CourtMember, requests: SpellRequest[]): Turn {
     const magic = this.magic
-    const requests = reading.spells ?? []
     if (!magic || requests.length === 0) return { note: '' }
     const giver = `the ${member.title}`
     if (magic.available === false) {
@@ -692,6 +709,44 @@ export class OllamaBrain implements Brain {
     }
   }
 
+  /**
+   * The King said "GMH": Portal on him to the court's hall (the home spot, else the great hall of
+   * the castles), with a line of Merlin's own at once. Only when it cannot be cast (no hall known,
+   * magic asleep) does the model put the reason in words.
+   */
+  private async getMeHome(member: CourtMember, ctx: BrainContext): Promise<BrainReply | null> {
+    const magic = this.magic
+    if (!magic) return null
+    const places = magic.places()
+    const hall =
+      magic.place('home') ??
+      places.find((p) => /great hall/i.test(p.name)) ??
+      places.find((p) => /hall/i.test(p.name))
+    const turn = hall
+      ? this.spellTurn(member, [{ id: 'portal', target: member.player, place: hall.name }])
+      : {
+          note:
+            `(The ${member.title} said "GMH", Get Me Home: the signal to take them to the hall ` +
+            'by magic at once. But you know of no hall yet: the court has no home. Say so kindly ' +
+            'in one short sentence, and ask where to.)',
+        }
+    if (turn.action) {
+      this.log.info(`GMH: the ${member.title} goes to ${hall?.name}`)
+      const lines = [
+        `Home you go, ${member.address}!`,
+        `At once, ${member.address}: to the hall!`,
+        `Hold fast, ${member.address}: home in a twinkling!`,
+      ]
+      const say = lines[Math.floor(Math.random() * lines.length)]
+      this.remember({ role: 'assistant', content: say })
+      this.hear(`${ctx.botName}: ${say}`)
+      return { say, action: turn.action }
+    }
+    const say = await this.generate(ctx, { note: turn.note })
+    if (say) this.hear(`${ctx.botName}: ${say}`)
+    return say ? { say } : null
+  }
+
   /** "the King", or a courtier's name. */
   private labelOf(player: string): string {
     const member = this.court.find(player)
@@ -747,7 +802,7 @@ export class OllamaBrain implements Brain {
       }
     }
     // A spell is cast at once, never kept as a standing order.
-    if (reading.spells?.length && this.magic) return this.spellTurn(member, reading)
+    if (reading.spells?.length && this.magic) return this.spellTurn(member, reading.spells)
     const replaced = replaces.length ? `(It replaces ${this.describe(replaces)}.)` : ''
     this.orders.remove(replaces.filter((id) => id.startsWith('O')))
     if (reading.type === 'rule') {

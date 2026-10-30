@@ -13,6 +13,7 @@ const SAME_LINE_MS = 10_000
  * Decides which bot speaks, so a court of several bots answers a line once, not in chorus.
  * Every bot receives every chat line separately; the first to ask decides for all.
  *
+ *   0. A line `route` gives to a bot goes to it ("GMH" from the King: Merlin).
  *   1. A bot named in the line answers (the first one named, spelling forgiven).
  *   2. Otherwise the bot already talking with that player answers.
  *   3. Otherwise the herald answers: the first online bot in court order.
@@ -27,10 +28,12 @@ export class ChatFloor {
   /**
    * @param order bot names in court order: who speaks first for the royal family
    * @param guestOrder who speaks first for everyone else (defaults to `order`)
+   * @param route the bot a line belongs to whoever else is named or talking, if any
    */
   constructor(
     private readonly order: string[],
-    private readonly guestOrder: string[] = order
+    private readonly guestOrder: string[] = order,
+    private readonly route?: (event: ChatEvent) => string | undefined
   ) {}
 
   setOnline(bot: string, online: boolean): void {
@@ -66,6 +69,8 @@ export class ChatFloor {
   }
 
   private decide(event: ChatEvent, now: number, fromGuest: boolean): string | null {
+    const routed = this.route?.(event)
+    if (routed && this.online.has(routed)) return routed
     const named = this.order
       .filter((b) => this.online.has(b) && mentionsNameLoosely(event.message, b))
       .map((b) => ({ b, at: firstMention(event.message, b) }))

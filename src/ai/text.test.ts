@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   cleanChatReply,
+  isGetMeHome,
   levenshtein,
   mentionsName,
   mentionsNameLoosely,
@@ -71,6 +72,17 @@ describe('mentionsNameLoosely', () => {
   it('stays exact for short names', () => {
     expect(mentionsNameLoosely('hi bob', 'Bob')).toBe(true)
     expect(mentionsNameLoosely('hi rob', 'Bob')).toBe(false)
+  })
+})
+
+describe('isGetMeHome', () => {
+  it('hears the signal alone or in a line, in any case, with dots', () => {
+    for (const m of ['GMH', 'gmh', 'GMH!', 'G.M.H.', 'Merlin, GMH', 'gmh please'])
+      expect(isGetMeHome(m), m).toBe(true)
+  })
+  it('not inside other words', () => {
+    for (const m of ['gmhh', 'xgmh', 'go home', 'g m h', 'agmh!'])
+      expect(isGetMeHome(m), m).toBe(false)
   })
 })
 

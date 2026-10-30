@@ -984,6 +984,50 @@ describe('OllamaBrain court behaviour', () => {
       expect(note).toContain('Portal on yourself')
     })
 
+    it('"GMH" from the King: Portal to the hall at once, without asking the model', async () => {
+      const places = [
+        { name: 'the throne room of the Great Castle', x: 1, y: 2, z: 3 },
+        { name: 'the great hall of the Great Castle', x: 4, y: 5, z: 6 },
+      ]
+      const { brain, calls, reads } = makeBrain('unused', {}, new HailLog(), {
+        magic: new Magic({ places: () => places }),
+      })
+      const reply = await brain.onChat(chat('BigDad', 'GMH'), ctx('BigDad'))
+      expect(reply?.action).toEqual({
+        type: 'cast',
+        casts: [
+          {
+            spell: 'portal',
+            args: { place: 'the great hall of the Great Castle' },
+            target: 'BigDad',
+          },
+        ],
+        requestedBy: 'BigDad',
+      })
+      expect(reply?.say).toContain('Your Majesty')
+      expect(calls).toHaveLength(0)
+      expect(reads).toHaveLength(0)
+      // With a home, the home is the hall.
+      places.push({ name: 'home', x: 7, y: 8, z: 9 })
+      const again = await brain.onChat(chat('BigDad', 'merlin gmh!'), {
+        ...ctx('BigDad'),
+        mayReply: false,
+      })
+      expect(again?.action).toMatchObject({ casts: [{ args: { place: 'home' } }] })
+    })
+
+    it('"GMH" with the magic asleep, or from the Princess, is no portal', async () => {
+      const magic = new Magic({ places: () => [{ name: 'home', x: 1, y: 2, z: 3 }] })
+      const { brain, calls } = makeBrain('My magic sleeps.', {}, new HailLog(), { magic })
+      magic.available = false
+      const asleep = await brain.onChat(chat('BigDad', 'GMH'), ctx('BigDad'))
+      expect(asleep).toEqual({ say: 'My magic sleeps.' })
+      expect(calls[0].at(-1)?.content).toContain('Your magic is asleep')
+      magic.available = true
+      const princess = await brain.onChat(chat('LittleOne42', 'GMH'), ctx('LittleOne42'))
+      expect(princess?.action).toBeUndefined()
+    })
+
     it('will not work magic on a royal who outranks the one asking', async () => {
       const { brain, calls, readings } = makeBrain('Alas.', {}, new HailLog(), {
         magic: new Magic(),

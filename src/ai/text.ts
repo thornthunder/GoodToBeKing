@@ -43,6 +43,14 @@ export function cleanChatReply(text: string, botName: string, otherLabels: strin
 }
 
 /** True when `message` contains `name` as a whole word, case-insensitively. */
+/**
+ * "GMH" (Get Me Home): the King's signal for Merlin to take him back to the hall at once.
+ * Upper or lower case, dots allowed ("G.M.H."), alone or in a line ("Merlin, GMH!").
+ */
+export function isGetMeHome(message: string): boolean {
+  return /(?:^|[^a-z0-9])g[.]?m[.]?h(?:[^a-z0-9]|$)/i.test(message)
+}
+
 export function mentionsName(message: string, name: string): boolean {
   const pattern = new RegExp(`(^|[^a-z0-9_])${escapeRegExp(name.toLowerCase())}(?=[^a-z0-9_]|$)`)
   return pattern.test(message.toLowerCase())

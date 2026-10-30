@@ -1,7 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { CourtMemory } from '../ai/CourtMemory'
-import { CourtRules, OrderBook } from '../ai/orders'
+import { CourtRules, OrderBook, rankOf } from '../ai/orders'
+import { isGetMeHome } from '../ai/text'
 import { HailLog } from '../ai/HailLog'
 import { Magic } from '../magic/Magic'
 import { placesFromFiles, type Place } from '../magic/places'
@@ -134,7 +135,14 @@ export class BotManager {
     const castellanFirst = [...botNames].sort(
       (a, b) => Number(isCastellan(cfg, b)) - Number(isCastellan(cfg, a))
     )
-    const floor = new ChatFloor(botNames, castellanFirst)
+    // "GMH" (Get Me Home) from the King is Merlin's to answer: he takes the King to the hall.
+    const wizard = cfg.bots.find((b) => b.magic)?.name
+    const kingRank = Math.max(1, ...court.members.map((m) => rankOf(m.role)))
+    const floor = new ChatFloor(botNames, castellanFirst, (event) =>
+      wizard && isGetMeHome(event.message) && rankOf(court.find(event.from)?.role) >= kingRank
+        ? wizard
+        : undefined
+    )
     const staff = cfg.bots.map((b) => ({
       name: b.name,
       role: b.role,

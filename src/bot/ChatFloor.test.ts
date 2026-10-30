@@ -58,4 +58,18 @@ describe('ChatFloor', () => {
     floor.replied('Bruce', 'Kid') // a reply lands between two bots asking
     expect(floor.responder(event)).toBe(first)
   })
+
+  it('gives a routed line to its bot, whoever else is named', () => {
+    const floor = new ChatFloor(['Festaris', 'Merlin', 'Bruce'], undefined, (e) =>
+      e.message.startsWith('GMH') && e.from === 'King' ? 'Merlin' : undefined
+    )
+    for (const b of ['Festaris', 'Merlin', 'Bruce']) floor.setOnline(b, true)
+    floor.replied('Bruce', 'King')
+    expect(floor.responder(line('King', 'GMH'))).toBe('Merlin')
+    expect(floor.responder(line('King', 'Bruce, hello'))).toBe('Bruce')
+    expect(floor.responder(line('Kid', 'GMH'))).toBe('Festaris')
+    // The bot routed to is not online: the usual rules.
+    floor.setOnline('Merlin', false)
+    expect(floor.responder(line('King', 'GMH!'))).toBe('Bruce')
+  })
 })
