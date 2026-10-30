@@ -365,7 +365,11 @@ export class BotManager {
       cobblestone: sum(/^(cobblestone|cobbled_deepslate)$/),
       stone: sum(/^(cobblestone|cobbled_deepslate|andesite|diorite|granite|tuff|stone)$/),
       // (An old mine stopped at its depth limit goes on as a tunnel: not ended.)
-      mineEnded: Boolean(this.household.mine?.ended && this.household.mine.ended !== 'deep enough'),
+      // (Nor one the miners could not get down: a new one is begun.)
+      mineEnded: Boolean(
+        this.household.mine?.ended &&
+        !['deep enough', 'unreachable'].includes(this.household.mine.ended)
+      ),
       seeds: seedsHad,
       grove: this.groveWork(names),
       woolInStore: sum(/_wool$/),

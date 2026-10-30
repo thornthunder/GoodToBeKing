@@ -21,6 +21,8 @@ export interface Mine {
   steps: number
   /** Why it stopped for good (water, lava, a cave), if it did. */
   ended?: string
+  /** Rounds in a row the miner could not get down to the last step. */
+  lost?: number
 }
 
 /** Stone that gives cobblestone, and the ores worth taking on the way. */
@@ -50,6 +52,9 @@ export function stepCells(mine: Mine, n: number): Vec3[] {
 }
 
 type MineBot = MineflayerBot & { pathfinder: Pathfinder }
+
+/** Rounds in a row the miner may fail to get down before the mine is given up for a new one. */
+const LOST_ROUNDS = 3
 
 export interface MineResult {
   steps: number
@@ -124,16 +129,31 @@ export class Miner {
     // Down the stairs dug before, to the last step: the next is dug from there, within reach.
     if (mine.steps > 0) {
       const last = stepAt(mine, mine.steps)
-      try {
-        await withTimeout(
-          this.bot.pathfinder.goto(new goals.GoalBlock(last.x, last.y, last.z)),
-          40_000
-        )
-      } catch (err) {
-        this.log.info(`could not walk down the mine to step ${mine.steps}: ${errMsg(err)}`)
-        this.bot.pathfinder.setGoal(null)
+      let down = false
+      // A fight on the way (a guard mines too) or a slow plan: try again, then near enough.
+      for (const goal of [
+        new goals.GoalBlock(last.x, last.y, last.z),
+        new goals.GoalBlock(last.x, last.y, last.z),
+        new goals.GoalNear(last.x, last.y, last.z, 1),
+      ]) {
+        try {
+          await withTimeout(this.bot.pathfinder.goto(goal), 40_000)
+          down = true
+          break
+        } catch (err) {
+          this.log.info(`could not walk down the mine to step ${mine.steps}: ${errMsg(err)}`)
+          this.bot.pathfinder.setGoal(null)
+          await sleep(2_000)
+        }
+      }
+      if (!down) {
+        mine.lost = (mine.lost ?? 0) + 1
+        // Three rounds in a row: the stairs are blocked or overrun; a new mine is begun.
+        if (mine.lost >= LOST_ROUNDS) mine.ended = 'unreachable'
+        result.ended = mine.ended
         return result
       }
+      mine.lost = 0
     }
     while (!this.cancelled && Date.now() < until && this.count('cobblestone') - before < want) {
       if (mine.ended) break

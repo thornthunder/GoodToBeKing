@@ -1436,12 +1436,16 @@ export class Bot extends EventEmitter {
     let mine = this.household?.mine
     // An older mine that stopped at its depth limit goes on as a tunnel now.
     if (mine?.ended === 'deep enough') mine.ended = undefined
+    // One the miners could no longer get down (blocked, or overrun in the dark): a new one.
+    const old = mine?.ended === 'unreachable' ? mine : undefined
+    if (old) mine = undefined
     if (!mine) {
       const names = (x: number, y: number, z: number) => body.blockAt(new WorldVec(x, y, z))?.name
       const hall = this.household?.hall
       const clear: Array<[number, number]> = [
         ...(hall ? [...hall.ring, ...hall.inside] : [[home.x, home.z] as [number, number]]),
         ...(this.household?.farm?.cells ?? []),
+        ...(old ? [[old.x, old.z] as [number, number]] : []),
       ]
       mine = chooseMine(names, home, clear)
       if (!mine) {
