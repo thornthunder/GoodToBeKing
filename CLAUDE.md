@@ -54,7 +54,7 @@ Write a line to a file named `.command` in the project root (checked every secon
 Castellan hands it to a builder), `<bot> fetch <dirt|wood|sand|gravel> [count] [for <player>]`
 (a survival errand), `<bot> hall <roof|floor|light|door|beds>` (by hand, on the court's home hall),
 `household home|storehouse <x> <y> <z>`, `<bot> bed`, `<bot> hunt [n]`, `<bot> cook`,
-`<bot> farm`, `<bot> forest`, `<bot> undo`, and for the court's building works `works status|pause|resume`,
+`<bot> farm`, `<bot> forest`, `<bot> fish`, `<bot> undo`, and for the court's building works `works status|pause|resume`,
 `works start <design.json>` and `works plan` (the overlord designs the next castle now). For
 magic: `Merlin cast <spell> [on <who>] [to <place>] [item <x>] [creature <x>] [for <player>]`,
 `Merlin spells` (logs spells, places and gifts still to fade), `Merlin fade` (takes every gift
@@ -141,7 +141,17 @@ Windows, killing a background `npx` shell does not kill its node children at all
   first and brings eight logs at least. With no tree (or game) in sight, gatherers and hunters
   walk out to look (`bot/scouting.ts`: where the court last found some, then 64-block legs).
   Beds are made of the hunt's wool (three wool, three planks); Merlin's only without wool.
-  Merlin grants the most urgent want this hour's magic still allows. `bot/mining.ts`: a staircase
+  Merlin grants the most urgent want this hour's magic still allows; bread first when nothing
+  at all is left to eat (a starving courtier dies of the next bite or fall). Fishing
+  (`build/fishing.ts` + `bot/fishing.ts`, bedboo's `bot.fish()`): open water near home, a rod
+  of three sticks and two string (Merlin's only when no game is found), the catch cooked;
+  no water near home is remembered for an hour. The iron age: the mine's ore smelted
+  (`Cook.ingots`), guards make iron swords and iron armour (put on at once), piece by piece.
+  Hours: outdoor work begins only between 500 and 9000 (an errand runs up to 6000 ticks), ends
+  at dusk (11500; a royal's errand goes on), and Merlin portals home whoever is out more than 48
+  blocks at dusk, and anyone more than 64 blocks from the storehouse it must reach; idle
+  courtiers wait inside the hall outside those hours. The hurt or hungry (health under 12,
+  food under 8) are not sent far. `bot/mining.ts`: a staircase
   mine near home (walked back down before digging on, stops at water, lava or a cave), a level
   tunnel past 18 deep; pickaxes made as needed, stone as soon as there is cobblestone. Gatherers
   climb a dirt pillar to high logs and take it down. Light: torches inside and a ring outside,
