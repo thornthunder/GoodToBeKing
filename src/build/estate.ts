@@ -520,8 +520,8 @@ export function estateLightCells(estate: Estate, names: BlockNames, max = 24): H
   const lit = new Map<string, number>()
   const cells: HandCell[] = []
   // What the planned torches light, as if they stood already.
-  const planned: BlockNames = (x, y, z) =>
-    cells.some((c) => c.x === x && c.y === y && c.z === z) ? 'torch' : names(x, y, z)
+  const torches = new Set<string>()
+  const planned: BlockNames = (x, y, z) => (torches.has(key(x, y, z)) ? 'torch' : names(x, y, z))
   for (const [x, y, z] of dark) {
     if (cells.length >= max) break
     if ((lit.get(key(x, y, z)) ?? 0) > 0) continue
@@ -556,6 +556,7 @@ export function estateLightCells(estate: Estate, names: BlockNames, max = 24): H
       continue
     }
     cells.push(cell)
+    torches.add(key(cell.x, cell.y, cell.z))
     spread(planned, lit, cell.x, cell.y, cell.z, 14)
   }
   return cells

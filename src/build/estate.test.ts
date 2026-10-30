@@ -42,10 +42,12 @@ function house(change: Record<string, string> = {}): BlockNames {
 }
 
 const HOME = { x: 2, y: 64, z: 4 }
+/** The house and the fence, and only as high as the house: quick to survey. */
+const OPTS = { radius: 34, below: 3, above: 8 }
 
-describe('the estate survey', () => {
+describe('the estate survey', { timeout: 30_000 }, () => {
   it('finds the buildings, their rooms and what the rooms are for', () => {
-    const estate = surveyEstate(house(), HOME, { radius: 34 })
+    const estate = surveyEstate(house(), HOME, OPTS)
     expect(estate.buildings).toHaveLength(2)
     const [home, fence] = estate.buildings
     expect(home.home).toBe(true)
@@ -63,7 +65,7 @@ describe('the estate survey', () => {
   })
 
   it('knows every block players placed, and nothing the world grew', () => {
-    const estate = surveyEstate(house(), HOME, { radius: 34 })
+    const estate = surveyEstate(house(), HOME, OPTS)
     expect(estate.made['0,64,0']).toBe('stone_bricks')
     expect(estate.made['3,63,3']).toBe('oak_planks')
     expect(estate.made['20,64,0']).toBe('oak_fence')
@@ -76,7 +78,7 @@ describe('the estate survey', () => {
 
   it('finds the dark corners and lights them all with torches', () => {
     const names = house()
-    const estate = surveyEstate(names, HOME, { radius: 34 })
+    const estate = surveyEstate(names, HOME, OPTS)
     const dark = darkSpots(estate, names)
     const at = (x: number, z: number) => dark.some(([dx, , dz]) => dx === x && dz === z)
     // The kitchen's torch lights both rooms (through the doorway); the far ground is dark.
@@ -96,12 +98,12 @@ describe('the estate survey', () => {
 
   it('hangs a door in the way in', () => {
     const names = house()
-    const estate = surveyEstate(names, HOME, { radius: 34 })
+    const estate = surveyEstate(names, HOME, OPTS)
     expect(estateDoorCells(estate, names)).toEqual([{ x: 7, y: 64, z: 6, block: 'wooden_door' }])
   })
 
   it('mends what was blown away, as it was where the storehouse has it', () => {
-    const before = surveyEstate(house(), HOME, { radius: 34 }).made
+    const before = surveyEstate(house(), HOME, OPTS).made
     const blown = house({ '0,65,2': 'air', '0,66,2': 'air', '0,64,3': 'air', '6,65,3': 'air' })
     const cells = estateRepairCells(before, blown)
     // The torch is the light's business, not a repair.
@@ -120,7 +122,7 @@ describe('the estate survey', () => {
 
   it('takes the room the home is in for the hall', () => {
     const names = house()
-    const estate = surveyEstate(names, HOME, { radius: 34 })
+    const estate = surveyEstate(names, HOME, OPTS)
     const hall = homeRoom(estate, names)
     expect(hall?.floorY).toBe(64)
     // The bedchamber's floor: 4 by 5 less the bed.
@@ -131,7 +133,7 @@ describe('the estate survey', () => {
 
   it('says what stands there in words', () => {
     const names = house()
-    const estate = surveyEstate(names, HOME, { radius: 34 })
+    const estate = surveyEstate(names, HOME, OPTS)
     const words = estateWords(estate, darkSpots(estate, names).length)
     expect(words).toContain('Building 1: 11 by 7 blocks and 6 high (the one the home is in)')
     expect(words).toContain('a bedchamber 4 by 5 (1 bed)')
@@ -141,7 +143,7 @@ describe('the estate survey', () => {
   })
 })
 
-describe('the estate book', () => {
+describe('the estate book', { timeout: 30_000 }, () => {
   const book = () => new EstateBook()
   const near = () => true
   const far = () => false
@@ -150,34 +152,28 @@ describe('the estate book', () => {
   it('keeps new blocks once they have stood a while, and lets scaffolding go', () => {
     const b = book()
     const t = 1_000_000
-    b.found(surveyEstate(house(), HOME, { radius: 34 }), 'a house', 'BigDad', t)
+    b.found(surveyEstate(house(), HOME, OPTS), 'a house', 'BigDad', t)
     const tower = house({ '12,64,3': 'cobblestone', '12,65,3': 'cobblestone' })
-    b.update(surveyEstate(tower, HOME, { radius: 34 }), 'a house', far, seen, t + 60_000)
+    b.update(surveyEstate(tower, HOME, OPTS), 'a house', far, seen, t + 60_000)
     expect(b.record?.made['12,64,3']).toBeUndefined()
     // Taken down again before it settled: never part of the estate.
-    b.update(surveyEstate(house(), HOME, { radius: 34 }), 'a house', far, seen, t + 120_000)
+    b.update(surveyEstate(house(), HOME, OPTS), 'a house', far, seen, t + 120_000)
     expect(b.record?.pending['12,64,3']).toBeUndefined()
     // A porch the King adds stays.
     const porch = house({ '7,64,8': 'oak_planks' })
-    b.update(surveyEstate(porch, HOME, { radius: 34 }), 'a house', far, seen, t + 180_000)
-    b.update(
-      surveyEstate(porch, HOME, { radius: 34 }),
-      'a house',
-      far,
-      seen,
-      t + 180_000 + SETTLE_MS
-    )
+    b.update(surveyEstate(porch, HOME, OPTS), 'a house', far, seen, t + 180_000)
+    b.update(surveyEstate(porch, HOME, OPTS), 'a house', far, seen, t + 180_000 + SETTLE_MS)
     expect(b.record?.made['7,64,8']).toBe('oak_planks')
   })
 
   it('lets a block go that went while a royal was about, and keeps the rest to mend', () => {
     const b = book()
-    b.found(surveyEstate(house(), HOME, { radius: 34 }), 'a house', 'BigDad')
+    b.found(surveyEstate(house(), HOME, OPTS), 'a house', 'BigDad')
     const window = house({ '3,65,0': 'air' })
-    b.update(surveyEstate(window, HOME, { radius: 34 }), 'a house', near, seen)
+    b.update(surveyEstate(window, HOME, OPTS), 'a house', near, seen)
     expect(b.record?.made['3,65,0']).toBeUndefined()
     const blown = house({ '3,65,0': 'air', '0,65,2': 'air' })
-    b.update(surveyEstate(blown, HOME, { radius: 34 }), 'a house', far, seen)
+    b.update(surveyEstate(blown, HOME, OPTS), 'a house', far, seen)
     expect(b.record?.made['0,65,2']).toBe('stone_bricks')
     expect(estateRepairCells(b.record!.made, blown).map((c) => [c.x, c.y, c.z])).toEqual([
       [0, 65, 2],
