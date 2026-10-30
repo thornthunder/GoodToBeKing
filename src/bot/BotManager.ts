@@ -44,6 +44,7 @@ import {
 import { plan, type CourtState, type StewardAction } from '../steward'
 import { RAW } from './cooking'
 import { farmNeed } from '../build/farm'
+import { groveNeed } from '../build/grove'
 import { FOODS } from './survival'
 import type { HallWork } from '../ai/Brain'
 import { ChatFloor } from './ChatFloor'
@@ -347,6 +348,10 @@ export class BotManager {
       // (An old mine stopped at its depth limit goes on as a tunnel: not ended.)
       mineEnded: Boolean(this.household.mine?.ended && this.household.mine.ended !== 'deep enough'),
       seeds: seedsHad,
+      grove: this.groveWork(names),
+      saplings: sum(/_sapling$/) + this.bots.reduce((n, b) => n + b.carries(/_sapling$/), 0),
+      withSaplings: staff.find((b) => b.isFree() && !b.buildsByMagic() && b.carries(/_sapling$/))
+        ?.cfg.name,
       // Guards first: they carry swords. Then anyone of the staff.
       freeHunter: (
         staff.find((b) => b.isGuard() && b.isFree() && !b.buildsByMagic()) ??
@@ -403,6 +408,22 @@ export class BotManager {
       if (need === 'harvest' || ((need === 'till' || need === 'plant') && seeds > 0)) work++
     }
     return work + (wheat >= 3 ? 1 : 0)
+  }
+
+  /** The grove: trees grown to fell, bare spots to plant (where the court can see them). */
+  private groveWork(names: (x: number, y: number, z: number) => string | undefined): {
+    exists: boolean
+    fell: number
+    plant: number
+  } {
+    const grove = this.household.grove
+    const work = { exists: Boolean(grove), fell: 0, plant: 0 }
+    for (const [x, y, z] of grove?.spots ?? []) {
+      const need = groveNeed(names(x, y, z), names(x, y + 1, z))
+      if (need === 'fell') work.fell++
+      else if (need === 'plant') work.plant++
+    }
+    return work
   }
 
   private async carryOutHousekeeping(
@@ -466,6 +487,13 @@ export class BotManager {
         if (!farmer) return
         this.log.info(`housekeeping: ${farmer.cfg.name} tends the wheat field`)
         this.doing('farm', farmer.startFarming())
+        return
+      }
+      case 'forest': {
+        const forester = by(action.by)
+        if (!forester) return
+        this.log.info(`housekeeping: ${forester.cfg.name} tends the grove`)
+        this.doing('forest', forester.startForestry())
         return
       }
       case 'cook': {
@@ -1253,6 +1281,8 @@ export class BotManager {
       void bot.startCharcoal()
     } else if (verb === 'farm') {
       void bot.startFarming()
+    } else if (verb === 'forest') {
+      void bot.startForestry()
     } else if (verb === 'bed') {
       // <bot> bed: go to bed now, as when a royal lies down at night (survival)
       void bot.goToBed()

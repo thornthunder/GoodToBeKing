@@ -38,6 +38,7 @@ import { Vec3 as WorldVec } from 'vec3'
 import type { ChatFloor } from './ChatFloor'
 import { goals, type Pathfinder } from 'mineflayer-pathfinder'
 import { chooseFarm } from '../build/farm'
+import { chooseGrove } from '../build/grove'
 import { Handbuilder } from '../build/Handbuilder'
 import {
   bedCells,
@@ -58,6 +59,7 @@ import type { Household } from '../household'
 import { Cook } from './cooking'
 import { craft, makePlanks } from './crafting'
 import { Farmer } from './farming'
+import { Forester } from './forestry'
 import { Miner, chooseMine } from './mining'
 import { Gatherer, type Material } from './gathering'
 import { GAME, Hunter, SPOILS } from './hunting'
@@ -220,6 +222,7 @@ export class Bot extends EventEmitter {
   private hunter?: Hunter
   private cook?: Cook
   private farmer?: Farmer
+  private forester?: Forester
   private miner?: Miner
   /** Eating and, for guards, fighting (survival). */
   private survival?: Survival
@@ -842,6 +845,7 @@ export class Bot extends EventEmitter {
     this.hunter = new Hunter(body, this.log.child('hunt'), (name) => this.isBot(name))
     this.cook = new Cook(body, this.log.child('cook'), this.gatherer)
     this.farmer = new Farmer(body, this.log.child('farm'), this.gatherer)
+    this.forester = new Forester(body, this.log.child('grove'), this.gatherer)
     this.miner = new Miner(body, this.log.child('mine'))
     this.handbuilder = new Handbuilder(body, this.log.child('hands'), this.gatherer, () =>
       this.movement?.configure()
@@ -1259,6 +1263,49 @@ export class Bot extends EventEmitter {
       return done.harvested + done.tilled + done.planted + done.bread > 0
     } catch (err) {
       this.log.warn(`farming failed: ${errMsg(err)}`)
+      return false
+    } finally {
+      this.gathering = false
+    }
+  }
+
+  /**
+   * Tend the court's grove (chosen once, near home): fell what has grown, plant saplings on bare
+   * spots, logs and saplings into the storehouse. Whether anything came of it.
+   */
+  async startForestry(): Promise<boolean> {
+    const forester = this.forester
+    const body = this.body
+    const home = this.household?.home
+    if (!forester || !body || !home || this.gathering || !byHand(this.gameMode())) return false
+    let grove = this.household?.grove
+    if (!grove) {
+      const names = (x: number, y: number, z: number) => body.blockAt(new WorldVec(x, y, z))?.name
+      const hall = this.household?.hall
+      const farm = this.household?.farm
+      grove = chooseGrove(names, home, {
+        keepClear: [
+          ...(hall ? [...hall.ring, ...hall.inside] : [[home.x, home.z] as [number, number]]),
+          ...(farm?.cells ?? []),
+        ],
+      })
+      if (!grove) {
+        this.log.info('found no open ground near home for a grove')
+        return false
+      }
+      this.household?.setGrove(grove)
+      this.log.info(`laid out a grove of ${grove.spots.length} trees near home`)
+    }
+    this.gathering = true
+    this.pauseWorks()
+    this.dutyFollowing = false
+    this.movement?.stop()
+    try {
+      const done = await forester.tend(grove, this.household?.storehouse)
+      if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
+      return done.felled + done.planted > 0
+    } catch (err) {
+      this.log.warn(`tending the grove failed: ${errMsg(err)}`)
       return false
     } finally {
       this.gathering = false

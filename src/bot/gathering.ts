@@ -38,6 +38,11 @@ const GROUND =
 const COVER =
   /^(air|short_grass|tall_grass|fern|large_fern|snow_layer|leaf_litter|bush|wildflowers|short_dry_grass|tall_dry_grass|dead_bush|deadbush|poppy|dandelion|allium|cornflower|azure_bluet|oxeye_daisy|[a-z_]*_tulip|lily_of_the_valley|pink_petals)$/
 const LEAVES = /_leaves$/
+const SAPLING = /_sapling$/
+/** What a tree gives besides its logs, kept in the storehouse. */
+const TREE_GIFTS = /_sapling$|^(stick|apple)$/
+/** Saplings a gatherer breaks leaves for, for the grove. */
+const SAPLINGS_WANTED = 6
 const LOG = /_log$/
 /** Whatever the land is made of, or grows or flows on it: anything else, someone made. */
 const WILD =
@@ -274,8 +279,8 @@ export class Gatherer {
       .find((p) => this.allowed(material, p, players))
   }
 
-  /** Walk over, dig it, and pick up what drops. */
-  private async digOne(material: Material, target: Vec3): Promise<void> {
+  /** Walk over, dig it (climbing to a log high up), and pick up what drops. */
+  async digOne(material: Material, target: Vec3): Promise<void> {
     try {
       await withTimeout(
         this.bot.pathfinder.goto(new goals.GoalNearXZ(target.x, target.z, 2)),
@@ -302,7 +307,37 @@ export class Gatherer {
       this.log.info(`could not dig ${block.name} at ${target}: ${errMsg(err)}`)
       return
     }
+    if (MATERIAL_INFO[material].tree) await this.leavesForSaplings(target)
     await this.pickUp(target)
+  }
+
+  /**
+   * Break the leaves within reach of a felled log while the court is short of saplings: one in
+   * twenty drops one, for the grove at home (a few seconds' work by hand).
+   */
+  async leavesForSaplings(near: Vec3, want = SAPLINGS_WANTED): Promise<void> {
+    if (this.carriedItems(SAPLING) >= want) return
+    const eyes = () => this.bot.entity.position.offset(0, 1.62, 0)
+    const leaves = this.bot.findBlocks({
+      matching: (b: { name: string }) => LEAVES.test(b.name),
+      point: near,
+      maxDistance: 5,
+      count: 24,
+    })
+    for (const p of leaves) {
+      if (this.cancelled || this.carriedItems(SAPLING) >= want) break
+      if (eyes().distanceTo(p.offset(0.5, 0.5, 0.5)) > REACH) continue
+      const block = this.bot.blockAt(p)
+      if (!block || !LEAVES.test(block.name)) continue
+      await withTimeout(this.bot.dig(block, true), 3_000).catch(() => {})
+    }
+  }
+
+  private carriedItems(items: RegExp): number {
+    return this.bot.inventory
+      .items()
+      .filter((i) => items.test(i.name))
+      .reduce((n, i) => n + i.count, 0)
   }
 
   /**
@@ -401,6 +436,10 @@ export class Gatherer {
         await withTimeout(window.deposit(item.type, item.metadata, n), 5_000)
         left -= n
       }
+      // What a tree gives besides its logs: saplings for the grove, sticks, apples.
+      if (MATERIAL_INFO[material].tree)
+        for (const item of this.bot.inventory.items().filter((i) => TREE_GIFTS.test(i.name)))
+          await withTimeout(window.deposit(item.type, item.metadata, item.count), 5_000)
       return count - left
     })
   }

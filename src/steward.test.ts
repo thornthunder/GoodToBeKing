@@ -247,6 +247,31 @@ describe("the Castellan's account", () => {
     })
   })
 
+  it('fells and plants the grove by day (not a guard), before trees far off', () => {
+    const grown = { ...base, woodInStore: 6, grove: { exists: true, fell: 2, plant: 0 } }
+    expect(kinds(grown)[0]).toBe('forest:Henry')
+    expect(plan({ ...grown, night: true }).some((a) => a.kind === 'forest')).toBe(false)
+    // Bare spots and no saplings: nothing to do there.
+    const bare = { ...base, grove: { exists: true, fell: 0, plant: 3 }, saplings: 0 }
+    expect(plan(bare).some((a) => a.kind === 'forest')).toBe(false)
+    // Saplings in a courtier's pocket and no grove yet: that one lays it out.
+    const pocket = { ...base, saplings: 4, withSaplings: 'George' }
+    expect(plan(pocket)).toContainEqual({ kind: 'forest', by: 'George' })
+  })
+
+  it('has Merlin conjure saplings for a grove when no tree is near enough to find', () => {
+    const treeless = { ...base, woodInStore: 6, resting: ['wood'] }
+    expect(plan(treeless)).toContainEqual({
+      kind: 'magic',
+      item: 'birch_sapling',
+      count: 4,
+      to: 'Henry',
+      why: 'saplings for a grove',
+    })
+    const growing = { ...treeless, grove: { exists: true, fell: 0, plant: 0 } }
+    expect(plan(growing).some((a) => a.kind === 'magic' && a.item === 'birch_sapling')).toBe(false)
+  })
+
   it('sends a free hand for wood when the storehouse runs low', () => {
     expect(plan({ ...base, woodInStore: 3 })).toEqual([
       { kind: 'errand', material: 'wood', count: 16, by: 'Henry' },

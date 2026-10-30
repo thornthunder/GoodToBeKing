@@ -73,6 +73,7 @@ export const GIFTS: Record<string, number> = {
   baked_potato: 4,
   carrot: 4,
   oak_log: 10,
+  birch_sapling: 6,
   oak_planks: 10,
   cobblestone: 10,
   coal: 8,

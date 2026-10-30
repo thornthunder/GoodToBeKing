@@ -42,6 +42,7 @@ corepack pnpm exec tsx scripts/check-section.ts <design> [section id prefix ...]
 corepack pnpm exec tsx scripts/survey-terrain.ts x1 z1 x2 z2 [baseY] [types] [json=f]    # height or block-type map of an area
 corepack pnpm exec tsx scripts/overlord-plan.ts <terrain.json> <out.json> [model]        # let the overlord design a castle offline
 corepack pnpm exec tsx scripts/render-castle.ts <design.json> <out.png> [scale]          # picture of each storey from above
+corepack pnpm exec tsx scripts/survey-layers.ts x1 z1 x2 z2 y1 y2                       # a box of blocks layer by layer (holes, caves)
 corepack pnpm exec tsx scripts/make-court-skins.ts [preview-dir]                         # repaint the court's skins (config/skins)
 ```
 
@@ -53,7 +54,7 @@ Write a line to a file named `.command` in the project root (checked every secon
 Castellan hands it to a builder), `<bot> fetch <dirt|wood|sand|gravel> [count] [for <player>]`
 (a survival errand), `<bot> hall <roof|floor|light|door|beds>` (by hand, on the court's home hall),
 `household home|storehouse <x> <y> <z>`, `<bot> bed`, `<bot> hunt [n]`, `<bot> cook`,
-`<bot> farm`, `<bot> undo`, and for the court's building works `works status|pause|resume`,
+`<bot> farm`, `<bot> forest`, `<bot> undo`, and for the court's building works `works status|pause|resume`,
 `works start <design.json>` and `works plan` (the overlord designs the next castle now). For
 magic: `Merlin cast <spell> [on <who>] [to <place>] [item <x>] [creature <x>] [for <player>]`,
 `Merlin spells` (logs spells, places and gifts still to fade), `Merlin fade` (takes every gift
@@ -96,24 +97,29 @@ Windows, killing a background `npx` shell does not kill its node children at all
   closes doors left open). Keep it that way unless the user asks.
 - Survival (the King's goal: Survival on Normal, one difficulty at a time; tested on the VM's
   test server first): `bot/gathering.ts` fetches dirt, wood, sand or gravel by hand from
-  untouched land (16 blocks from every player; never a hole's floor, never a wall), to a royal
-  or into the storehouse. `household.ts`: the court's home (free courtiers gather there, inside
+  untouched land (under open sky, not a pit's floor, nothing made within three blocks, 16
+  blocks from every player and from the court's own grounds: home, storehouse, hall, field,
+  grove, mine), to a royal or into the storehouse. A night once ended with the hall dug away:
+  its dirt floor and mended patches had looked like untouched land. `household.ts`: the court's home (free courtiers gather there, inside
   by night; Merlin portals the far ones, travel is free) and storehouse chest with its last seen
   stock. `build/hall.ts` surveys the royals' hall from its walls (closed at three high);
   `build/Handbuilder.ts` builds its roof, plank floor, door and torches like a survival player
   (storehouse first, planks from logs, wood chopped when short, crafting table put down and
   taken back, towers on dirt and takes the scaffolding away, leftovers back in the chest).
   `bot/survival.ts`: eating when hungry (food from the storehouse), guards fighting monsters near
-  royals (not creepers or endermen), doors closed behind; dying is said lightly and the bot comes
-  home. In survival the mason (creative) is never used and builds by blueprint are declined.
+  royals (not creepers or endermen; in the hall with no royal near, only what got in or comes
+  within reach; a monster they get no closer to is let go), everyone outside the hall backing
+  away from a creeper, doors closed behind; dying is said lightly and the bot comes home. In survival the mason (creative) is never used and builds by blueprint are declined.
   Beds: when a royal lies down at night every courtier sleeps in a free bed near home; each taps
   a bed once so it respawns there (the "Respawn point set" pop-up is not read: a tap that went
   through counts). `steward.ts` + `BotManager.keepHouse`: every minute the Castellan takes stock
   (roof, door, beds, torches, a sword per guard, food per courtier, wood in the storehouse) and
   sees to it: builders and errands by hand, and with no royal near, Merlin's magic (within his
-  ten an hour, two kept for the royals); with a royal near he asks them instead. His rounds
-  (`inspectHall`) repair holes against the hall's shape as last seen whole (planks). Nobody goes
-  out at night (no field, hunt or wood errands). Food: `build/farm.ts` + `bot/farming.ts` (a 4x4
+  ten an hour, two kept for the royals); with a royal near he asks them instead. Repairs go
+  against the hall's shape as last seen whole (stone first, then planks, then dirt); a gap is a
+  doorway only if it has a door or was one before (worn walls under a standing top course are
+  holes). Nobody goes out at night (no field, hunt, grove or wood errands, and the court's own
+  hall work makes do with the storehouse). Food: `build/farm.ts` + `bot/farming.ts` (a 4x4
   wheat field near home, by water if any; hoe via `bot/crafting.ts`, which puts a crafting table
   down and takes it back; seeds from grass, Merlin's eight only to start; harvest, replant, bread
   to the storehouse), `bot/hunting.ts` (the King's rule: never a named, tame, owned or leashed
@@ -126,14 +132,19 @@ Windows, killing a background `npx` shell does not kill its node children at all
   to builders: repair (walls, roof, floor craters, any filler), a lost storehouse chest remade,
   roof, door, crafting table, beds, light, furnace, stone facing for dirt walls; then wood first
   when nearly none, stone first while there is no furnace, charcoal, the field, cooking or
-  hunting (guards first), arming, the mine, wood). Work that came to nothing rests 10 minutes
-  (`resting`); the court's own errands say nothing of a failure. `bot/mining.ts`: a staircase
+  hunting (guards first), arming, the grove, the mine, wood). Work that came to nothing rests
+  10 minutes (`resting`), work someone is at is not given out twice (`underway`); the court's
+  own errands say nothing of a failure. Wood: `build/grove.ts` + `bot/forestry.ts`, six trees
+  near home (saplings from the leaves of felled trees, Merlin's four only when none can be
+  found), felled when grown and planted again; a builder back from a far tree walks to the hall
+  first and brings eight logs at least. `bot/mining.ts`: a staircase
   mine near home (walked back down before digging on, stops at water, lava or a cave), a level
   tunnel past 18 deep; pickaxes made as needed, stone as soon as there is cobblestone. Gatherers
   climb a dirt pillar to high logs and take it down. Light: torches inside and a ring outside,
   from charcoal (`Cook.smelt`: logs with planks for fuel). Guards make stone or wooden swords.
   A courtier is free again right after a job (the 10-minute pause holds back the castle works
-  only). Merlin's magic (beds, food, seeds, logs, a furnace) only for what cannot be had by hand.
+  only). Merlin's magic (beds, food, seeds, saplings, logs, a furnace, a lost storehouse's chest)
+  only for what cannot be had by hand.
 - Bedrock 1.26.60 renumbered item stack actions (`craft_reserved`): bedboo's legacy bytes are
   corrected on the way out (`packets.ts fixOutgoing`), or every craft disconnects the bot.
 - The brain returns `BrainReply { say, action? }` from `onChat`; actions are follow/come/stop,

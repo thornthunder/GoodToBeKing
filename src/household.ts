@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Farm } from './build/farm'
+import type { Grove } from './build/grove'
 import type { Mine } from './bot/mining'
 
 /** A place the royal family chose, and who chose it when. */
@@ -30,6 +31,8 @@ interface Saved {
   farm?: Farm
   /** The court's mine (see bot/mining.ts). */
   mine?: Mine
+  /** The court's grove (see build/grove.ts). */
+  grove?: Grove
   /** Courtiers whose respawn point is a bed in the hall, and which bed. */
   spawns?: Record<string, { x: number; y: number; z: number }>
   /** What was in the storehouse when a courtier last opened it: item name -> count. */
@@ -98,8 +101,17 @@ export class Household {
     this.save()
   }
 
+  get grove(): Grove | undefined {
+    return this.data.grove
+  }
+
+  setGrove(grove: Grove): void {
+    this.data.grove = grove
+    this.save()
+  }
+
   /**
-   * The court's own grounds: home, storehouse, field and mine. Nobody digs the land near them
+   * The court's own grounds: home, storehouse, field, grove and mine. Nobody digs the land near them
    * (the hall's floor, the patches mended with dirt and the ground round the walls look like
    * untouched land, and digging them took the hall apart).
    */
@@ -111,6 +123,7 @@ export class Household {
     for (const [x, z] of farm?.cells ?? []) out.push({ x, y: farm!.y, z })
     const hall = this.hall
     for (const [x, z] of hall?.ring ?? []) out.push({ x, y: hall!.floorY, z })
+    for (const [x, y, z] of this.grove?.spots ?? []) out.push({ x, y, z })
     if (this.mine) out.push(this.mine)
     return out
   }

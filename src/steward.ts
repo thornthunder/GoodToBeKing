@@ -54,6 +54,12 @@ export interface CourtState {
   farm: { exists: boolean; work: number }
   /** Wheat seeds the court has (storehouse and pockets). */
   seeds: number
+  /** The grove: whether there is one, trees grown to fell, bare spots to plant. */
+  grove?: { exists: boolean; fell: number; plant: number }
+  /** Saplings the court has (storehouse and pockets). */
+  saplings?: number
+  /** A courtier carrying saplings: the one to plant them. */
+  withSaplings?: string
   /** Cobblestone in the storehouse (the furnace and stone tools need it). */
   cobblestone: number
   /** Any stone in the storehouse, cobblestone included (andesite and the like do for walls). */
@@ -98,6 +104,8 @@ export type StewardAction =
   | { kind: 'arm'; by: string }
   /** Lay out the wheat field, or tend it (till, plant, harvest, bake). */
   | { kind: 'farm'; by: string }
+  /** Tend the grove: fell what has grown, plant the bare spots. */
+  | { kind: 'forest'; by: string }
 
 /** Merlin keeps this much of the hour's magic for the royal family. */
 export const MAGIC_RESERVE = 2
@@ -159,6 +167,16 @@ export function plan(s: CourtState): StewardAction[] {
     if (by) out.push({ kind: 'hallwork', work: job.work, by })
   }
 
+  // The grove: wood from home, safe by day, felled and planted again; before trees far off.
+  const saplings = s.saplings ?? 0
+  const grove = s.grove
+  const groveWork = grove?.exists
+    ? grove.fell > 0 || (grove.plant > 0 && saplings > 0)
+    : saplings >= 3
+  if (groveWork && s.storehouse && !s.night && !rests('forest')) {
+    const by = take(s.withSaplings) ?? anyone([], s.guards ?? [])
+    if (by) out.push({ kind: 'forest', by })
+  }
   // Almost no wood: every tool, table and chest begins with planks, so wood comes first.
   const woodFirst = s.storehouse && s.woodInStore < WOOD_LOW && !s.night && !rests('wood')
   if (woodFirst) {
@@ -224,6 +242,10 @@ export function plan(s: CourtState): StewardAction[] {
   // No wood to be had nearby and hardly any in store: everything waits on it, so Merlin's first.
   if (failed('wood') && s.woodInStore < WOOD_LOW && someone)
     wants.push({ item: 'oak_log', count: 8, to: someone, why: 'wood for the court' })
+  // No trees left near enough to find, no grove and no saplings: saplings to start one (once
+  // the logs have come: a grove takes an hour to grow).
+  if (failed('wood') && !grove?.exists && saplings === 0 && someone && s.storehouse)
+    wants.push({ item: 'birch_sapling', count: 4, to: someone, why: 'saplings for a grove' })
   if (!canArm)
     for (const guard of s.guardsUnarmed)
       wants.push({ item: 'iron_sword', count: 1, to: guard, why: `a sword for ${guard}` })
