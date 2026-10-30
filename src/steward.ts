@@ -65,6 +65,8 @@ export interface CourtState {
   ironInStore?: number
   /** Guards an iron sword or a piece of iron armour would make better (iron to be had). */
   guardsToOutfit?: string[]
+  /** Courtiers hurt or hungry: none of them is sent a long way out. */
+  weak?: string[]
   /** Wool in the storehouse: three make a bed (with three planks). */
   woolInStore?: number
   /** A courtier carrying saplings: the one to plant them. */
@@ -146,6 +148,15 @@ export function plan(s: CourtState): StewardAction[] {
   const free = new Set<string>([...(s.freeHands ?? (s.freeHand ? [s.freeHand] : [])), ...builders])
   const take = (name?: string) => (name && free.delete(name) ? name : undefined)
   const builder = () => take(builders.find((b) => free.has(b)))
+  /** Anyone free and fit for a long way out (not hurt or hungry: one bite or fall then kills). */
+  const fitOne = (first: string[] = [], last: string[] = []) => {
+    const fit = (n: string) => free.has(n) && !(s.weak ?? []).includes(n)
+    return (
+      take(first.find(fit)) ??
+      take([...free].find((n) => fit(n) && !last.includes(n))) ??
+      take([...free].find(fit))
+    )
+  }
   /** Anyone free, these first (guards hunt, builders build). */
   const anyone = (first: string[] = [], last: string[] = []) =>
     take(first.find((n) => free.has(n))) ??
@@ -195,7 +206,7 @@ export function plan(s: CourtState): StewardAction[] {
   // Almost no wood: every tool, table and chest begins with planks, so wood comes first.
   const woodFirst = s.storehouse && s.woodInStore < WOOD_LOW && !s.night && !rests('wood')
   if (woodFirst) {
-    const by = anyone([], s.guards ?? [])
+    const by = fitOne([], s.guards ?? [])
     if (by) out.push({ kind: 'errand', material: 'wood', count: 16, by })
   }
   // Light without coal: charcoal from the court's own logs, in the furnace (indoor work).
@@ -234,7 +245,7 @@ export function plan(s: CourtState): StewardAction[] {
       const by = anyone(s.guards ?? (s.freeHunter ? [s.freeHunter] : []))
       if (by) out.push({ kind: 'cook', by })
     } else if (s.rawInStore < FOOD_RESERVE && !s.night && !rests('hunt')) {
-      const by = anyone(s.guards ?? (s.freeHunter ? [s.freeHunter] : []))
+      const by = fitOne(s.guards ?? (s.freeHunter ? [s.freeHunter] : []))
       if (by) out.push({ kind: 'hunt', animals: 3, by })
     }
   }
@@ -276,6 +287,11 @@ export function plan(s: CourtState): StewardAction[] {
       then: 'chest',
       why: 'a chest for the storehouse',
     })
+  // Bread by magic only when there is nothing in store, cooked or raw, to eat; before any tool
+  // or bed: a starving courtier heals no more, and dies of the next bite or fall.
+  if (s.foodInStore === 0 && s.rawInStore === 0)
+    for (const hungry of s.withoutFood)
+      wants.push({ item: 'bread', count: 4, to: hungry, why: `food for ${hungry}` })
   // No wood to be had nearby and hardly any in store: everything waits on it, so Merlin's first.
   if (failed('wood') && s.woodInStore < WOOD_LOW && someone)
     wants.push({ item: 'oak_log', count: 4, to: someone, why: 'wood for the court' })
@@ -313,10 +329,6 @@ export function plan(s: CourtState): StewardAction[] {
   // A fishing rod when no game is to be found and no string to make one of: food for good.
   if (hungry && !canFish && failed('hunt') && someone && s.storehouse)
     wants.push({ item: 'fishing_rod', count: 1, to: someone, why: 'a fishing rod for the court' })
-  // Bread by magic only when there is nothing in store, cooked or raw, to eat.
-  if (s.foodInStore === 0 && s.rawInStore === 0)
-    for (const hungry of s.withoutFood)
-      wants.push({ item: 'bread', count: 4, to: hungry, why: `food for ${hungry}` })
   // The most urgent want; from Merlin, the most urgent he can still grant this hour.
   const first = wants[0]
   const affordable = wants.find((w) => s.magicLeft - w.count >= MAGIC_RESERVE)
@@ -337,7 +349,7 @@ export function plan(s: CourtState): StewardAction[] {
   }
   // Wood for the next repairs and planks.
   if (!woodFirst && !rests('wood') && s.storehouse && s.woodInStore < WOOD_RESERVE && !s.night) {
-    const by = anyone()
+    const by = fitOne()
     if (by) out.push({ kind: 'errand', material: 'wood', count: 16, by })
   }
   return out

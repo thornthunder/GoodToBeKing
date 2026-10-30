@@ -357,6 +357,7 @@ export class BotManager {
       seeds: seedsHad,
       grove: this.groveWork(names),
       woolInStore: sum(/_wool$/),
+      weak: this.bots.filter((b) => b.weak()).map((b) => b.cfg.name),
       oreInStore: sum(/^(raw_iron|raw_copper|raw_gold|iron_ore|copper_ore|gold_ore)$/),
       ironInStore: sum(/^iron_ingot$/),
       guardsToOutfit: staff

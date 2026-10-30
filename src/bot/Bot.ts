@@ -521,6 +521,13 @@ export class Bot extends EventEmitter {
   }
 
   /** Night in this bot's world (monsters about). */
+  /** Hurt or hungry (survival): one bite or fall away from dying, so not sent far. */
+  weak(): boolean {
+    const body = this.body
+    if (!body || !byHand(this.gameMode())) return false
+    return (body.health ?? 20) < 12 || (body.food ?? 20) < 8
+  }
+
   /** Hours for work outdoors (see survival.ts `outdoorHours`). */
   outdoorTime(): boolean {
     return outdoorHours(this.body?.time?.timeOfDay)

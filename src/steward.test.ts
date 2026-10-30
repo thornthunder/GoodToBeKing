@@ -308,6 +308,27 @@ describe("the Castellan's account", () => {
     expect(plan({ ...iron, resting: ['arm'] }).some((a) => a.kind === 'arm')).toBe(false)
   })
 
+  it('sends nobody hurt or hungry a long way out, and feeds the starving before anything else', () => {
+    const weak = { ...base, woodInStore: 3, weak: ['Henry', 'George', 'Bruce', 'Dyke'] }
+    expect(plan(weak).some((a) => a.kind === 'errand')).toBe(false)
+    const starving = {
+      ...base,
+      foodInStore: 0,
+      withoutFood: ['Henry'],
+      guardsUnarmed: ['Bruce'],
+      cobblestone: 0,
+      woodInStore: 0,
+      magicLeft: 7,
+    }
+    expect(plan(starving)).toContainEqual({
+      kind: 'magic',
+      item: 'bread',
+      count: 4,
+      to: 'Henry',
+      why: 'food for Henry',
+    })
+  })
+
   it('sends a free hand for wood when the storehouse runs low', () => {
     expect(plan({ ...base, woodInStore: 3 })).toEqual([
       { kind: 'errand', material: 'wood', count: 16, by: 'Henry' },
