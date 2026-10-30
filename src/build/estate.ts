@@ -570,10 +570,23 @@ export function estateLightCells(
   return cells
 }
 
-/** Doors for the ways in without one (the item places both halves). */
-export function estateDoorCells(estate: Estate, names: BlockNames, max = 4): HandCell[] {
+/**
+ * Doors for the ways in without one (the item places both halves). A gap where the estate as
+ * last seen whole (`before`) had wall is a hole to mend, not a doorway.
+ */
+export function estateDoorCells(
+  estate: Estate,
+  names: BlockNames,
+  max = 4,
+  before: Record<string, string> = {}
+): HandCell[] {
+  const wall = (x: number, y: number, z: number) => {
+    const was = before[key(x, y, z)]
+    return was !== undefined && !DOOR.test(was)
+  }
   return estate.doorless
     .filter(([x, y, z]) => open(names(x, y, z)) && open(names(x, y + 1, z)))
+    .filter(([x, y, z]) => !wall(x, y, z) && !wall(x, y + 1, z))
     .slice(0, max)
     .map(([x, y, z]) => ({ x, y, z, block: 'wooden_door' }))
 }

@@ -1314,7 +1314,7 @@ export class Bot extends EventEmitter {
           ? // By night only indoors: nobody goes out in the dark.
             estateLightCells(estate, names, ESTATE_TORCHES, this.isNight())
           : work === 'doors'
-            ? estateDoorCells(estate, names)
+            ? estateDoorCells(estate, names, 4, made)
             : // The hall's own walls and roof are the hall's repairs.
               estateRepairCells(made, names, (b) => (stock[b] ?? 0) > 0).filter(
                 (c) => !this.household?.hallColumn(c.x, c.z)

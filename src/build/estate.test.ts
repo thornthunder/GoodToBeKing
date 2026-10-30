@@ -100,6 +100,13 @@ describe('the estate survey', { timeout: 30_000 }, () => {
     const names = house()
     const estate = surveyEstate(names, HOME, OPTS)
     expect(estateDoorCells(estate, names)).toEqual([{ x: 7, y: 64, z: 6, block: 'wooden_door' }])
+    // A hole blown in a wall looks like a doorway: it is mended, not doored.
+    const holed = house({ '3,64,0': 'air', '3,65,0': 'air' })
+    const again = surveyEstate(holed, HOME, OPTS)
+    expect(again.doorless).toContainEqual([3, 64, 0])
+    expect(estateDoorCells(again, holed, 4, estate.made)).toEqual([
+      { x: 7, y: 64, z: 6, block: 'wooden_door' },
+    ])
   })
 
   it('mends what was blown away, as it was where the storehouse has it', () => {

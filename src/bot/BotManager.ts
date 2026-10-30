@@ -378,7 +378,7 @@ export class BotManager {
           names,
           (b) => (stock[b] ?? 0) > 0
         ).filter((c) => !this.household.hallColumn(c.x, c.z)).length,
-        doors: estateDoorCells(estate, names).length,
+        doors: estateDoorCells(estate, names, 4, this.estate.of(home)?.made).length,
         light: estateLightCells(estate, names, 16).length,
       }
       this.log.info(`estate: ${words} Wants: ${JSON.stringify(this.estateWork)}`)
@@ -999,16 +999,18 @@ export class BotManager {
 
   /** Named places of the castles built and being built (for Merlin's portal), cached a while. */
   private places(): Place[] {
-    if (this.placesCache && Date.now() - this.placesCache.at < 10 * 60_000) {
-      return this.placesCache.places
+    if (!this.placesCache || Date.now() - this.placesCache.at > 10 * 60_000) {
+      const works = this.courtWorks()
+      const files = [...works.built, ...(works.current ? [works.current] : [])].map((f) =>
+        path.resolve(f.replace(/\\/g, '/'))
+      )
+      this.placesCache = { at: Date.now(), places: placesFromFiles([...new Set(files)]) }
     }
-    const works = this.courtWorks()
-    const files = [...works.built, ...(works.current ? [works.current] : [])].map((f) =>
-      path.resolve(f.replace(/\\/g, '/'))
-    )
-    const places = placesFromFiles([...new Set(files)])
-    // The household's own places, for Merlin's portal: "take us home".
-    const { home, storehouse, formerStore } = this.household
+    const places = [...this.placesCache.places]
+    // The household's own places, for Merlin's portal: "take us home". Looked at afresh each
+    // time: a creeper's crater under the home spot is a trap nobody walks out of.
+    const { storehouse, formerStore } = this.household
+    const home = this.homeSpot()
     if (home) places.push({ name: 'home', x: home.x + 0.5, y: home.y, z: home.z + 0.5 })
     if (formerStore)
       places.push({
@@ -1024,8 +1026,38 @@ export class BotManager {
         y: storehouse.y + 1,
         z: storehouse.z + 0.5,
       })
-    this.placesCache = { at: Date.now(), places }
     return places
+  }
+
+  /**
+   * Where Merlin sets someone down at home: the home spot, or when the floor there is gone (a
+   * creeper's crater: everyone portalled into it was stuck at its bottom) the nearest sound
+   * floor beside it.
+   */
+  private homeSpot(): Point | undefined {
+    const home = this.household.home
+    if (!home) return undefined
+    const eyes = this.bots.find((b) => b.nameAt(home.x, home.y - 1, home.z) !== undefined)
+    if (!eyes) return home
+    const AIR = /^(air|cave_air|short_grass|tall_grass|torch|wall_torch|[a-z_]*_carpet)$/
+    const GONE = /^(air|cave_air|water|flowing_water|lava|flowing_lava|fire)$/
+    const stand = (x: number, y: number, z: number) => {
+      const below = eyes.nameAt(x, y - 1, z)
+      return (
+        below !== undefined &&
+        !GONE.test(below) &&
+        AIR.test(eyes.nameAt(x, y, z) ?? '') &&
+        AIR.test(eyes.nameAt(x, y + 1, z) ?? '')
+      )
+    }
+    for (let r = 0; r <= 6; r++)
+      for (let dx = -r; dx <= r; dx++)
+        for (let dz = -r; dz <= r; dz++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue
+          if (stand(home.x + dx, home.y, home.z + dz))
+            return { x: home.x + dx, y: home.y, z: home.z + dz }
+        }
+    return home
   }
 
   /** Which designs the court has built and is building, kept in .state/court-works.json. */
