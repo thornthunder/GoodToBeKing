@@ -17,6 +17,8 @@ const GRASS = /^(short_grass|tall_grass|fern|large_fern)$/
 const UP = new Vec3(0, 1, 0)
 
 export interface FarmResult {
+  /** Squares whose soil was dug out, filled with dirt again. */
+  filled: number
   tilled: number
   planted: number
   harvested: number
@@ -49,7 +51,11 @@ export class Farmer {
   }
 
   async tend(farm: Farm, storehouse?: { x: number; y: number; z: number }): Promise<FarmResult> {
-    const result: FarmResult = { tilled: 0, planted: 0, harvested: 0, bread: 0 }
+    const result: FarmResult = { filled: 0, tilled: 0, planted: 0, harvested: 0, bread: 0 }
+    const names = (x: number, y: number, z: number) => this.bot.blockAt(new Vec3(x, y, z))?.name
+    const holes = farm.cells.filter(
+      ([x, z]) => farmNeed(names(x, farm.y, z), names(x, farm.y + 1, z)) === 'fill'
+    ).length
     // What the storehouse has for the field: a hoe, seeds, wheat waiting to be baked.
     if (storehouse) {
       await this.gatherer.withChest(storehouse, async (chest) => {
@@ -60,6 +66,13 @@ export class Farmer {
             item.name === 'wheat'
           if (take) await withTimeout(chest.withdraw(item.type, item.metadata, item.count), 5_000)
         }
+        // Dirt for the squares dug out (two each, in case a hole goes deeper).
+        const dirt = chest.containerItems().find((i) => i.name === 'dirt')
+        if (holes > 0 && dirt)
+          await withTimeout(
+            chest.withdraw(dirt.type, dirt.metadata, Math.min(dirt.count, 2 * holes)),
+            5_000
+          )
         // A little wood for a hoe and a crafting table (bread needs the big grid too).
         const baking = this.count('wheat') >= 3
         if ((this.count(HOE) === 0 || baking) && this.count(/_planks$|_log$/) < 3) {
@@ -93,6 +106,11 @@ export class Farmer {
       let need = farmNeed(soil?.name, crop?.name, growth)
       if (!need || !soil) continue
       if (!(await this.near(x, farm.y, z))) continue
+      if (need === 'fill') {
+        if (await this.fill(x, farm.y, z)) result.filled++
+        need = farmNeed(names(x, farm.y, z), names(x, farm.y + 1, z))
+        if (need !== 'till') continue
+      }
       if (need === 'harvest' && crop) {
         try {
           await withTimeout(this.bot.dig(crop, true), 5_000)
@@ -123,9 +141,32 @@ export class Farmer {
       result.bread = Math.floor(wheat / 3)
     if (storehouse) await this.store(storehouse, farm.cells.length)
     this.log.info(
-      `the field: ${result.harvested} harvested, ${result.tilled} tilled, ${result.planted} planted, ${result.bread} bread`
+      `the field: ${result.filled} filled, ${result.harvested} harvested, ${result.tilled} tilled, ${result.planted} planted, ${result.bread} bread`
     )
     return result
+  }
+
+  /** Dirt into a square's hole, from the bottom up (at most three deep). */
+  private async fill(x: number, y: number, z: number): Promise<boolean> {
+    let bottom = y
+    while (
+      bottom > y - 3 &&
+      !this.bot.blockAt(new Vec3(x, bottom - 1, z))?.boundingBox?.includes('block')
+    )
+      bottom--
+    for (let at = bottom; at <= y; at++) {
+      const below = this.bot.blockAt(new Vec3(x, at - 1, z))
+      const dirt = this.bot.inventory.items().find((i) => i.name === 'dirt')
+      if (!below || below.boundingBox !== 'block' || !dirt) return false
+      try {
+        await this.bot.equip(dirt, 'hand')
+        await withTimeout(this.bot.placeBlock(below, UP), 5_000)
+      } catch (err) {
+        this.log.debug(`could not fill the field at ${x},${at},${z}: ${errMsg(err)}`)
+      }
+      await sleep(200)
+    }
+    return this.bot.blockAt(new Vec3(x, y, z))?.name === 'dirt'
   }
 
   /** Break grass near the field until there are `want` seeds (or it has tried enough). */

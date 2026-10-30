@@ -13,7 +13,7 @@ export interface Farm {
 }
 
 /** What a square of the field needs right now. */
-export type FarmNeed = 'till' | 'plant' | 'harvest' | null
+export type FarmNeed = 'fill' | 'till' | 'plant' | 'harvest' | null
 
 const SOIL = /^(grass_block|dirt|coarse_dirt|rooted_dirt)$/
 const COVER =
@@ -127,7 +127,7 @@ function nearWater(names: BlockNames, x: number, y: number, z: number): boolean 
 
 /**
  * What a square needs: soil (or dry farmland turned back to dirt) to till, bare farmland to
- * plant, ripe wheat to harvest; null when it is growing.
+ * plant, ripe wheat to harvest, a hole where the soil was to fill; null when it is growing.
  */
 export function farmNeed(
   soil: string | undefined,
@@ -137,5 +137,7 @@ export function farmNeed(
   if (crop === 'wheat') return (growth ?? 0) >= RIPE ? 'harvest' : null
   if (soil === 'farmland') return COVER.test(crop ?? 'air') ? 'plant' : null
   if (soil && SOIL.test(soil) && COVER.test(crop ?? 'air')) return 'till'
+  // The square's soil dug out or blown away: dirt in first.
+  if (soil && COVER.test(soil)) return 'fill'
   return null
 }

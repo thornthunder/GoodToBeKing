@@ -1310,7 +1310,7 @@ export class Bot extends EventEmitter {
       const done = await farmer.tend(farm, this.household?.storehouse)
       if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
       this.growField(farm)
-      return done.harvested + done.tilled + done.planted + done.bread > 0
+      return done.filled + done.harvested + done.tilled + done.planted + done.bread > 0
     } catch (err) {
       this.log.warn(`farming failed: ${errMsg(err)}`)
       return false

@@ -47,5 +47,7 @@ describe('the farm', () => {
     expect(farmNeed('farmland', 'wheat', 3)).toBeNull()
     expect(farmNeed('farmland', 'wheat', 7)).toBe('harvest')
     expect(farmNeed('stone', 'air')).toBeNull()
+    // Its soil dug out: dirt goes in first.
+    expect(farmNeed('air', 'air')).toBe('fill')
   })
 })

@@ -446,7 +446,8 @@ export class BotManager {
       const growth = eyes?.blockProperty(x, farm.y + 1, z, 'growth')
       const need = farmNeed(names(x, farm.y, z), names(x, farm.y + 1, z), Number(growth ?? 0))
       // Farmland without seed in it dries back to dirt: till only with seed to sow.
-      if (need === 'harvest' || ((need === 'till' || need === 'plant') && seeds > 0)) work++
+      if (need === 'harvest' || need === 'fill') work++
+      else if ((need === 'till' || need === 'plant') && seeds > 0) work++
     }
     return work + (wheat >= 3 ? 1 : 0)
   }
