@@ -67,6 +67,13 @@ const CANDIDATES = 80
 const TOSS_RANGE = 4
 /** Reach for digging, from the eyes. */
 const REACH = 4.5
+/** Walking out to find trees: this far a leg, at most this many legs, this long each. */
+const SCOUT_STEP = 64
+const SCOUT_LEGS = 4
+const SCOUT_MS = 60_000
+/** Where the court's gatherers last found trees, and which way they scout next. */
+let lastWoods: Vec3 | undefined
+let scoutTurn = 0
 /** The longest a whole errand may take. */
 const ERRAND_MS = 4 * 60_000
 
@@ -206,6 +213,7 @@ export class Gatherer {
     let reason: GatherResult['reason']
     let candidates = this.search(material)
     let searched = Date.now()
+    let legs = 0
     while (this.carried(material) - before < want) {
       if (this.cancelled) {
         reason = 'cancelled'
@@ -222,10 +230,18 @@ export class Gatherer {
         searched = Date.now()
         target = this.nearest(material, candidates, tried)
       }
+      // No trees in sight: walk out to look further (where some were found last, else round about).
+      if (!target && material === 'wood' && legs < SCOUT_LEGS) {
+        await this.scout(legs++)
+        candidates = this.search(material)
+        searched = Date.now()
+        target = this.nearest(material, candidates, tried)
+      }
       if (!target) {
         reason = 'none_found'
         break
       }
+      if (material === 'wood') lastWoods = target.clone()
       tried.add(target.toString())
       await this.digOne(material, target)
     }
@@ -235,6 +251,31 @@ export class Gatherer {
   }
 
   private names: BlockNames = (x, y, z) => this.bot.blockAt(new Vec3(x, y, z))?.name
+
+  /**
+   * Walk out to see more land: first to where the court last found trees, then SCOUT_STEP
+   * blocks at a time, each leg a quarter turn on.
+   */
+  private async scout(leg: number): Promise<void> {
+    const me = this.bot.entity.position
+    let to: Vec3
+    if (leg === 0 && lastWoods && lastWoods.distanceTo(me) > 32) to = lastWoods
+    else {
+      const angle = (scoutTurn + leg) * (Math.PI / 2)
+      to = me.offset(Math.cos(angle) * SCOUT_STEP, 0, Math.sin(angle) * SCOUT_STEP)
+    }
+    if (leg === SCOUT_LEGS - 1) scoutTurn++
+    this.log.info(`no trees in sight: looking further, towards ${to.floored()}`)
+    try {
+      await withTimeout(
+        this.bot.pathfinder.goto(new goals.GoalNearXZ(Math.floor(to.x), Math.floor(to.z), 8)),
+        SCOUT_MS
+      )
+    } catch (err) {
+      this.bot.pathfinder.setGoal(null)
+      this.log.debug(`scouting stopped: ${errMsg(err)}`)
+    }
+  }
 
   /** Where the real players are (not the court's bots), and the court's own grounds. */
   private players(): Vec3[] {
