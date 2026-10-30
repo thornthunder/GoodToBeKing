@@ -36,6 +36,8 @@ interface Saved {
   grove?: Grove
   /** Where the court fishes (see build/fishing.ts). */
   fishing?: FishingSpot
+  /** When the court last looked for water to fish in near home and found none. */
+  noWaterAt?: number
   /** Courtiers whose respawn point is a bed in the hall, and which bed. */
   spawns?: Record<string, { x: number; y: number; z: number }>
   /** What was in the storehouse when a courtier last opened it: item name -> count. */
@@ -110,6 +112,20 @@ export class Household {
 
   setFishing(spot: FishingSpot): void {
     this.data.fishing = spot
+    this.data.noWaterAt = undefined
+    this.save()
+  }
+
+  /** Water to fish in near home: true (a spot), false (none found lately), undefined (unknown). */
+  waterNearHome(now = Date.now()): boolean | undefined {
+    if (this.data.fishing) return true
+    const at = this.data.noWaterAt
+    // Looked again after an hour: the royal family may have dug a pond.
+    return at !== undefined && now - at < 60 * 60_000 ? false : undefined
+  }
+
+  noteNoWater(now = Date.now()): void {
+    this.data.noWaterAt = now
     this.save()
   }
 

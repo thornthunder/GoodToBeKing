@@ -59,7 +59,7 @@ export interface CourtState {
   /** Saplings the court has (storehouse and pockets). */
   saplings?: number
   /** Fishing: a rod to hand (storehouse or a free courtier), string in the storehouse (two make one). */
-  fishing?: { rod: boolean; string: number }
+  fishing?: { rod: boolean; string: number; water?: boolean }
   /** Ore in the storehouse to smelt (raw iron, copper, gold), and iron ingots. */
   oreInStore?: number
   ironInStore?: number
@@ -233,7 +233,8 @@ export function plan(s: CourtState): StewardAction[] {
     if (by) out.push({ kind: 'farm', by })
   }
   // Fishing: food that never runs out (the game near home does), by day, not a guard first.
-  const canFish = Boolean(s.fishing?.rod) || (s.fishing?.string ?? 0) >= 2
+  const water = s.fishing?.water
+  const canFish = water !== false && (Boolean(s.fishing?.rod) || (s.fishing?.string ?? 0) >= 2)
   const hungry = s.foodInStore < FOOD_RESERVE && s.rawInStore < FOOD_RESERVE
   if (hungry && canFish && s.storehouse && !s.night && !rests('fish')) {
     const by = anyone([], s.guards ?? [])
@@ -327,7 +328,7 @@ export function plan(s: CourtState): StewardAction[] {
   if (s.hall.light > 0 && !coal && !s.furnace && someBuilder)
     wants.push({ item: 'coal', count: 1, to: someBuilder, then: 'light', why: 'coal for torches' })
   // A fishing rod when no game is to be found and no string to make one of: food for good.
-  if (hungry && !canFish && failed('hunt') && someone && s.storehouse)
+  if (hungry && water === true && !canFish && failed('hunt') && someone && s.storehouse)
     wants.push({ item: 'fishing_rod', count: 1, to: someone, why: 'a fishing rod for the court' })
   // The most urgent want; from Merlin, the most urgent he can still grant this hour.
   const first = wants[0]

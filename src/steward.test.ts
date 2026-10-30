@@ -285,7 +285,7 @@ describe("the Castellan's account", () => {
     const rodless = {
       ...base,
       foodInStore: 2,
-      fishing: { rod: false, string: 0 },
+      fishing: { rod: false, string: 0, water: true },
       resting: ['hunt'],
     }
     expect(plan(rodless)).toContainEqual({
@@ -295,6 +295,11 @@ describe("the Castellan's account", () => {
       to: 'Henry',
       why: 'a fishing rod for the court',
     })
+    // No water near home: no fishing, and no rod for it.
+    const dry = { ...short, fishing: { rod: true, string: 0, water: false } }
+    expect(plan(dry).some((a) => a.kind === 'fish')).toBe(false)
+    const dryRodless = { ...rodless, fishing: { rod: false, string: 0, water: false } }
+    expect(plan(dryRodless).some((a) => a.kind === 'magic')).toBe(false)
   })
 
   it('smelts the ore from the mine, and outfits the guards in iron once there is iron', () => {

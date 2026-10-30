@@ -538,6 +538,9 @@ export class Bot extends EventEmitter {
     return duskFallen(this.body?.time?.timeOfDay)
   }
 
+  /** Asks Merlin to portal this courtier home (set by the court); whether he could. */
+  portalHome?: () => Promise<boolean>
+
   /** A royal's errand is under way (it goes on after dusk, wherever it leads). */
   private royalErrand = false
 
@@ -881,6 +884,7 @@ export class Bot extends EventEmitter {
       (name) => this.isBot(name),
       () => this.household?.grounds() ?? []
     )
+    this.gatherer.portalHome = () => this.portalHome?.() ?? Promise.resolve(false)
     this.hunter = new Hunter(body, this.log.child('hunt'), (name) => this.isBot(name))
     this.cook = new Cook(body, this.log.child('cook'), this.gatherer)
     this.farmer = new Farmer(body, this.log.child('farm'), this.gatherer)
@@ -1354,6 +1358,7 @@ export class Bot extends EventEmitter {
       spot = chooseFishingSpot(names, home)
       if (!spot) {
         this.log.info('found no open water near home to fish in')
+        this.household?.noteNoWater()
         return 0
       }
       this.household?.setFishing(spot)

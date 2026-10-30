@@ -69,6 +69,8 @@ const CANDIDATES = 80
 const TOSS_RANGE = 4
 /** Reach for digging, from the eyes. */
 const REACH = 4.5
+/** Further than this from the storehouse, a courtier is brought home by Merlin's portal. */
+const PORTAL_FROM = 64
 /** The longest a whole errand may take. */
 const ERRAND_MS = 4 * 60_000
 
@@ -156,6 +158,8 @@ export class Gatherer {
   private cancelled = false
   /** A royal's errand goes on after dusk (the court's own stop then). */
   allNight = false
+  /** Merlin's portal home (travel is free), for a courtier far out with the storehouse to reach. */
+  portalHome?: () => Promise<boolean>
 
   constructor(
     bot: MineflayerBot,
@@ -477,6 +481,11 @@ export class Gatherer {
     work: (window: Chest) => Promise<number>
   ): Promise<number> {
     const pos = new Vec3(chest.x, chest.y, chest.z)
+    // Far out (a tree or a herd 200 blocks off): nobody walks home through the wilds.
+    if (this.portalHome && this.bot.entity.position.distanceTo(pos) > PORTAL_FROM) {
+      this.log.info('far from home: Merlin is asked for a portal')
+      if (await this.portalHome().catch(() => false)) await sleep(2_000)
+    }
     // A chest opens from four blocks: the hall is crowded (beds, bots), so do not insist on two.
     for (const range of [3, 4]) {
       const eyes = this.bot.entity.position.offset(0, 1.62, 0)

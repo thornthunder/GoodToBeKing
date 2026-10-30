@@ -179,6 +179,18 @@ export class BotManager {
           `${s.requestedBy} made the chest at ${s.at.x},${s.at.y},${s.at.z} the storehouse`
         )
       })
+      // Far out with the storehouse to reach: Merlin brings the courtier home (travel is free).
+      bot.portalHome = async () => {
+        const merlin = this.bots.find((b) => b.magicAwake())
+        if (!merlin || bot.buildsByMagic() || !this.household.home) return false
+        this.log.info(`${merlin.cfg.name} brings ${bot.cfg.name} home from afar by portal`)
+        await merlin.castCommand('portal', {
+          target: bot.cfg.name,
+          requestedBy: merlin.cfg.name,
+          args: { place: 'home' },
+        })
+        return true
+      }
       this.bots.push(bot)
     }
     // Carry on with whatever the court was last building (the overlord's design, once there is one).
@@ -372,6 +384,7 @@ export class BotManager {
           sum(/^fishing_rod$/) > 0 ||
           this.bots.some((b) => b.isFree() && b.carries(/^fishing_rod$/) > 0),
         string: sum(/^string$/),
+        water: this.household.waterNearHome(),
       },
       // Saplings to hand: the storehouse's, and those a free courtier carries.
       saplings:
