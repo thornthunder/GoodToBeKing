@@ -241,7 +241,7 @@ export function plan(s: CourtState): StewardAction[] {
     })
   // No wood to be had nearby and hardly any in store: everything waits on it, so Merlin's first.
   if (failed('wood') && s.woodInStore < WOOD_LOW && someone)
-    wants.push({ item: 'oak_log', count: 8, to: someone, why: 'wood for the court' })
+    wants.push({ item: 'oak_log', count: 4, to: someone, why: 'wood for the court' })
   // No trees left near enough to find, no grove and no saplings: saplings to start one (once
   // the logs have come: a grove takes an hour to grow).
   if (failed('wood') && !grove?.exists && saplings === 0 && someone && s.storehouse)
@@ -277,12 +277,11 @@ export function plan(s: CourtState): StewardAction[] {
   if (s.foodInStore === 0 && s.rawInStore === 0)
     for (const hungry of s.withoutFood)
       wants.push({ item: 'bread', count: 4, to: hungry, why: `food for ${hungry}` })
+  // The most urgent want; from Merlin, the most urgent he can still grant this hour.
   const first = wants[0]
-  if (first) {
-    if (s.royalNear) out.push({ kind: 'ask', what: first.why })
-    else if (s.merlinAwake && s.magicLeft - first.count >= MAGIC_RESERVE)
-      out.push({ kind: 'magic', ...first })
-  }
+  const affordable = wants.find((w) => s.magicLeft - w.count >= MAGIC_RESERVE)
+  if (first && s.royalNear) out.push({ kind: 'ask', what: first.why })
+  else if (affordable && s.merlinAwake) out.push({ kind: 'magic', ...affordable })
 
   // Stone: the mine, by day.
   if (

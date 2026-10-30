@@ -37,7 +37,7 @@ import { SEE_THROUGH } from '../build/sites'
 import { Vec3 as WorldVec } from 'vec3'
 import type { ChatFloor } from './ChatFloor'
 import { goals, type Pathfinder } from 'mineflayer-pathfinder'
-import { chooseFarm } from '../build/farm'
+import { chooseFarm, extendFarm, type Farm } from '../build/farm'
 import { chooseGrove } from '../build/grove'
 import { Handbuilder } from '../build/Handbuilder'
 import {
@@ -1260,6 +1260,7 @@ export class Bot extends EventEmitter {
     try {
       const done = await farmer.tend(farm, this.household?.storehouse)
       if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
+      this.growField(farm)
       return done.harvested + done.tilled + done.planted + done.bread > 0
     } catch (err) {
       this.log.warn(`farming failed: ${errMsg(err)}`)
@@ -1267,6 +1268,30 @@ export class Bot extends EventEmitter {
     } finally {
       this.gathering = false
     }
+  }
+
+  /**
+   * The field all sown and seeds to spare for another plot: it grows by four by four (bread is
+   * the court's food for good, and six courtiers eat more than one small field gives).
+   */
+  private growField(farm: Farm): void {
+    const body = this.body
+    if (!body) return
+    const names = (x: number, y: number, z: number) => body.blockAt(new WorldVec(x, y, z))?.name
+    if (!farm.cells.every(([x, z]) => names(x, farm.y + 1, z) === 'wheat')) return
+    const seeds = (this.household?.stock.items.wheat_seeds ?? 0) + this.carries(/^wheat_seeds$/)
+    if (seeds < 16) return
+    const hall = this.household?.hall
+    const grove = this.household?.grove
+    const bigger = extendFarm(names, farm, {
+      keepClear: [
+        ...(hall ? [...hall.ring, ...hall.inside] : []),
+        ...(grove?.spots.map(([x, , z]) => [x, z] as [number, number]) ?? []),
+      ],
+    })
+    if (!bigger) return
+    this.household?.setFarm(bigger)
+    this.log.info(`the field grows to ${bigger.cells.length} squares`)
   }
 
   /**

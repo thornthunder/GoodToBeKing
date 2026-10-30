@@ -216,7 +216,7 @@ describe("the Castellan's account", () => {
     expect(plan(bare)).toContainEqual({
       kind: 'magic',
       item: 'oak_log',
-      count: 8,
+      count: 4,
       to: 'Henry',
       why: 'wood for the court',
     })

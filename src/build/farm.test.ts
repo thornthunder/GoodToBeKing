@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chooseFarm, farmNeed } from './farm'
+import { chooseFarm, extendFarm, farmNeed, MAX_FIELD } from './farm'
 import type { BlockNames } from './hall'
 
 /** Flat grass at y 64, air above; `extra` adds water, walls and the like. */
@@ -22,6 +22,22 @@ describe('the farm', () => {
     const hall: Array<[number, number]> = [[0, 0]]
     const away = chooseFarm(land(), { x: 0, y: 65, z: 0 }, { reach: 8, keepClear: hall })
     expect(away?.cells.every(([x, z]) => Math.abs(x) > 3 || Math.abs(z) > 3)).toBe(true)
+  })
+
+  it('grows plot by plot beside the field, at its height, up to its largest', () => {
+    let farm = chooseFarm(land(), { x: 0, y: 65, z: 0 }, { reach: 8 })!
+    const first = new Set(farm.cells.map(([x, z]) => `${x},${z}`))
+    farm = extendFarm(land(), farm)!
+    expect(farm.cells).toHaveLength(32)
+    expect(new Set(farm.cells.map(([x, z]) => `${x},${z}`)).size).toBe(32)
+    expect(farm.cells.filter(([x, z]) => first.has(`${x},${z}`))).toHaveLength(16)
+    while (farm.cells.length < MAX_FIELD) farm = extendFarm(land(), farm)!
+    expect(extendFarm(land(), farm)).toBeUndefined()
+    // Not over a hall.
+    const small = chooseFarm(land(), { x: 0, y: 65, z: 0 }, { reach: 8 })!
+    const walls: Array<[number, number]> = []
+    for (let x = -40; x <= 40; x++) for (let z = -40; z <= 40; z++) walls.push([x, z])
+    expect(extendFarm(land(), small, { keepClear: walls })).toBeUndefined()
   })
 
   it('knows what each square needs', () => {

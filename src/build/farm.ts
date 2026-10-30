@@ -64,6 +64,49 @@ export function chooseFarm(
   return options.sort((a, b) => a.score - b.score)[0]?.farm
 }
 
+/** The largest the field grows to, plot by plot. */
+export const MAX_FIELD = 64
+
+/**
+ * Another plot of four by four beside the field, at its height, on flat untouched soil clear of
+ * `keepClear`: the field grows as its seeds multiply. Undefined when it is as big as it gets or
+ * nothing fits beside it.
+ */
+export function extendFarm(
+  names: BlockNames,
+  farm: Farm,
+  opts: { keepClear?: Array<[number, number]> } = {}
+): Farm | undefined {
+  if (farm.cells.length + SIDE * SIDE > MAX_FIELD) return undefined
+  const clear = opts.keepClear ?? []
+  const has = new Set(farm.cells.map(([x, z]) => `${x},${z}`))
+  const xs = farm.cells.map(([x]) => x)
+  const zs = farm.cells.map(([, z]) => z)
+  const [minX, maxX, minZ, maxZ] = [
+    Math.min(...xs),
+    Math.max(...xs),
+    Math.min(...zs),
+    Math.max(...zs),
+  ]
+  // Corners of the plots that would touch the field along a side.
+  const corners: Array<[number, number]> = []
+  for (let z = minZ; z <= maxZ; z += SIDE) corners.push([maxX + 1, z], [minX - SIDE, z])
+  for (let x = minX; x <= maxX; x += SIDE) corners.push([x, maxZ + 1], [x, minZ - SIDE])
+  for (const [x0, z0] of corners) {
+    const cells: Array<[number, number]> = []
+    for (let i = 0; i < SIDE; i++) for (let j = 0; j < SIDE; j++) cells.push([x0 + i, z0 + j])
+    const fits = cells.every(
+      ([x, z]) =>
+        !has.has(`${x},${z}`) &&
+        !clear.some(([cx, cz]) => Math.abs(cx - x) <= 3 && Math.abs(cz - z) <= 3) &&
+        SOIL.test(names(x, farm.y, z) ?? '') &&
+        COVER.test(names(x, farm.y + 1, z) ?? '')
+    )
+    if (fits) return { ...farm, cells: [...farm.cells, ...cells] }
+  }
+  return undefined
+}
+
 /** The top soil block of a column near height `around` (with air or grass above it). */
 function surface(names: BlockNames, x: number, z: number, around: number): number | undefined {
   for (let y = around + 3; y >= around - 4; y--)
