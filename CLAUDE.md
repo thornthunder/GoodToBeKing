@@ -53,7 +53,8 @@ Write a line to a file named `.command` in the project root (checked every secon
 `<bot> commission <blueprint> [at x y z] [for <player>]` (as if a royal asked that bot: the
 Castellan hands it to a builder), `<bot> fetch <dirt|wood|sand|gravel> [count] [for <player>]`
 (a survival errand), `<bot> hall <roof|floor|light|door|beds>` (by hand, on the court's home hall),
-`household home|storehouse <x> <y> <z>`, `<bot> bed`, `<bot> hunt [n]`, `<bot> cook`,
+`household home|storehouse <x> <y> <z> [for <player>]` (a home as if that royal declared it: the
+court moves house, surveys and reports), `<bot> bed`, `<bot> hunt [n]`, `<bot> cook`,
 `<bot> farm`, `<bot> forest`, `<bot> fish`, `<bot> undo`, and for the court's building works `works status|pause|resume`,
 `works start <design.json>` and `works plan` (the overlord designs the next castle now). For
 magic: `Merlin cast <spell> [on <who>] [to <place>] [item <x>] [creature <x>] [for <player>]`,
@@ -108,8 +109,9 @@ Windows, killing a background `npx` shell does not kill its node children at all
   taken back, towers on dirt and takes the scaffolding away, leftovers back in the chest).
   `bot/survival.ts`: eating when hungry (food from the storehouse), guards fighting monsters near
   royals (not creepers or endermen; in the hall with no royal near, only what got in or comes
-  within reach; a monster they get no closer to is let go), everyone outside the hall backing
-  away from a creeper, doors closed behind; dying is said lightly and the bot comes home. In survival the mason (creative) is never used and builds by blueprint are declined.
+  within reach; a monster they get no closer to is let go), everyone backing away from a
+  creeper (inside the hall only from one that got in or stands by the doorway), doors closed
+  behind; dying is said lightly and the bot comes home. In survival the mason (creative) is never used and builds by blueprint are declined.
   Beds: when a royal lies down at night every courtier sleeps in a free bed near home; each taps
   a bed once so it respawns there (the "Respawn point set" pop-up is not read: a tap that went
   through counts). `steward.ts` + `BotManager.keepHouse`: every minute the Castellan takes stock
@@ -159,6 +161,36 @@ Windows, killing a background `npx` shell does not kill its node children at all
   A courtier is free again right after a job (the 10-minute pause holds back the castle works
   only). Merlin's magic (beds, food, seeds, saplings, logs, a furnace, a lost storehouse's chest)
   only for what cannot be had by hand.
+- Moving house and the estate (the King's wish, 2026-10-30: "if I build a castle somewhere, or
+  find one, and call the court there and declare it the new home, they assess what's there,
+  improve it if needed and maintain it, not rebuild from scratch"). "This is our new home" (any
+  royal for the first home; once there is one, only the King) far from the old home
+  (`MOVE_FROM` 32) moves the court (`Household.moveHome`, `BotManager.makeHome`): everyone drops
+  the court's own work there (`Bot.dropCourtWork`), the field, mine, grove and fishing spot start
+  afresh round the new home, a storehouse left behind with things in it becomes `formerStore`
+  (builders take materials from it until a new chest stands; a `move` job empties it into the new
+  one, portalling to "the old storehouse"), and the court's own build zone is centred on the
+  home a royal chose. `build/estate.ts` surveys what players built round home (radius 40, read
+  through `Bot.fastNames`, chunk state ids instead of blockAt): buildings (touching columns of
+  placed blocks), rooms under their roofs split at doorways one block wide, with furniture and a
+  guessed purpose, ways in without a door, spots no block light reaches (`lightLevels`: monsters
+  spawn there, by day too indoors), and every placed block. The Castellan reports it once; the
+  steward's `estate` jobs then light it first (wall torches indoors at head height, by night
+  too indoors; Merlin's coal when there is no wood for charcoal), hang doors and mend damage.
+  `build/EstateBook.ts` (`.state/estate.json`) keeps the placed blocks as last seen whole: a new
+  block joins after standing 10 minutes (scaffolding comes and goes), a block gone where a royal
+  was lately (`royalTrail`, 12 blocks) is the royals' change and let go, anything else is
+  damage, put back as it was when the storehouse has the block, else with stone, planks or dirt
+  (glass, furniture and decorations are left to the royals); changes while the court was down
+  are taken as they are. The court never pulls down anything there, and its field, grove, mine
+  and digging keep clear of the buildings (`Household.keepClear`, `grounds`). In a castle whose
+  walls do not close a hall (3-high doorways) the room the home is in (`homeRoom`) is the hall
+  for beds, the chest, the furnace and the table; its walls are the estate's. The overlord is
+  told what stands (`Brief.standing`) and which needs it meets (`coveredNeeds`), avoids it, and
+  designs only what is missing beside it, or nothing when it has all the court needs. Three of
+  the court dead at home within five minutes by night: the home is overrun, and nobody is
+  portalled back into it till morning (in a dark test house the dead were brought back to die
+  again, a dozen times in two minutes).
 - Bedrock 1.26.60 renumbered item stack actions (`craft_reserved`): bedboo's legacy bytes are
   corrected on the way out (`packets.ts fixOutgoing`), or every craft disconnects the bot.
 - The brain returns `BrainReply { say, action? }` from `onChat`; actions are follow/come/stop,
@@ -313,8 +345,8 @@ Windows, killing a background `npx` shell does not kill its node children at all
   Merlin checks his rights (`execute as @s run testfor @s`) after each spawn and every minute while they are
   missing; until then his magic sleeps and he says so in character.
 - The court's own choices (the overlord picking a site by itself) stay within `BUILD_RADIUS`
-  (100) of `BUILD_CENTER` (105, 75, 122). What a royal asks for is built where they say,
-  anywhere (the King's wish, 2026-10-28). Never dig player-made blocks: the princess's house and
+  (100) of the home a royal chose, or of `BUILD_CENTER` (105, 75, 122) without one. What a royal
+  asks for is built where they say, anywhere (the King's wish, 2026-10-28). Never dig player-made blocks: the princess's house and
   the village paths lie south of the castle.
 - Requests to a shared model take turns inside this program (`ModelQueue` in OllamaClient):
   reading a royal's line is urgent and cuts a memory extraction short (it reruns afterwards), the
