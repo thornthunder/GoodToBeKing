@@ -230,6 +230,17 @@ export class BotManager {
   private readonly asked = new Map<string, number>()
   /** Work that came to nothing lately, and until when it rests (see steward.ts `resting`). */
   private readonly resting = new Map<string, number>()
+  /** Work someone is doing right now: nobody else is sent to do it too. */
+  private readonly underway = new Set<string>()
+
+  /** Mark work as underway till it ends, then rest it if it came to nothing. */
+  private doing(kind: string, work: Promise<boolean>): void {
+    this.underway.add(kind)
+    void work
+      .then((ok) => this.rest(kind, ok))
+      .catch(() => this.rest(kind, false))
+      .finally(() => this.underway.delete(kind))
+  }
 
   /** Rest a kind of work for a while after it came to nothing. */
   private rest(kind: string, ok: boolean): void {
@@ -347,6 +358,7 @@ export class BotManager {
       storehouseLost: Boolean(this.household.storehouse) && !storehouseThere,
       night: castellan.isNight(),
       resting: [...this.resting].filter(([, until]) => until > Date.now()).map(([kind]) => kind),
+      underway: [...this.underway],
     }
     // Beds in the hall: each courtier taps one, so it respawns at home (one a round).
     if (beds > 0) {
@@ -406,9 +418,10 @@ export class BotManager {
           `housekeeping: ${action.work} for the hall${builder ? ` by ${builder.cfg.name}` : ''}`
         )
         if (builder)
-          void builder
-            .startHallWork(action.work, castellan.cfg.name)
-            .then((ok) => this.rest(`hallwork:${action.work}`, ok))
+          this.doing(
+            `hallwork:${action.work}`,
+            builder.startHallWork(action.work, castellan.cfg.name)
+          )
         else
           void this.sendToHall(
             castellan,
@@ -428,7 +441,10 @@ export class BotManager {
         const miner = by(action.by)
         if (!miner) return
         this.log.info(`housekeeping: ${miner.cfg.name} goes down the mine for stone`)
-        void miner.startMining(action.want).then((got) => this.rest('mine', got > 0))
+        this.doing(
+          'mine',
+          miner.startMining(action.want).then((got) => got > 0)
+        )
         return
       }
       case 'arm': {
@@ -449,7 +465,7 @@ export class BotManager {
         const farmer = by(action.by)
         if (!farmer) return
         this.log.info(`housekeeping: ${farmer.cfg.name} tends the wheat field`)
-        void farmer.startFarming().then((ok) => this.rest('farm', ok))
+        this.doing('farm', farmer.startFarming())
         return
       }
       case 'cook': {
@@ -519,7 +535,10 @@ export class BotManager {
         const then = action.then
         const worker = by(action.to)
         if (then && worker)
-          setTimeout(() => void worker.startHallWork(then, castellan.cfg.name), 2_000)
+          setTimeout(
+            () => this.doing(`hallwork:${then}`, worker.startHallWork(then, castellan.cfg.name)),
+            2_000
+          )
       }
     }
   }

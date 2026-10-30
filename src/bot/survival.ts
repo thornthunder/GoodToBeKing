@@ -47,6 +47,9 @@ const SELF_RANGE = 6
 const STRIKE = 3
 /** The longest one fight may last. */
 const FIGHT_MS = 30_000
+/** A creeper this close is walked away from, till it is this far. */
+const CREEPER_NEAR = 6
+const CREEPER_SAFE = 10
 /** A monster it has not got any closer to for this long is out of reach (in a pit, behind a wall). */
 const OUT_OF_REACH_MS = 6_000
 
@@ -73,6 +76,7 @@ export class Survival {
   private readonly bot: SurvivalBot
   private eating = false
   private fighting = false
+  private fleeing = false
   private lastEmptyTrip = 0
   /** Monsters that got away, left alone until then (no chasing the same one every tick). */
   private readonly letGo = new Map<number, number>()
@@ -86,13 +90,14 @@ export class Survival {
     this.bot = bot as SurvivalBot
   }
 
-  /** Fighting or eating: leave the body alone for now. */
+  /** Fighting, eating or out of a creeper's way: leave the body alone for now. */
   get busy(): boolean {
-    return this.fighting || this.eating
+    return this.fighting || this.eating || this.fleeing
   }
 
   async tick(): Promise<void> {
     if (!this.bot.entity) return
+    if (!this.fighting && (await this.awayFromCreepers())) return
     if (this.opts.guard && !this.fighting) {
       const foe = this.foe()
       if (foe) await this.fight(foe)
@@ -180,6 +185,38 @@ export class Survival {
       if (outcome.startsWith('gave up')) this.letGo.set(foe.id, Date.now() + 60_000)
       this.log.info(`fight with a ${foe.name}: ${strikes} strikes, ${outcome}`)
     }
+  }
+
+  /**
+   * Out of a creeper's way: it blows up three blocks off, and nobody fights one. Not inside the
+   * hall, whose walls take the blast. Returns whether it had to back away.
+   */
+  private async awayFromCreepers(): Promise<boolean> {
+    const me = this.bot.entity.position
+    if (this.opts.inside?.(me.floored())) return false
+    const creeper = Object.values(this.bot.entities).find(
+      (e) =>
+        e.name === 'creeper' && e.isValid !== false && e.position.distanceTo(me) <= CREEPER_NEAR
+    )
+    if (!creeper) return false
+    this.fleeing = true
+    this.log.info(`backing away from a creeper at ${creeper.position.floored()}`)
+    try {
+      const away = new goals.GoalInvert(new goals.GoalFollow(creeper, CREEPER_SAFE))
+      this.bot.pathfinder.setGoal(away, true)
+      const start = Date.now()
+      while (
+        Date.now() - start < 8_000 &&
+        this.bot.entities[creeper.id] &&
+        creeper.isValid !== false &&
+        creeper.position.distanceTo(this.bot.entity.position) < CREEPER_SAFE
+      )
+        await sleep(250)
+    } finally {
+      this.bot.pathfinder.setGoal(null)
+      this.fleeing = false
+    }
+    return true
   }
 
   private async takeUpWeapon(): Promise<void> {

@@ -1157,7 +1157,8 @@ export class Bot extends EventEmitter {
     )
     const result = await builder.build(
       { title: `${title} for the hall`, cells },
-      this.household?.storehouse
+      this.household?.storehouse,
+      !royal && this.isNight()
     )
     if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
     if (work === 'chest' && result.missing === 0 && cells[0]) {

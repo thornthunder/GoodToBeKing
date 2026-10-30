@@ -31,6 +31,11 @@ const SCAFFOLD = /^(dirt|cobblestone)$/
 const ROOM =
   /^(air|cave_air|short_grass|tall_grass|fern|large_fern|snow_layer|leaf_litter|wildflowers|[a-z_]*flower|poppy|dandelion|[a-z_]*_tulip)$/
 const LIQUID = /^(flowing_)?(water|lava)$/
+/** A builder out for wood brings at least this many logs back. */
+const MIN_LOGS = 8
+/** Further than this from the job after fetching materials, the builder walks back first. */
+const BACK_FROM = 16
+const WALK_BACK_MS = 3 * 60_000
 /** Reach for placing, from the eyes (Bedrock's is a little longer). */
 const REACH = 4.5
 /** Neighbours to place against, below first. */
@@ -97,7 +102,15 @@ export class Handbuilder {
     this.bot.pathfinder.setGoal(null)
   }
 
-  async build(job: HandJob, storehouse?: { x: number; y: number; z: number }): Promise<HandResult> {
+  /**
+   * Build the job. `stayIn`: at night the court's own work makes do with what it carries and what
+   * the storehouse holds; going out for wood or dirt in the dark killed its builders.
+   */
+  async build(
+    job: HandJob,
+    storehouse?: { x: number; y: number; z: number },
+    stayIn = false
+  ): Promise<HandResult> {
     const result: HandResult = { placed: 0, missing: 0, short: {}, cancelled: false }
     if (this.current) return { ...result, cancelled: true }
     this.current = job.title
@@ -116,7 +129,7 @@ export class Handbuilder {
     events.on('blockPlaced', onPlaced)
     try {
       this.useBuildingRules(true)
-      await this.getMaterials(job, storehouse)
+      await this.getMaterials(job, storehouse, stayIn)
       placing = true
       if (!this.cancelled) await this.placeAll(job, result)
       placing = false
@@ -212,7 +225,8 @@ export class Handbuilder {
   /** From the storehouse first; planks made from logs; wood and dirt dug by hand when short. */
   private async getMaterials(
     job: HandJob,
-    storehouse?: { x: number; y: number; z: number }
+    storehouse?: { x: number; y: number; z: number },
+    stayIn = false
   ): Promise<void> {
     let needs = this.needs(job)
     if (storehouse && [...needs.values()].some((n) => n > 0)) {
@@ -247,9 +261,11 @@ export class Handbuilder {
     if (planks > 0) await this.makePlanks(planks)
     needs = this.needs(job)
     const stillPlanks = needs.get('planks') ?? 0
-    if (stillPlanks > 0 && !this.cancelled) {
-      this.log.info(`${job.title}: chopping ${Math.ceil(stillPlanks / 4)} logs for planks`)
-      await this.gatherer.collect('wood', Math.ceil(stillPlanks / 4))
+    if (stillPlanks > 0 && !this.cancelled && !stayIn) {
+      // Trees are far: bring a few more back than this job wants (the rest go into the storehouse).
+      const logs = Math.max(Math.ceil(stillPlanks / 4), MIN_LOGS)
+      this.log.info(`${job.title}: chopping ${logs} logs for planks`)
+      await this.gatherer.collect('wood', logs)
       await this.makePlanks(stillPlanks)
     }
     const filler = this.needs(job).get('filler') ?? 0
@@ -257,7 +273,9 @@ export class Handbuilder {
     const stillFiller = this.needs(job).get('filler') ?? 0
     const dirt =
       (this.needs(job).get('dirt') ?? 0) + (this.needs(job).get('earth') ?? 0) + stillFiller
-    if (dirt > 0 && !this.cancelled) await this.gatherer.collect('dirt', dirt)
+    if (dirt > 0 && !this.cancelled && !stayIn) await this.gatherer.collect('dirt', dirt)
+    // Back from the woods: craft at the hall's table, and see the hall's blocks to build on.
+    await this.backTo(job)
     if ((this.needs(job).get('torch') ?? 0) > 0)
       await this.makeTorches(this.needs(job).get('torch') ?? 0)
     // At the hall's crafting table if there is one, else at one put down and taken back.
@@ -270,6 +288,23 @@ export class Handbuilder {
     const furnaces = this.needs(job).get('furnace') ?? 0
     if (furnaces > 0 && this.carried('cobblestone') >= 8 && !this.cancelled)
       await craft(this.bot, this.log, 'furnace', furnaces)
+  }
+
+  /** Walk back to the job if materials took the builder far away (a tree a long way off). */
+  private async backTo(job: HandJob): Promise<void> {
+    const site = job.cells[0]
+    if (!site || this.cancelled) return
+    if (this.bot.entity.position.distanceTo(vec(site)) <= BACK_FROM) return
+    this.log.info(`${job.title}: back to the hall`)
+    try {
+      await withTimeout(
+        this.bot.pathfinder.goto(new goals.GoalNear(site.x, site.y, site.z, 4)),
+        WALK_BACK_MS
+      )
+    } catch (err) {
+      this.bot.pathfinder.setGoal(null)
+      this.log.info(`${job.title}: could not walk back: ${errMsg(err)}`)
+    }
   }
 
   /** Take up to `count` matching items out of the chest; returns how many it could not find. */

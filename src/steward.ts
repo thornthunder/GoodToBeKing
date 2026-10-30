@@ -73,6 +73,8 @@ export interface CourtState {
    * 'hallwork:<work>'. No wood to be found nearby makes Merlin's logs the way out.
    */
   resting?: string[]
+  /** Work someone is doing right now ('hallwork:<work>', 'mine', 'farm'): not given out twice. */
+  underway?: string[]
 }
 
 export type StewardAction =
@@ -114,7 +116,10 @@ export const STONE_RESERVE = 32
  */
 export function plan(s: CourtState): StewardAction[] {
   const out: StewardAction[] = []
-  const rests = (kind: string) => (s.resting ?? []).includes(kind)
+  /** Came to nothing lately (and so may call for magic). */
+  const failed = (kind: string) => (s.resting ?? []).includes(kind)
+  /** Not to be given out now: resting, or someone is at it. */
+  const rests = (kind: string) => failed(kind) || (s.underway ?? []).includes(kind)
   // One pool of free courtiers: each job takes someone not yet given work this round.
   const builders = s.freeBuilders ?? (s.freeBuilder ? [s.freeBuilder] : [])
   const free = new Set<string>([...(s.freeHands ?? (s.freeHand ? [s.freeHand] : [])), ...builders])
@@ -207,8 +212,17 @@ export function plan(s: CourtState): StewardAction[] {
   const someBuilder = builders.find((b) => free.has(b)) ?? s.freeBuilder
   const someone = someBuilder ?? [...free][0] ?? s.freeHand
   const wants: Array<Omit<Extract<StewardAction, { kind: 'magic' }>, 'kind'>> = []
+  // The storehouse lost and no wood to make a chest of: everything else waits on it.
+  if (s.storehouseLost && failed('hallwork:chest') && someBuilder)
+    wants.push({
+      item: 'chest',
+      count: 1,
+      to: someBuilder,
+      then: 'chest',
+      why: 'a chest for the storehouse',
+    })
   // No wood to be had nearby and hardly any in store: everything waits on it, so Merlin's first.
-  if (rests('wood') && s.woodInStore < WOOD_LOW && someone)
+  if (failed('wood') && s.woodInStore < WOOD_LOW && someone)
     wants.push({ item: 'oak_log', count: 8, to: someone, why: 'wood for the court' })
   if (!canArm)
     for (const guard of s.guardsUnarmed)

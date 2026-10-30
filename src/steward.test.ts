@@ -228,6 +228,25 @@ describe("the Castellan's account", () => {
     expect(plan(doorless)).toEqual([])
   })
 
+  it('gives work someone is at to nobody else; a lost storehouse with no wood calls for magic', () => {
+    const lost = { ...base, storehouse: false, storehouseLost: true }
+    expect(kinds(lost)).toContain('hallwork:Henry')
+    expect(plan({ ...lost, underway: ['hallwork:chest'] }).some((a) => a.kind === 'hallwork')).toBe(
+      false
+    )
+    expect(plan({ ...lost, underway: ['hallwork:chest'] }).some((a) => a.kind === 'magic')).toBe(
+      false
+    )
+    expect(plan({ ...lost, resting: ['hallwork:chest'] })).toContainEqual({
+      kind: 'magic',
+      item: 'chest',
+      count: 1,
+      to: 'Henry',
+      then: 'chest',
+      why: 'a chest for the storehouse',
+    })
+  })
+
   it('sends a free hand for wood when the storehouse runs low', () => {
     expect(plan({ ...base, woodInStore: 3 })).toEqual([
       { kind: 'errand', material: 'wood', count: 16, by: 'Henry' },
