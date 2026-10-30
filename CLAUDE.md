@@ -120,9 +120,10 @@ Windows, killing a background `npx` shell does not kill its node children at all
   doorway only if it has a door or was one before (worn walls under a standing top course are
   holes). Nobody goes out at night (no field, hunt, grove or wood errands, and the court's own
   hall work makes do with the storehouse). Food: `build/farm.ts` + `bot/farming.ts` (a 4x4
-  wheat field near home, by water if any; hoe via `bot/crafting.ts`, which puts a crafting table
-  down and takes it back; seeds from grass, Merlin's eight only to start; harvest, replant, bread
-  to the storehouse), `bot/hunting.ts` (the King's rule: never a named, tame, owned or leashed
+  wheat field near home, by water if any, growing by another 4x4 beside it, up to 64 squares,
+  once sown with 16 seeds spare; hoe via `bot/crafting.ts`, which crafts at a table within 24
+  blocks or puts one down and takes it back; seeds from grass, Merlin's eight only to start;
+  harvest, replant, bread to the storehouse), `bot/hunting.ts` (the King's rule: never a named, tame, owned or leashed
   animal nor a baby; only cows, pigs, sheep, chickens, rabbits; 16 blocks from players, not by
   fences, two of a kind always left; game animals' entity data is read for this), `bot/cooking.ts`
   (raw meat cooked in the hall's furnace with wood). Bots eat up to 18 when hurt (health only
@@ -137,7 +138,10 @@ Windows, killing a background `npx` shell does not kill its node children at all
   own errands say nothing of a failure. Wood: `build/grove.ts` + `bot/forestry.ts`, six trees
   near home (saplings from the leaves of felled trees, Merlin's four only when none can be
   found), felled when grown and planted again; a builder back from a far tree walks to the hall
-  first and brings eight logs at least. `bot/mining.ts`: a staircase
+  first and brings eight logs at least. With no tree (or game) in sight, gatherers and hunters
+  walk out to look (`bot/scouting.ts`: where the court last found some, then 64-block legs).
+  Beds are made of the hunt's wool (three wool, three planks); Merlin's only without wool.
+  Merlin grants the most urgent want this hour's magic still allows. `bot/mining.ts`: a staircase
   mine near home (walked back down before digging on, stops at water, lava or a cave), a level
   tunnel past 18 deep; pickaxes made as needed, stone as soon as there is cobblestone. Gatherers
   climb a dirt pillar to high logs and take it down. Light: torches inside and a ring outside,
