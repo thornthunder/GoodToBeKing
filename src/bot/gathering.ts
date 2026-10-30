@@ -225,7 +225,7 @@ export class Gatherer {
         target = this.nearest(material, candidates, tried)
       }
       // No trees in sight: walk out to look further (where some were found last, else round about).
-      if (!target && material === 'wood' && legs < SCOUT_LEGS) {
+      while (!target && material === 'wood' && legs < SCOUT_LEGS && !this.cancelled) {
         await scout(this.bot, this.log, 'trees', legs++)
         candidates = this.search(material)
         searched = Date.now()
