@@ -47,6 +47,8 @@ const SELF_RANGE = 6
 const STRIKE = 3
 /** The longest one fight may last. */
 const FIGHT_MS = 30_000
+/** A monster it has not got any closer to for this long is out of reach (in a pit, behind a wall). */
+const OUT_OF_REACH_MS = 6_000
 
 type SurvivalBot = MineflayerBot & { pathfinder: Pathfinder }
 
@@ -55,6 +57,8 @@ export interface SurvivalOptions {
   guard: boolean
   /** Where royals stand right now (the ones in sight). */
   royals: () => Vec3[]
+  /** Is this spot inside the court's hall? */
+  inside?: (p: Vec3) => boolean
   /** Take food out of the storehouse: how many it took; undefined when it cannot go now (busy). */
   fetchFood: () => Promise<number | undefined>
   /** Say something in character (the brain words it). */
@@ -96,20 +100,26 @@ export class Survival {
     if (!this.fighting) await this.eatIfHungry()
   }
 
-  /** The nearest monster close to a royal or to this guard. */
+  /**
+   * The nearest monster close to a royal or to this guard. Inside the hall, with no royal to
+   * defend, a guard fights only what got in or comes within reach: going out after the monsters
+   * round the walls at night opened the door to them, and the guards died out there.
+   */
   private foe(): ReturnType<typeof this.monsters>[number] | undefined {
     const me = this.bot.entity.position
     const royals = this.opts.royals()
     const now = Date.now()
+    const indoors = this.opts.inside?.(me.floored()) ?? false
     return this.monsters()
       .filter((e) => (this.letGo.get(e.id) ?? 0) < now)
-      .filter(
-        (e) =>
-          e.position.distanceTo(me) <= SELF_RANGE ||
-          // Near a royal, and near enough to this guard to be reached.
-          (e.position.distanceTo(me) <= GUARD_RANGE &&
-            royals.some((r) => r.distanceTo(e.position) <= GUARD_RANGE))
-      )
+      .filter((e) => {
+        const gap = e.position.distanceTo(me)
+        // Near a royal, and near enough to this guard to be reached.
+        if (gap <= GUARD_RANGE && royals.some((r) => r.distanceTo(e.position) <= GUARD_RANGE))
+          return true
+        if (indoors) return gap <= STRIKE + 1 || this.opts.inside!(e.position.floored())
+        return gap <= SELF_RANGE
+      })
       .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me))[0]
   }
 
@@ -129,6 +139,9 @@ export class Survival {
     try {
       await this.takeUpWeapon()
       const start = Date.now()
+      // Closest it has come, and when: a monster it cannot get nearer to is out of reach.
+      let closest = Infinity
+      let closer = Date.now()
       while (Date.now() - start < FIGHT_MS) {
         if (!this.bot.entities[foe.id] || foe.isValid === false) {
           outcome = 'it is gone'
@@ -137,6 +150,14 @@ export class Survival {
         const gap = foe.position.distanceTo(this.bot.entity.position)
         if (gap > GUARD_RANGE + 6) {
           outcome = 'it got away'
+          this.letGo.set(foe.id, Date.now() + 60_000)
+          break
+        }
+        if (gap < closest - 0.5) {
+          closest = gap
+          closer = Date.now()
+        } else if (Date.now() - closer > OUT_OF_REACH_MS) {
+          outcome = 'out of reach'
           this.letGo.set(foe.id, Date.now() + 60_000)
           break
         }

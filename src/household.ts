@@ -67,6 +67,14 @@ export class Household {
     return this.data.hall
   }
 
+  /** Is this spot inside the hall (as last seen whole)? */
+  inHall(p: { x: number; y: number; z: number }): boolean {
+    const hall = this.hall
+    if (!hall || p.y < hall.floorY - 1 || p.y > hall.wallTop) return false
+    const [x, z] = [Math.floor(p.x), Math.floor(p.z)]
+    return hall.inside.some(([ix, iz]) => ix === x && iz === z)
+  }
+
   setHall(hall: Omit<SavedHall, 'at'>, now = Date.now()): void {
     this.data.hall = { ...hall, at: now }
     this.save()
@@ -88,6 +96,23 @@ export class Household {
   setFarm(farm: Farm): void {
     this.data.farm = farm
     this.save()
+  }
+
+  /**
+   * The court's own grounds: home, storehouse, field and mine. Nobody digs the land near them
+   * (the hall's floor, the patches mended with dirt and the ground round the walls look like
+   * untouched land, and digging them took the hall apart).
+   */
+  grounds(): Array<{ x: number; y: number; z: number }> {
+    const out: Array<{ x: number; y: number; z: number }> = []
+    if (this.home) out.push(this.home)
+    if (this.storehouse) out.push(this.storehouse)
+    const farm = this.farm
+    for (const [x, z] of farm?.cells ?? []) out.push({ x, y: farm!.y, z })
+    const hall = this.hall
+    for (const [x, z] of hall?.ring ?? []) out.push({ x, y: hall!.floorY, z })
+    if (this.mine) out.push(this.mine)
+    return out
   }
 
   /** Where this courtier respawns, if it set its spawn at a bed in the hall. */

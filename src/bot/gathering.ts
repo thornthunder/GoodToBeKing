@@ -38,6 +38,15 @@ const GROUND =
 const COVER =
   /^(air|short_grass|tall_grass|fern|large_fern|snow_layer|leaf_litter|bush|wildflowers|short_dry_grass|tall_dry_grass|dead_bush|deadbush|poppy|dandelion|allium|cornflower|azure_bluet|oxeye_daisy|[a-z_]*_tulip|lily_of_the_valley|pink_petals)$/
 const LEAVES = /_leaves$/
+const LOG = /_log$/
+/** Whatever the land is made of, or grows or flows on it: anything else, someone made. */
+const WILD =
+  /^(air|cave_air|void_air|water|flowing_water|lava|flowing_lava|seagrass|tall_seagrass|kelp|kelp_plant|lily_pad|vine|glow_lichen|sugar_cane|cactus|brown_mushroom|red_mushroom|pumpkin|melon_block|sweet_berry_bush|peony|rose_bush|lilac|sunflower|moss_carpet|ice|snow|calcite|dripstone_block|pointed_dripstone|bedrock|obsidian|[a-z_]*_ore)$/
+
+/** The sky must be open this far above a dug block: a hall's floor or a cave is not the surface. */
+const SKY = 24
+/** Nothing anyone made (planks, torches, a door, a field) this close to land that is dug. */
+const MADE_NEAR = 3
 
 /** Block names by position; undefined where the world is not loaded. */
 export type BlockNames = (x: number, y: number, z: number) => string | undefined
@@ -57,9 +66,10 @@ const REACH = 4.5
 const ERRAND_MS = 4 * 60_000
 
 /**
- * Untouched land only, never anything someone built: a ground block lies in the surface with
- * ground on all four sides and below and only grass, flowers or air above; a log belongs to a
- * tree, with leaves close by.
+ * Untouched land only, never anything someone built: a ground block lies in the surface, under
+ * open sky, with ground on all four sides and below and only grass, flowers or air above, and
+ * not at the bottom of a pit; a log belongs to a tree, with leaves close by. Neither has
+ * anything made by anyone close by (the court's own mended dirt sits among planks and torches).
  */
 export function untouched(
   material: Material,
@@ -71,28 +81,47 @@ export function untouched(
   const info = MATERIAL_INFO[material]
   const here = names(x, y, z)
   if (!here || !info.blocks.test(here)) return false
-  if (info.tree) {
-    for (let dx = -3; dx <= 3; dx++)
-      for (let dy = -1; dy <= 4; dy++)
-        for (let dz = -3; dz <= 3; dz++)
-          if (LEAVES.test(names(x + dx, y + dy, z + dz) ?? '')) return true
-    return false
-  }
+  if (info.tree) return nearLeaves(names, x, y, z) && nothingMade(names, x, y, z)
   const above = names(x, y + 1, z)
   if (!above || !COVER.test(above)) return false
-  // Open sky all round: the floor of a hole (even the one the bot stands in) is not the surface,
-  // or a bot would dig itself into a shaft it cannot climb out of.
-  const open = [
-    names(x + 1, y + 1, z),
-    names(x - 1, y + 1, z),
-    names(x, y + 1, z + 1),
-    names(x, y + 1, z - 1),
-  ]
-  if (!open.every((n) => n !== undefined && COVER.test(n))) return false
   const sides = [names(x + 1, y, z), names(x - 1, y, z), names(x, y, z + 1), names(x, y, z - 1)]
   if (!sides.every((n) => n !== undefined && GROUND.test(n))) return false
   const below = names(x, y - 1, z)
-  return below !== undefined && GROUND.test(below)
+  if (below === undefined || !GROUND.test(below)) return false
+  // Open all round, two blocks out: the floor of a hole or a pit (even the one the bot stands
+  // in) is not the surface, or the court digs the land down into a quarry it cannot climb out of.
+  for (let dx = -2; dx <= 2; dx++)
+    for (let dz = -2; dz <= 2; dz++) {
+      const n = names(x + dx, y + 1, z + dz)
+      if (n === undefined || !(COVER.test(n) || LEAVES.test(n) || LOG.test(n))) return false
+    }
+  // Open sky: under a roof (the hall's floor), an overhang or in a cave it is not the surface.
+  for (let dy = 2; dy <= SKY; dy++) {
+    const n = names(x, y + dy, z)
+    if (n !== undefined && !COVER.test(n) && !LEAVES.test(n) && !LOG.test(n)) return false
+  }
+  return nothingMade(names, x, y, z)
+}
+
+function nearLeaves(names: BlockNames, x: number, y: number, z: number): boolean {
+  for (let dx = -3; dx <= 3; dx++)
+    for (let dy = -1; dy <= 4; dy++)
+      for (let dz = -3; dz <= 3; dz++)
+        if (LEAVES.test(names(x + dx, y + dy, z + dz) ?? '')) return true
+  return false
+}
+
+/** Nothing but the land itself, and what grows on it, within MADE_NEAR blocks. */
+function nothingMade(names: BlockNames, x: number, y: number, z: number): boolean {
+  for (let dx = -MADE_NEAR; dx <= MADE_NEAR; dx++)
+    for (let dy = -2; dy <= 3; dy++)
+      for (let dz = -MADE_NEAR; dz <= MADE_NEAR; dz++) {
+        const n = names(x + dx, y + dy, z + dz)
+        if (n === undefined) continue
+        if (!GROUND.test(n) && !COVER.test(n) && !LEAVES.test(n) && !LOG.test(n) && !WILD.test(n))
+          return false
+      }
+  return true
 }
 
 /** Where the fetched things go: to a player, or into the storehouse chest. */
@@ -123,7 +152,9 @@ export class Gatherer {
     bot: MineflayerBot,
     private readonly log: Logger,
     /** The court's own bots: they are not building anything, so they need no keeping away from. */
-    private readonly isBot: (name: string) => boolean = () => false
+    private readonly isBot: (name: string) => boolean = () => false,
+    /** The court's own grounds (home, storehouse, field, mine): kept clear like a player. */
+    private readonly grounds: () => Array<{ x: number; y: number; z: number }> = () => []
   ) {
     this.bot = bot as GatherBot
   }
@@ -200,11 +231,12 @@ export class Gatherer {
 
   private names: BlockNames = (x, y, z) => this.bot.blockAt(new Vec3(x, y, z))?.name
 
-  /** Where the real players are (not the court's bots). */
+  /** Where the real players are (not the court's bots), and the court's own grounds. */
   private players(): Vec3[] {
     return Object.values(this.bot.players)
       .filter((p) => p.username !== this.bot.username && !this.isBot(p.username) && p.entity)
       .map((p) => p.entity.position)
+      .concat(this.grounds().map((g) => new Vec3(g.x, g.y, g.z)))
   }
 
   /** May this block be dug: untouched land, far enough from every player, not underfoot. */

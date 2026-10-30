@@ -38,6 +38,22 @@ describe('the hall survey', () => {
     expect(h.openings).toEqual([[2, -1]])
   })
 
+  it('takes walls worn away under a top course still standing for holes, not doorways', () => {
+    const first = surveyHall(hall(), { x: 2, y: 64, z: 2 })
+    if (typeof first === 'string') throw new Error(first)
+    // The east wall gone at feet and head height, its top course still there.
+    const worn = hall({ '5,64,2': 'air', '5,65,2': 'air', '5,64,3': 'air', '5,65,3': 'air' })
+    const again = surveyHall(worn, { x: 2, y: 64, z: 2 }, first)
+    if (typeof again === 'string') throw new Error(again)
+    expect(again.openings).toEqual([[2, -1]])
+    expect(repairCells(again, worn).filter((c) => c.x === 5)).toHaveLength(4)
+    // A doorway with a door in it the royals made since is a doorway.
+    const doored = hall({ '5,64,2': 'wooden_door', '5,65,2': 'wooden_door' })
+    const third = surveyHall(doored, { x: 2, y: 64, z: 2 }, first)
+    if (typeof third === 'string') throw new Error(third)
+    expect(third.openings).toContainEqual([5, 2])
+  })
+
   it('says so when the walls are not closed at three high', () => {
     const leaky = hall({ '5,66,2': 'air' })
     expect(surveyHall(leaky, { x: 2, y: 64, z: 2 })).toContain('not closed all round')
@@ -177,7 +193,7 @@ describe('repairs', () => {
     // A creeper blew a hole two deep where the floor was.
     const crater = hall({ '2,63,2': 'air', '2,62,2': 'air' })
     expect(repairCells(h, crater)).toEqual([
-      { x: 2, y: 62, z: 2, block: 'dirt' },
+      { x: 2, y: 62, z: 2, block: 'earth' },
       { x: 2, y: 63, z: 2, block: 'filler' },
     ])
   })

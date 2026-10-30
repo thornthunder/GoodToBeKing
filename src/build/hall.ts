@@ -47,11 +47,14 @@ const open = (name: string | undefined) => name !== undefined && OPEN.test(name)
 
 /**
  * The hall around the home spot (where the royal stood, inside it). The walls must stand at
- * least three high all round, so a doorway two high does not let the room leak out.
+ * least three high all round, so a doorway two high does not let the room leak out. Seen
+ * `before` (the same room), a gap is a doorway only if it has a door or was one then: walls
+ * worn away below a top course still standing are holes to mend, not doorways for more doors.
  */
 export function surveyHall(
   names: BlockNames,
-  home: { x: number; y: number; z: number }
+  home: { x: number; y: number; z: number },
+  before?: Hall
 ): Hall | string {
   const floorY = Math.floor(home.y)
   const hx = Math.floor(home.x)
@@ -99,11 +102,20 @@ export function surveyHall(
     while (y < level + 8 && !open(names(x, y + 1, z)) && !(roofed && y + 1 >= roofY)) y++
     wallTop = Math.max(wallTop, y)
   }
-  const openings = ring.filter(
+  const gaps = ring.filter(
     ([x, z]) =>
       (open(names(x, floorY, z)) || DOOR.test(names(x, floorY, z) ?? '')) &&
       (open(names(x, floorY + 1, z)) || DOOR.test(names(x, floorY + 1, z) ?? ''))
   )
+  const same =
+    before !== undefined &&
+    before.floorY === floorY &&
+    before.inside.length === inside.length &&
+    before.inside.every(([x, z]) => isInside.has(`${x},${z}`))
+  const doorway = new Set(before?.openings.map(([x, z]) => `${x},${z}`))
+  const openings = same
+    ? gaps.filter(([x, z]) => doorway.has(`${x},${z}`) || DOOR.test(names(x, floorY, z) ?? ''))
+    : gaps
   return { floorY, inside, ring, wallTop, openings }
 }
 
@@ -206,8 +218,9 @@ function outsideLights(hall: Hall, names: BlockNames): HandCell[] {
 }
 
 /**
- * Up to `count` beds along the inside of the walls, head against the wall, a gap between them,
- * none in front of a doorway: the foot one block in, the head next to the wall.
+ * Up to `count` beds along the inside of the walls, head against the wall, side by side, none in
+ * front of a doorway: the foot one block in, the head next to the wall, and room to stand
+ * behind the foot (where the builder puts it down from) that no other bed takes.
  */
 export function bedCells(hall: Hall, names: BlockNames, count: number): HandCell[] {
   const y = hall.floorY
@@ -217,7 +230,9 @@ export function bedCells(hall: Hall, names: BlockNames, count: number): HandCell
     hall.openings.some(([ox, oz]) => Math.abs(ox - x) + Math.abs(oz - z) <= 2)
   const free = (x: number, z: number) =>
     isInside.has(`${x},${z}`) && open(names(x, y, z)) && open(names(x, y + 1, z))
+  /** Cells the beds planned so far lie on, and the spots their builders stand on. */
   const used = new Set<string>()
+  const stands = new Set<string>()
   const cells: HandCell[] = []
   const sides = [
     [1, 0],
@@ -234,13 +249,12 @@ export function bedCells(hall: Hall, names: BlockNames, count: number): HandCell
       const [fx, fz] = [hx - dx, hz - dz]
       const [sx, sz] = [fx - dx, fz - dz]
       if (!free(hx, hz) || !free(fx, fz) || !free(sx, sz) || nearDoor(hx, hz)) continue
-      const around = [
-        [hx, hz],
-        [fx, fz],
-      ].flatMap(([x, z]) => [`${x},${z}`, `${x + dz},${z + dx}`, `${x - dz},${z - dx}`])
-      if (around.some((k) => used.has(k))) continue
-      used.add(`${hx},${hz}`)
-      used.add(`${fx},${fz}`)
+      const [head, foot, stand] = [`${hx},${hz}`, `${fx},${fz}`, `${sx},${sz}`]
+      if (used.has(head) || used.has(foot) || used.has(stand)) continue
+      if (stands.has(head) || stands.has(foot)) continue
+      used.add(head)
+      used.add(foot)
+      stands.add(stand)
       cells.push({ x: fx, y, z: fz, block: 'bed', head: [dx, dz] })
       break
     }
@@ -254,9 +268,9 @@ export function bedCells(hall: Hall, names: BlockNames, count: number): HandCell
  */
 export function repairCells(hall: Hall, names: BlockNames): HandCell[] {
   const cells: HandCell[] = []
-  // The floor first, and any crater under it (a creeper's), filled from the bottom up: dirt
-  // below, the sturdiest filler to hand on top; under the walls too, so they stand on something.
-  // Repairs take any filler (planks, cobblestone, else dirt): a hole must be shut tonight.
+  // The floor first, and any crater under it (a creeper's), filled from the bottom up: dirt or
+  // stone below, the sturdiest filler to hand on top; under the walls too, so they stand on
+  // something. Repairs take any filler (stone, planks, else dirt): a hole must be shut tonight.
   for (const [x, z] of [...hall.inside, ...hall.ring]) {
     const top = hall.floorY - 1
     if (!open(names(x, top, z))) continue
@@ -268,7 +282,7 @@ export function repairCells(hall: Hall, names: BlockNames): HandCell[] {
         y,
         z,
         block:
-          y === top && hall.inside.some(([ix, iz]) => ix === x && iz === z) ? 'filler' : 'dirt',
+          y === top && hall.inside.some(([ix, iz]) => ix === x && iz === z) ? 'filler' : 'earth',
       })
   }
   const doorway = new Set(hall.openings.map(([x, z]) => `${x},${z}`))

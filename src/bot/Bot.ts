@@ -833,7 +833,12 @@ export class Bot extends EventEmitter {
         .catch((err) => this.log.warn(`brain.onStuck failed: ${errMsg(err)}`))
     }
     this.mason = new Mason(body, this.log.child('mason'))
-    this.gatherer = new Gatherer(body, this.log.child('gather'), (name) => this.isBot(name))
+    this.gatherer = new Gatherer(
+      body,
+      this.log.child('gather'),
+      (name) => this.isBot(name),
+      () => this.household?.grounds() ?? []
+    )
     this.hunter = new Hunter(body, this.log.child('hunt'), (name) => this.isBot(name))
     this.cook = new Cook(body, this.log.child('cook'), this.gatherer)
     this.farmer = new Farmer(body, this.log.child('farm'), this.gatherer)
@@ -847,6 +852,7 @@ export class Bot extends EventEmitter {
     this.survival = new Survival(body, this.log.child('life'), {
       guard: this.cfg.duty?.kind === 'escort',
       royals: () => this.royalPositions(),
+      inside: (p) => this.household?.inHall(p) ?? false,
       fetchFood: () => this.fetchFood(),
       speak: (instruction, fallback) => this.speak(instruction, fallback),
     })
@@ -1120,7 +1126,7 @@ export class Bot extends EventEmitter {
     }
     const body = this.body
     const names = (x: number, y: number, z: number) => body.blockAt(new WorldVec(x, y, z))?.name
-    const surveyed = surveyHall(names, home)
+    const surveyed = surveyHall(names, home, this.household?.hall)
     // Whole: remember its shape. Damaged: the shape last seen whole says where it was.
     if (typeof surveyed !== 'string') this.household?.setHall(surveyed)
     const saved = this.household?.hall
@@ -1138,7 +1144,8 @@ export class Bot extends EventEmitter {
     }
     const cells = HALL_WORK_CELLS[work](hall, names)
     if (cells.length === 0) {
-      if (!royal) return true
+      // Planned, yet nothing to do here (no room for more beds): it rests, not asked every minute.
+      if (!royal) return false
       await this.speak(
         `${who} asked for ${title}, and the hall already has it. Say so in one short sentence.`,
         `The hall already has ${title}!`

@@ -14,10 +14,15 @@ const GROUPS: Record<string, RegExp> = {
   // Any stone a mine gives: cobblestone, andesite, diorite, granite...
   stone: /^(cobblestone|andesite|diorite|granite|tuff|cobbled_deepslate|stone)$/,
   // Whatever closes a hole, sturdiest first (see FILLER_ORDER).
-  filler: /(_planks|^cobblestone|^dirt)$/,
+  filler: /(_planks|^(cobblestone|andesite|diorite|granite|tuff|cobbled_deepslate|stone|dirt))$/,
+  // Ground under the floor: dirt or any stone.
+  earth: /^(dirt|cobblestone|andesite|diorite|granite|tuff|cobbled_deepslate|stone)$/,
 }
-/** Filler by preference: planks and stone keep endermen and creepers out better than dirt. */
-const FILLER_ORDER = [/_planks$/, /^cobblestone$/, /^dirt$/]
+/**
+ * Filler by preference: stone stands up to a creeper's blast (dirt is blown away in a crater,
+ * planks halfway), and keeps the court's wood for planks and torches.
+ */
+const FILLER_ORDER = [GROUPS.stone, /_planks$/, /^dirt$/]
 export const itemsFor = (block: string): RegExp => GROUPS[block] ?? new RegExp(`^${block}$`)
 
 /** Blocks a builder towers up on when a spot is out of reach, and takes away afterwards. */
@@ -98,18 +103,23 @@ export class Handbuilder {
     this.current = job.title
     this.cancelled = false
     const planned = new Set(job.cells.map(key))
-    // Whatever the builder places that is not in the plan is scaffolding (towers, bridges).
+    // Whatever the builder places while building that is not in the plan is scaffolding (towers,
+    // bridges). Not before: the pillar a gatherer climbs to a far tree it takes down itself, and
+    // a crafting table put down for a moment is taken back.
     const scaffold: Vec3[] = []
+    let placing = false
     const onPlaced = (_old: unknown, block: { position?: Vec3 } | null) => {
       const p = block?.position
-      if (p && !planned.has(key(p))) scaffold.push(p.clone())
+      if (placing && p && !planned.has(key(p))) scaffold.push(p.clone())
     }
     const events = this.bot as unknown as NodeJS.EventEmitter
     events.on('blockPlaced', onPlaced)
     try {
       this.useBuildingRules(true)
       await this.getMaterials(job, storehouse)
+      placing = true
       if (!this.cancelled) await this.placeAll(job, result)
+      placing = false
       this.useBuildingRules(false)
       await this.clearScaffold(scaffold)
       // What is missing, and short, before the leftovers go back.
@@ -208,14 +218,25 @@ export class Handbuilder {
     if (storehouse && [...needs.values()].some((n) => n > 0)) {
       await this.gatherer.withChest(storehouse, async (chest) => {
         for (const [block, n] of needs) {
+          // Filler and ground by preference: the court's stone before its wood or dirt.
+          if (block === 'filler' || block === 'earth') {
+            let left = n
+            for (const kind of block === 'filler' ? FILLER_ORDER : [/^dirt$/, GROUPS.stone])
+              if (left > 0) left = await this.withdraw(chest, kind, left)
+            continue
+          }
           const left = await this.withdraw(chest, itemsFor(block), n)
           // Planks can be made from logs: four from each.
           if (block === 'planks' && left > 0)
             await this.withdraw(chest, /_log$/, Math.ceil(left / 4))
           // Torches are made from coal and sticks, four at a time; sticks from a log's planks.
           if (block === 'torch' && left > 0) {
-            await this.withdraw(chest, /^(coal|charcoal)$/, Math.ceil(left / 4))
-            if (this.carried('planks') < 2) await this.withdraw(chest, /_log$/, 1)
+            const batches = Math.ceil(left / 4)
+            await this.withdraw(chest, /^(coal|charcoal)$/, batches)
+            if (this.carried('stick') < batches) await this.withdraw(chest, /^stick$/, batches)
+            if (this.carried('stick') < batches && this.carried('planks') < 2)
+              if ((await this.withdraw(chest, /_planks$/, 2)) > 0)
+                await this.withdraw(chest, /_log$/, 1)
           }
         }
         return 0
@@ -234,12 +255,14 @@ export class Handbuilder {
     const filler = this.needs(job).get('filler') ?? 0
     if (filler > 0) await this.makePlanks(filler)
     const stillFiller = this.needs(job).get('filler') ?? 0
-    const dirt = (this.needs(job).get('dirt') ?? 0) + stillFiller
+    const dirt =
+      (this.needs(job).get('dirt') ?? 0) + (this.needs(job).get('earth') ?? 0) + stillFiller
     if (dirt > 0 && !this.cancelled) await this.gatherer.collect('dirt', dirt)
     if ((this.needs(job).get('torch') ?? 0) > 0)
       await this.makeTorches(this.needs(job).get('torch') ?? 0)
+    // At the hall's crafting table if there is one, else at one put down and taken back.
     const doors = this.needs(job).get('wooden_door') ?? 0
-    for (let i = 0; i < doors && !this.cancelled; i++) await this.makeDoor()
+    if (doors > 0 && !this.cancelled) await craft(this.bot, this.log, 'wooden_door', 1)
     const chests = this.needs(job).get('chest') ?? 0
     if (chests > 0 && !this.cancelled) await craft(this.bot, this.log, 'chest', chests)
     const tables = this.needs(job).get('crafting_table') ?? 0
@@ -302,36 +325,6 @@ export class Handbuilder {
     if (this.carried('stick') < batches)
       await this.craft('stick', Math.ceil((batches - this.carried('stick')) / 4))
     await this.craft('torch', batches)
-  }
-
-  /** A door needs the big crafting grid: make a table, put it down, craft, take it back up. */
-  private async makeDoor(): Promise<void> {
-    if (this.carried('crafting_table') === 0 && !(await this.craft('crafting_table', 1))) return
-    const me = this.bot.entity.position.floored()
-    const spot = DIRECTIONS.slice(1, 5)
-      .map(([dx, , dz]) => new Vec3(me.x + dx * 2, me.y, me.z + dz * 2))
-      .find(
-        (p) =>
-          ROOM.test(this.names(p.x, p.y, p.z) ?? '') &&
-          this.reference({ x: p.x, y: p.y, z: p.z, block: 'crafting_table' })
-      )
-    const table = this.bot.inventory.items().find((i) => i.name === 'crafting_table')
-    if (!spot || !table) return void this.log.info('no room to put a crafting table down')
-    const ref = this.reference({ x: spot.x, y: spot.y, z: spot.z, block: 'crafting_table' })!
-    try {
-      await this.bot.equip(table, 'hand')
-      await withTimeout(this.bot.placeBlock(ref.block, ref.face), 5_000)
-    } catch (err) {
-      return void this.log.info(`could not put the crafting table down: ${errMsg(err)}`)
-    }
-    const placed = this.bot.blockAt(spot)
-    if (placed?.name === 'crafting_table') {
-      await this.craft('wooden_door', 1, placed)
-      await withTimeout(this.bot.dig(placed, true), 10_000).catch((err) =>
-        this.log.info(`could not take the crafting table back up: ${errMsg(err)}`)
-      )
-      await sleep(600)
-    }
   }
 
   private carriedAny(items: RegExp): number {

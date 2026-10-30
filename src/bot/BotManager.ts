@@ -258,7 +258,7 @@ export class BotManager {
     if (!castellan || castellan.buildsByMagic() || !eyes) return
     this.lastHousekeeping = Date.now()
     const names = (x: number, y: number, z: number) => eyes.nameAt(x, y, z)
-    const surveyed = surveyHall(names, home)
+    const surveyed = surveyHall(names, home, this.household.hall)
     // Whole: remember it, so damage later (endermen, creepers) can be measured against it.
     if (typeof surveyed !== 'string') this.household.setHall(surveyed)
     const hall = typeof surveyed === 'string' ? this.household.hall : surveyed
