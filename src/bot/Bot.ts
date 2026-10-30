@@ -1055,10 +1055,10 @@ export class Bot extends EventEmitter {
         else void this.startHallWork(action.work, action.requestedBy)
         return
       case 'home':
-        // The court keeps it (see BotManager): where the royal stands, or failing that, here.
+        // The court keeps it (see BotManager): where the royal stands, as any courtier sees it.
         this.emit('home', {
           requestedBy: action.requestedBy,
-          at: this.playerPosition(action.requestedBy) ?? this.position(),
+          at: this.playerPosition(action.requestedBy),
         })
         return
       case 'storehouse':

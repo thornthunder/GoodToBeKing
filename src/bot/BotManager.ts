@@ -195,7 +195,18 @@ export class BotManager {
         (job: { work: HallWork; requestedBy: string }) => void this.sendToHall(bot, job)
       )
       bot.on('home', (h: { requestedBy: string; at?: Point }) => {
-        if (h.at) this.makeHome(h.at, h.requestedBy)
+        // Where the royal stands, as any courtier sees it; out of everyone's sight it is nowhere
+        // yet (the line reaches the whole world): they are asked to come where the court can see.
+        const at = h.at ?? this.bots.map((b) => b.playerPosition(h.requestedBy)).find(Boolean)
+        if (at) return this.makeHome(at, h.requestedBy)
+        const member = this.court.find(h.requestedBy)
+        const who = member ? `the ${member.title}` : h.requestedBy
+        void bot.speak(
+          `${capital(who)} wants the court's home where they stand, but no courtier can see them, ` +
+            'so you do not know where that is. Ask kindly, in one short sentence, to call the ' +
+            'court there first (Merlin can gather everyone) and say it again once the court is there.',
+          'Where is that? Call us there first, and we shall make it our home.'
+        )
       })
       bot.on('storehouse', (s: { requestedBy: string; at: Point }) => {
         if (this.household.storehouse && samePoint(this.household.storehouse, s.at)) return
