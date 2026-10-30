@@ -6,6 +6,7 @@ import type { Logger } from '../logger'
 import { errMsg, sleep, withTimeout } from '../util'
 import { craft, makePlanks } from './crafting'
 import type { Gatherer } from './gathering'
+import { duskFallen } from './survival'
 
 type FishBot = MineflayerBot & { pathfinder: Pathfinder; fish: () => Promise<void> }
 
@@ -77,6 +78,7 @@ export class Fisher {
     const until = Date.now() + ms
     let dry = 0
     while (Date.now() < until && !this.cancelled && dry < DRY_CASTS) {
+      if (duskFallen(this.bot.time?.timeOfDay)) break
       const rod = this.bot.inventory.items().find((i) => ROD.test(i.name))
       if (!rod) break
       await this.bot.equip(rod, 'hand').catch(() => {})
