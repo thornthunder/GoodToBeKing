@@ -1387,15 +1387,29 @@ export class Bot extends EventEmitter {
         await this.portalHome?.()
         await sleep(2_000)
       }
-      await gatherer.withChest(to, async (window) => {
-        for (const item of body.inventory.items())
-          if (!TOOLS.test(item.name))
-            await window.deposit(item.type, item.metadata, item.count).catch(() => {})
-        return 0
-      })
-      if (gatherer.lastStock) this.household?.noteStock(gatherer.lastStock)
-      this.log.info(`carried ${moved} things from the old storehouse to the new`)
-      return moved
+      const goods = () =>
+        body.inventory
+          .items()
+          .filter((i) => !TOOLS.test(i.name))
+          .reduce((n, i) => n + i.count, 0)
+      // Out of reach of the new chest (a crater by it, a wall): tried again a little later.
+      for (let attempt = 0; attempt < 3 && goods() > 0; attempt++) {
+        if (attempt > 0) await sleep(5_000)
+        gatherer.lastStock = undefined
+        await gatherer.withChest(to, async (window) => {
+          for (const item of body.inventory.items())
+            if (!TOOLS.test(item.name))
+              await window.deposit(item.type, item.metadata, item.count).catch(() => {})
+          return 0
+        })
+        if (gatherer.lastStock) this.household?.noteStock(gatherer.lastStock)
+      }
+      const kept = goods()
+      this.log.info(
+        `carried ${moved} things from the old storehouse to the new` +
+          (kept ? `; ${kept} still in my pockets (could not put them in)` : '')
+      )
+      return moved - kept
     } catch (err) {
       this.log.warn(`moving the stores failed: ${errMsg(err)}`)
       return 0
