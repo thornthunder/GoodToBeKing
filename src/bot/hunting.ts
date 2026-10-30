@@ -4,6 +4,7 @@ import type { Vec3 } from 'vec3'
 import type { Logger } from '../logger'
 import { errMsg, sleep, withTimeout } from '../util'
 import { foundAt, scout, SCOUT_LEGS } from './scouting'
+import { duskFallen } from './survival'
 
 /**
  * The only animals the court hunts (the King's rule: never a named or tame animal). Kinds that
@@ -53,7 +54,7 @@ export interface HuntResult {
   killed: number
   /** Meat brought home (or carried, without a storehouse). */
   meat: number
-  reason?: 'none_found' | 'cancelled' | 'too_long'
+  reason?: 'none_found' | 'cancelled' | 'too_long' | 'dusk'
 }
 
 /**
@@ -101,9 +102,18 @@ export class Hunter {
         reason = 'too_long'
         break
       }
+      if (duskFallen(this.bot.time?.timeOfDay)) {
+        reason = 'dusk'
+        break
+      }
       let prey = this.prey(passed)
       // None near: walk out to look for game further off (where some was found last, first).
-      while (!prey && legs < SCOUT_LEGS && !this.cancelled) {
+      while (
+        !prey &&
+        legs < SCOUT_LEGS &&
+        !this.cancelled &&
+        !duskFallen(this.bot.time?.timeOfDay)
+      ) {
         await scout(this.bot, this.log, 'game', legs++)
         prey = this.prey(passed)
       }

@@ -4,6 +4,7 @@ import { Vec3 } from 'vec3'
 import type { Logger } from '../logger'
 import { errMsg, sleep, withTimeout } from '../util'
 import { foundAt, scout, SCOUT_LEGS } from './scouting'
+import { duskFallen } from './survival'
 
 /** What a royal can send a courtier to fetch in survival: everything a bare hand can dig. */
 export const MATERIALS = ['dirt', 'wood', 'sand', 'gravel'] as const
@@ -141,7 +142,7 @@ export interface GatherResult {
   /** How many it handed over. */
   delivered: number
   /** Why it stopped short, if it did. */
-  reason?: 'none_found' | 'cancelled' | 'too_long' | 'not_delivered'
+  reason?: 'none_found' | 'cancelled' | 'too_long' | 'not_delivered' | 'dusk'
 }
 
 type GatherBot = MineflayerBot & { pathfinder: Pathfinder }
@@ -153,6 +154,8 @@ type GatherBot = MineflayerBot & { pathfinder: Pathfinder }
 export class Gatherer {
   private readonly bot: GatherBot
   private cancelled = false
+  /** A royal's errand goes on after dusk (the court's own stop then). */
+  allNight = false
 
   constructor(
     bot: MineflayerBot,
@@ -217,6 +220,11 @@ export class Gatherer {
         reason = 'too_long'
         break
       }
+      // Dusk: the court's errands end, and whoever is far is brought home.
+      if (duskFallen(this.bot.time?.timeOfDay) && !this.allNight) {
+        reason = 'dusk'
+        break
+      }
       let target = this.nearest(material, candidates, tried)
       // The land near the start is used up: look again from here, once in a while.
       if (!target && Date.now() - searched > 5_000) {
@@ -225,7 +233,13 @@ export class Gatherer {
         target = this.nearest(material, candidates, tried)
       }
       // No trees in sight: walk out to look further (where some were found last, else round about).
-      while (!target && material === 'wood' && legs < SCOUT_LEGS && !this.cancelled) {
+      while (
+        !target &&
+        material === 'wood' &&
+        legs < SCOUT_LEGS &&
+        !this.cancelled &&
+        !duskFallen(this.bot.time?.timeOfDay)
+      ) {
         await scout(this.bot, this.log, 'trees', legs++)
         candidates = this.search(material)
         searched = Date.now()

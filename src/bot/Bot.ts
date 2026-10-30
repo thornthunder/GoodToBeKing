@@ -65,7 +65,7 @@ import { Forester } from './forestry'
 import { Miner, chooseMine } from './mining'
 import { Gatherer, type Material } from './gathering'
 import { GAME, Hunter, SPOILS } from './hunting'
-import { FOODS, Survival, isNight } from './survival'
+import { FOODS, Survival, duskFallen, isNight, outdoorHours } from './survival'
 import { Movement } from './movement'
 import type { CommandResult, Magic } from '../magic/Magic'
 import type { SpellArgs } from '../magic/spells'
@@ -521,6 +521,21 @@ export class Bot extends EventEmitter {
   }
 
   /** Night in this bot's world (monsters about). */
+  /** Hours for work outdoors (see survival.ts `outdoorHours`). */
+  outdoorTime(): boolean {
+    return outdoorHours(this.body?.time?.timeOfDay)
+  }
+
+  /** Dusk has fallen: whoever is out comes home. */
+  duskFallen(): boolean {
+    return duskFallen(this.body?.time?.timeOfDay)
+  }
+
+  /** Out on an errand of its own accord (the court's, not a royal's post or escort). */
+  onErrand(): boolean {
+    return this.gathering && !this.dutyFollowing && !this.brain.post?.()
+  }
+
   isNight(): boolean {
     return isNight(this.body?.time?.timeOfDay)
   }
@@ -1057,6 +1072,8 @@ export class Bot extends EventEmitter {
     const name = material === 'wood' ? 'logs' : material
     try {
       this.log.info(`fetching ${count} ${material} for ${chest ? 'the storehouse' : requestedBy}`)
+      // A royal's errand goes on after dusk; the court's own end then.
+      gatherer.allNight = Boolean(member)
       const result = await gatherer.fetch(
         material,
         count,

@@ -195,12 +195,19 @@ export class BotManager {
     if (!home) return
     const now = Date.now()
     for (const bot of this.bots) {
-      if (!bot.isFree()) continue
       const p = bot.position()
       if (!p) continue
       const far = Math.hypot(p.x - home.x - 0.5, p.z - home.z - 0.5)
-      // At night in survival everyone comes inside the hall; by day near it will do.
-      const radius = bot.isNight() && !bot.buildsByMagic() ? HOME_RADIUS_NIGHT : HOME_RADIUS
+      // Dusk: whoever is still far out on the court's errands is brought home (travel is free).
+      const busy = !bot.isFree()
+      if (busy) {
+        if (!(bot.onErrand() && bot.duskFallen() && far > DUSK_FAR && !bot.buildsByMagic()))
+          continue
+      }
+      // In survival everyone comes inside the hall outside the hours for outdoor work (the dusk
+      // and the first light are when the monsters are about too); by day near it will do.
+      const indoors = (bot.isNight() || !bot.outdoorTime()) && !bot.buildsByMagic()
+      const radius = indoors ? HOME_RADIUS_NIGHT : HOME_RADIUS
       if (far <= radius && Math.abs(p.y - home.y) < 2) {
         this.homeTrips.delete(bot.cfg.name)
         continue
@@ -209,8 +216,8 @@ export class BotManager {
       if (now - trip.at < HOME_RETRY_MS) continue
       const merlin = this.bots.find((b) => b.magicAwake())
       // By night nobody walks through the dark: Merlin brings them in.
-      const dark = bot.isNight() && !bot.buildsByMagic()
-      if ((far > HOME_WALK || trip.walks >= 2 || dark) && merlin) {
+      const dark = (bot.isNight() || bot.duskFallen()) && !bot.buildsByMagic()
+      if ((far > HOME_WALK || trip.walks >= 2 || dark || busy) && merlin) {
         this.homeTrips.set(bot.cfg.name, { at: now, walks: 0 })
         this.log.info(`${merlin.cfg.name} sends ${bot.cfg.name} home by portal`)
         void merlin.castCommand('portal', {
@@ -218,7 +225,7 @@ export class BotManager {
           requestedBy: merlin.cfg.name,
           args: { place: 'home' },
         })
-      } else if (far <= HOME_WALK) {
+      } else if (far <= HOME_WALK && !busy) {
         this.homeTrips.set(bot.cfg.name, { at: now, walks: trip.walks + 1 })
         bot.goTo(home, 'home')
       }
@@ -380,7 +387,8 @@ export class BotManager {
       freeHand: staff.find((b) => b.isFree() && !b.buildsByMagic())?.cfg.name,
       storehouse: storehouseThere,
       storehouseLost: Boolean(this.household.storehouse) && !storehouseThere,
-      night: castellan.isNight(),
+      // No work outdoors begins after mid-afternoon or before the night's monsters burn off.
+      night: !castellan.outdoorTime(),
       resting: [...this.resting].filter(([, until]) => until > Date.now()).map(([kind]) => kind),
       underway: [...this.underway],
     }
@@ -1396,6 +1404,8 @@ const HOME_RADIUS = 10
 const HOME_RADIUS_NIGHT = 2.5
 /** Farther than this, Merlin portals them home rather than letting them walk. */
 const HOME_WALK = 96
+/** At dusk, courtiers further than this out on errands are brought home by Merlin. */
+const DUSK_FAR = 48
 /** Work that came to nothing rests this long before it is tried again. */
 const REST_MS = 10 * 60_000
 /** How often the Castellan takes stock of what the court needs, and asks Merlin for magic. */

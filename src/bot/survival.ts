@@ -309,6 +309,23 @@ export class Survival {
 }
 
 /** Is it night (monsters about)? Bedrock day is 0..24000; night from dusk to dawn. */
+/**
+ * Hours for work outdoors: from when the sun is well up (the night's monsters burned) till well
+ * before dusk, as an errand may take five minutes (6000 ticks) and dusk killed those still out.
+ */
+export function outdoorHours(timeOfDay: number | undefined): boolean {
+  if (timeOfDay === undefined) return true
+  const t = ((timeOfDay % 24000) + 24000) % 24000
+  return t >= 500 && t <= 9_000
+}
+
+/** Dusk has fallen (or it is not yet light): whoever is out comes home. */
+export function duskFallen(timeOfDay: number | undefined): boolean {
+  if (timeOfDay === undefined) return false
+  const t = ((timeOfDay % 24000) + 24000) % 24000
+  return t >= 11_500 || t < 300
+}
+
 export function isNight(timeOfDay: number | undefined): boolean {
   if (timeOfDay === undefined) return false
   const t = ((timeOfDay % 24000) + 24000) % 24000
