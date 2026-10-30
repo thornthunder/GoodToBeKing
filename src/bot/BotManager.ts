@@ -625,10 +625,11 @@ export class BotManager {
         const then = action.then
         const worker = by(action.to)
         if (then && worker)
-          setTimeout(
-            () => this.doing(`hallwork:${then}`, worker.startHallWork(then, castellan.cfg.name)),
-            2_000
-          )
+          setTimeout(() => {
+            if (then === 'farm') this.doing('farm', worker.startFarming())
+            else if (then === 'forest') this.doing('forest', worker.startForestry())
+            else this.doing(`hallwork:${then}`, worker.startHallWork(then, castellan.cfg.name))
+          }, 2_000)
       }
     }
   }

@@ -98,7 +98,15 @@ export type StewardAction =
   /** Work on the hall by a builder (`by`: this one; planned work always names one). */
   | { kind: 'hallwork'; work: HallWork; by?: string }
   /** Merlin conjures `count` of `item` for `to`; then `to` does `then` with it. */
-  | { kind: 'magic'; item: string; count: number; to: string; then?: HallWork; why: string }
+  | {
+      kind: 'magic'
+      item: string
+      count: number
+      to: string
+      /** What the one given it does with it straight away (hall work, the field, the grove). */
+      then?: HallWork | 'farm' | 'forest'
+      why: string
+    }
   /** Ask the royal family for Merlin's help instead (they are near). */
   | { kind: 'ask'; what: string }
   /** A free hand fetches this for the storehouse. */
@@ -298,8 +306,14 @@ export function plan(s: CourtState): StewardAction[] {
     wants.push({ item: 'oak_log', count: 4, to: someone, why: 'wood for the court' })
   // No trees left near enough to find, no grove and no saplings: saplings to start one (once
   // the logs have come: a grove takes an hour to grow).
-  if (failed('wood') && !grove?.exists && saplings === 0 && someone && s.storehouse)
-    wants.push({ item: 'birch_sapling', count: 4, to: someone, why: 'saplings for a grove' })
+  if (failed('wood') && !grove?.exists && saplings === 0 && someone && s.storehouse && !s.night)
+    wants.push({
+      item: 'birch_sapling',
+      count: 4,
+      to: someone,
+      then: 'forest',
+      why: 'saplings for a grove',
+    })
   if (!canArm)
     for (const guard of s.guardsUnarmed)
       wants.push({ item: 'iron_sword', count: 1, to: guard, why: `a sword for ${guard}` })
@@ -312,9 +326,16 @@ export function plan(s: CourtState): StewardAction[] {
       then: 'beds',
       why: 'beds for the court',
     })
-  // Seeds, once, to start the field (after that it gives its own).
-  if (!s.farm.exists && s.seeds === 0 && someone && s.storehouse)
-    wants.push({ item: 'wheat_seeds', count: 8, to: someone, why: 'seeds for a wheat field' })
+  // Seeds to start the field (after that it gives its own), or to sow it again when it lies
+  // bare with no seed left and no grass near to break for more.
+  if (s.seeds === 0 && (!s.farm.exists || failed('farm')) && someone && s.storehouse && !s.night)
+    wants.push({
+      item: 'wheat_seeds',
+      count: 8,
+      to: someone,
+      then: 'farm',
+      why: 'seeds for a wheat field',
+    })
   // A furnace by magic only when the court cannot mine the stone for one.
   if (!s.furnace && !s.builderWithFurnace && someBuilder && s.storehouse && s.mineEnded)
     wants.push({

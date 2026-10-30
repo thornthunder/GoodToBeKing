@@ -160,6 +160,19 @@ describe("the Castellan's account", () => {
     })
   })
 
+  it('has Merlin sow a bare field again when no seed is left', () => {
+    const bare = { ...base, seeds: 0, resting: ['farm'] }
+    expect(plan(bare)).toContainEqual({
+      kind: 'magic',
+      item: 'wheat_seeds',
+      count: 8,
+      to: 'Henry',
+      then: 'farm',
+      why: 'seeds for a wheat field',
+    })
+    expect(plan({ ...base, seeds: 0 }).some((a) => a.kind === 'magic')).toBe(false)
+  })
+
   it('lays out a wheat field and tends it (not a guard); Merlin seeds only to start it', () => {
     expect(kinds({ ...base, farm: { exists: false, work: 0 } })).toEqual(['farm:Henry'])
     const guardsFirst = {
@@ -174,6 +187,7 @@ describe("the Castellan's account", () => {
       item: 'wheat_seeds',
       count: 8,
       to: 'Henry',
+      then: 'farm',
       why: 'seeds for a wheat field',
     })
   })
@@ -272,6 +286,7 @@ describe("the Castellan's account", () => {
       item: 'birch_sapling',
       count: 4,
       to: 'Henry',
+      then: 'forest',
       why: 'saplings for a grove',
     })
     const growing = { ...treeless, grove: { exists: true, fell: 0, plant: 0 } }
