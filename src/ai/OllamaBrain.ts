@@ -554,6 +554,10 @@ export class OllamaBrain implements Brain {
         `- The court's home (chosen by ${this.titleOf(h.home.setBy)}) is at ${h.home.x}, ` +
           `${h.home.y}, ${h.home.z}. Courtiers with nothing to do gather there.`
       )
+      if (h.estateWords)
+        lines.push(
+          `- What stands round it (the court keeps it, lights it and mends it; it never pulls it down): ${h.estateWords}`
+        )
     }
     if (h.storehouse) {
       const seen = h.stock.at
@@ -950,11 +954,21 @@ export class OllamaBrain implements Brain {
       }
     }
     if (home) {
+      // Moving the whole court is the King's to decide (the Princess's own house stays hers).
+      const king = this.court.members.find((m) => m.role.toLowerCase() === 'king')
+      if (this.household?.home && king && member !== king)
+        return {
+          note:
+            `(${who} would make this place the court's home, but where the court lives is the ` +
+            `King's to choose. Say so kindly in one short sentence; the court stays where it is.)`,
+        }
       return {
         action: { type: 'home', requestedBy: event.from },
         note:
-          `(${who} makes this place the court's home: from now on courtiers with nothing to do ` +
-          'gather here. Say so gladly in one short sentence.)',
+          `(${who} makes this place the court's home: the whole court comes here, the field, the ` +
+          'mine and the storehouse begin afresh round it, and the Castellan looks round what ' +
+          'stands here to keep it, light it and mend it rather than build it anew. Say so gladly ' +
+          'in one short sentence.)',
       }
     }
     return {

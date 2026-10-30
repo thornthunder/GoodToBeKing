@@ -57,6 +57,15 @@ import {
   type HandCell,
 } from '../build/hall'
 import type { Household } from '../household'
+import type { EstateBook } from '../build/EstateBook'
+import {
+  estateDoorCells,
+  estateLightCells,
+  estateRepairCells,
+  homeRoom,
+  surveyEstate,
+} from '../build/estate'
+import type { BlockNames } from '../build/hall'
 import { Cook } from './cooking'
 import { craft, makePlanks } from './crafting'
 import { Farmer } from './farming'
@@ -135,6 +144,19 @@ const ARMOUR_SLOT = {
 /** Inventory slots of the armour worn (mineflayer's numbering). */
 const ARMOUR_INDEX = { helmet: 5, chestplate: 6, leggings: 7, boots: 8 } as const
 
+/** What the builders do for the estate round home. */
+export type EstateWork = 'light' | 'doors' | 'repair'
+const ESTATE_WORK_TITLES: Record<EstateWork, string> = {
+  light: 'torches',
+  doors: 'doors',
+  repair: 'repairs',
+}
+/** Torches one builder puts up in one go (the rest the next time). */
+const ESTATE_TORCHES = 16
+/** Kept when emptying pockets into the storehouse. */
+const TOOLS =
+  /_(sword|axe|pickaxe|shovel|hoe|helmet|chestplate|leggings|boots)$|^(fishing_rod|shield)$/
+
 /** Hall work as the builder speaks of it, and the cells it takes. */
 const HALL_WORK_TITLES: Record<HallWork, string> = {
   roof: 'a roof',
@@ -188,6 +210,8 @@ export interface BotOptions {
   magic?: Magic
   /** The court's home and storehouse (survival), shared by the court. */
   household?: Household
+  /** What stands round the court's home, as last seen whole (shared). */
+  estate?: EstateBook
 }
 
 export interface BotState {
@@ -245,6 +269,7 @@ export class Bot extends EventEmitter {
   private surviving = false
   /** The court's home and storehouse (survival). */
   private readonly household?: Household
+  private readonly estate?: EstateBook
   /** A royal asked for something else: no work orders until then. */
   private worksPausedUntil = 0
   private readonly worksSummary?: () => string | undefined
@@ -278,6 +303,7 @@ export class Bot extends EventEmitter {
     this.magic = opts.magic
     this.worksSummary = opts.works
     this.household = opts.household
+    this.estate = opts.estate
   }
 
   /** May this bot speak for the court right now (hails, notices)? Always, without a floor. */
@@ -540,6 +566,8 @@ export class Bot extends EventEmitter {
 
   /** Asks Merlin to portal this courtier home (set by the court); whether he could. */
   portalHome?: () => Promise<boolean>
+  /** Asks Merlin to portal this courtier to a named place (set by the court). */
+  portalTo?: (place: string) => Promise<boolean>
 
   /** A royal's errand is under way (it goes on after dusk, wherever it leads). */
   private royalErrand = false
@@ -1183,7 +1211,14 @@ export class Bot extends EventEmitter {
     // Whole: remember its shape. Damaged: the shape last seen whole says where it was.
     if (typeof surveyed !== 'string') this.household?.setHall(surveyed)
     const saved = this.household?.hall
-    const hall: Hall | string = typeof surveyed === 'string' && saved ? saved : surveyed
+    // In a castle: the room the home is in (its repairs are the estate's).
+    const room =
+      typeof surveyed === 'string' && !saved
+        ? homeRoom(surveyEstate(this.fastNames() ?? names, home, { radius: 24 }), names)
+        : undefined
+    const hall: Hall | string =
+      typeof surveyed === 'string' ? (saved ?? room ?? surveyed) : surveyed
+    if (room && (work === 'repair' || work === 'roof' || work === 'reinforce')) return false
     if (typeof surveyed === 'string' && saved)
       this.log.info(`the hall is damaged (${surveyed}); working from its shape as last seen`)
     if (typeof hall === 'string') {
@@ -1248,6 +1283,138 @@ export class Bot extends EventEmitter {
   }
 
   /**
+   * Work on the court's estate by hand (the buildings round home: the King's castle): torches
+   * where it is dark, doors in the ways in, and what was blown away put back. Surveyed afresh.
+   */
+  async startEstateWork(work: EstateWork, requestedBy: string): Promise<boolean> {
+    const builder = this.handbuilder
+    const home = this.household?.home
+    const body = this.body
+    if (!builder || builder.busy || this.onHallWork || !home || !body) return false
+    this.onHallWork = true
+    try {
+      this.pauseWorks()
+      this.dutyFollowing = false
+      this.movement?.stop()
+      const p = this.position()
+      if (p && Math.hypot(p.x - home.x, p.z - home.z) > 24) {
+        this.movement?.goTo(home, 'home')
+        for (let i = 0; i < 60 && this.movement?.current()?.kind === 'going'; i++)
+          await sleep(1_000)
+      }
+      const names = this.fastNames()
+      if (!names) return false
+      const estate = surveyEstate(names, home)
+      const stock = this.household?.stock.items ?? {}
+      const made = this.estate?.of(home)?.made ?? {}
+      const cells =
+        work === 'light'
+          ? estateLightCells(estate, names, ESTATE_TORCHES)
+          : work === 'doors'
+            ? estateDoorCells(estate, names)
+            : // The hall's own walls and roof are the hall's repairs.
+              estateRepairCells(made, names, (b) => (stock[b] ?? 0) > 0).filter(
+                (c) => !this.household?.hallColumn(c.x, c.z)
+              )
+      if (!cells.length) return false
+      const title = ESTATE_WORK_TITLES[work]
+      this.log.info(`${title} for the estate: ${cells.length} blocks`)
+      const result = await builder.build(
+        { title: `${title} for the estate`, cells },
+        this.household?.storehouse,
+        this.isNight()
+      )
+      if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
+      if (result.placed > 0 && this.court?.find(requestedBy))
+        await this.speak(
+          `You have put ${result.placed} in place for ${title} round the court's home${result.missing ? `, ${result.missing} still to do` : ''}. Say so in one short sentence.`,
+          `Done: ${title}, ${result.placed} in place.`
+        )
+      return result.placed > 0
+    } finally {
+      this.onHallWork = false
+    }
+  }
+
+  /**
+   * Carry what is in the storehouse left behind over to the new one: Merlin's portal there
+   * (travel is free) when it is far, everything that fits taken out, and back by portal.
+   */
+  async startMovingStores(): Promise<number> {
+    const gatherer = this.gatherer
+    const from = this.household?.formerStore
+    const to = this.household?.storehouse
+    const body = this.body
+    if (!gatherer || !from || !to || !body || this.gathering || !byHand(this.gameMode())) return 0
+    this.gathering = true
+    this.pauseWorks()
+    this.dutyFollowing = false
+    this.movement?.stop()
+    try {
+      const far = (p: { x: number; z: number }) => {
+        const me = this.position()
+        return !me || Math.hypot(me.x - p.x, me.z - p.z) > 48
+      }
+      if (far(from)) {
+        if (!(await this.portalTo?.('the old storehouse'))) return 0
+        await sleep(2_000)
+      }
+      const before = this.carries(/./)
+      // Everything that fits: the old chest is emptied over a trip or two.
+      gatherer.lastStock = undefined
+      await gatherer.withChest(from, async (window) => {
+        for (const item of window.containerItems()) {
+          if (body.inventory.emptySlotCount() < 2) break
+          await window.withdraw(item.type, item.metadata, item.count).catch(() => {})
+        }
+        return 0
+      })
+      const seen = gatherer.lastStock
+      if (seen === undefined) {
+        // Not opened: gone (blown up, taken away) if something else stands there now.
+        const there = this.nameAt(from.x, from.y, from.z)
+        if (there !== undefined && !/chest|barrel/.test(there))
+          this.household?.noteFormerStock(undefined)
+        return 0
+      }
+      this.household?.noteFormerStock(seen)
+      const moved = this.carries(/./) - before
+      if (moved <= 0) return 0
+      if (far(to)) {
+        await this.portalHome?.()
+        await sleep(2_000)
+      }
+      await gatherer.withChest(to, async (window) => {
+        for (const item of body.inventory.items())
+          if (!TOOLS.test(item.name))
+            await window.deposit(item.type, item.metadata, item.count).catch(() => {})
+        return 0
+      })
+      if (gatherer.lastStock) this.household?.noteStock(gatherer.lastStock)
+      this.log.info(`carried ${moved} things from the old storehouse to the new`)
+      return moved
+    } catch (err) {
+      this.log.warn(`moving the stores failed: ${errMsg(err)}`)
+      return 0
+    } finally {
+      this.gathering = false
+    }
+  }
+
+  /**
+   * The court moves house: whatever this courtier does for the court round the old home is put
+   * down (a royal's errand goes on), so everyone comes to the new one.
+   */
+  dropCourtWork(): void {
+    if (this.royalErrand || this.brain.post?.()) return
+    this.gatherer?.cancel()
+    this.handbuilder?.cancel()
+    this.hunter?.cancel()
+    this.fisher?.cancel()
+    this.miner?.cancel()
+  }
+
+  /**
    * Hunt for the court's food (the King's rule: never a named or tame animal; see hunting.ts) and
    * bring the spoils to the storehouse. Returns how much meat it brought.
    */
@@ -1289,9 +1456,8 @@ export class Bot extends EventEmitter {
     let farm = this.household?.farm
     if (!farm) {
       const names = (x: number, y: number, z: number) => body.blockAt(new WorldVec(x, y, z))?.name
-      const hall = this.household?.hall
       farm = chooseFarm(names, home, {
-        keepClear: hall ? [...hall.ring, ...hall.inside] : [[home.x, home.z]],
+        keepClear: this.household?.keepClear() ?? [[home.x, home.z]],
       })
       if (!farm) {
         this.log.info('found no flat, untouched soil near home for a field')
@@ -1330,14 +1496,7 @@ export class Bot extends EventEmitter {
     if (!farm.cells.every(([x, z]) => names(x, farm.y + 1, z) === 'wheat')) return
     const seeds = (this.household?.stock.items.wheat_seeds ?? 0) + this.carries(/^wheat_seeds$/)
     if (seeds < 16) return
-    const hall = this.household?.hall
-    const grove = this.household?.grove
-    const bigger = extendFarm(names, farm, {
-      keepClear: [
-        ...(hall ? [...hall.ring, ...hall.inside] : []),
-        ...(grove?.spots.map(([x, , z]) => [x, z] as [number, number]) ?? []),
-      ],
-    })
+    const bigger = extendFarm(names, farm, { keepClear: this.household?.keepClear(false) ?? [] })
     if (!bigger) return
     this.household?.setFarm(bigger)
     this.log.info(`the field grows to ${bigger.cells.length} squares`)
@@ -1392,13 +1551,8 @@ export class Bot extends EventEmitter {
     let grove = this.household?.grove
     if (!grove) {
       const names = (x: number, y: number, z: number) => body.blockAt(new WorldVec(x, y, z))?.name
-      const hall = this.household?.hall
-      const farm = this.household?.farm
       grove = chooseGrove(names, home, {
-        keepClear: [
-          ...(hall ? [...hall.ring, ...hall.inside] : [[home.x, home.z] as [number, number]]),
-          ...(farm?.cells ?? []),
-        ],
+        keepClear: this.household?.keepClear() ?? [[home.x, home.z]],
       })
       if (!grove) {
         this.log.info('found no open ground near home for a grove')
@@ -1441,10 +1595,8 @@ export class Bot extends EventEmitter {
     if (old) mine = undefined
     if (!mine) {
       const names = (x: number, y: number, z: number) => body.blockAt(new WorldVec(x, y, z))?.name
-      const hall = this.household?.hall
       const clear: Array<[number, number]> = [
-        ...(hall ? [...hall.ring, ...hall.inside] : [[home.x, home.z] as [number, number]]),
-        ...(this.household?.farm?.cells ?? []),
+        ...(this.household?.keepClear() ?? [[home.x, home.z]]),
         ...(old ? [[old.x, old.z] as [number, number]] : []),
       ]
       mine = chooseMine(names, home, clear)
@@ -1719,6 +1871,33 @@ export class Bot extends EventEmitter {
   /** The name of the block at a spot as this bot sees it; undefined where nothing is loaded. */
   nameAt(x: number, y: number, z: number): string | undefined {
     return this.body?.blockAt(new WorldVec(x, y, z))?.name
+  }
+
+  /**
+   * Block names read straight from the loaded chunks, for surveys of thousands of blocks:
+   * blockAt builds a block object for each, many times slower. Undefined where not loaded.
+   */
+  fastNames(): BlockNames | undefined {
+    const body = this.body
+    if (!body) return undefined
+    type Column = { getBlockStateId(p: WorldVec): number }
+    const world = body.world as unknown as { getColumnAt(p: WorldVec): Column | null }
+    const byState = (
+      body.registry as unknown as { blocksByStateId: Record<number, { name: string } | undefined> }
+    ).blocksByStateId
+    const columns = new Map<string, Column | null>()
+    const at = new WorldVec(0, 0, 0)
+    return (x, y, z) => {
+      const k = `${x >> 4},${z >> 4}`
+      let column = columns.get(k)
+      if (column === undefined) {
+        column = world.getColumnAt(new WorldVec(x, 0, z))
+        columns.set(k, column)
+      }
+      if (!column) return undefined
+      at.set(x & 15, y, z & 15)
+      return byState[column.getBlockStateId(at)]?.name
+    }
   }
 
   /** Whether the server lets this bot's magic work right now. */

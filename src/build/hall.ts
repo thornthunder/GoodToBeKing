@@ -331,10 +331,11 @@ export function tableCells(hall: Hall, names: BlockNames): HandCell[] {
   }))
 }
 
-/** A chest for the storehouse, placed like the furnace; none if the hall has one. */
+/**
+ * A chest for the storehouse, placed like the furnace. Always a new one: a chest already in
+ * the room may be a royal's own (the King's castle), and the court keeps its stores apart.
+ */
 export function chestCells(hall: Hall, names: BlockNames): HandCell[] {
-  if (hall.inside.some(([x, z]) => /^(chest|barrel)$/.test(names(x, hall.floorY, z) ?? '')))
-    return []
   return againstWall(hall, names).map(([x, z]) => ({ x, y: hall.floorY, z, block: 'chest' }))
 }
 

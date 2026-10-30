@@ -92,6 +92,13 @@ export interface CourtState {
   resting?: string[]
   /** Work someone is doing right now ('hallwork:<work>', 'mine', 'farm'): not given out twice. */
   underway?: string[]
+  /**
+   * The estate round home (the buildings there: the King's castle), in blocks: holes to mend
+   * against how it was last seen whole, ways in without a door, torches wanted in the dark.
+   */
+  estate?: { repair: number; doors: number; light: number }
+  /** A storehouse left behind when the court moved, with things still in it. */
+  formerStore?: boolean
 }
 
 export type StewardAction =
@@ -129,6 +136,10 @@ export type StewardAction =
   | { kind: 'fish'; by: string }
   /** Tend the grove: fell what has grown, plant the bare spots. */
   | { kind: 'forest'; by: string }
+  /** Work on the estate round home: mend it, hang doors, light the dark. */
+  | { kind: 'estate'; work: 'repair' | 'doors' | 'light'; by: string }
+  /** Carry the storehouse left behind over to the new one. */
+  | { kind: 'move'; by: string }
 
 /** Merlin keeps this much of the hour's magic for the royal family. */
 export const MAGIC_RESERVE = 2
@@ -200,6 +211,25 @@ export function plan(s: CourtState): StewardAction[] {
     const by = job.by ? take(job.by) : builder()
     if (by) out.push({ kind: 'hallwork', work: job.work, by })
   }
+  // The estate round home, by day: what was blown away put back, ways in shut, the dark lit.
+  const coalToHand = s.storeHasCoal || Boolean(s.builderWithCoal)
+  const estate = s.estate
+  if (estate && s.storehouse && !s.night) {
+    const estateJobs: Array<'repair' | 'doors' | 'light'> = []
+    if (estate.repair > 0) estateJobs.push('repair')
+    if (estate.doors > 0) estateJobs.push('doors')
+    if (estate.light > 0 && coalToHand) estateJobs.push('light')
+    for (const work of estateJobs) {
+      if (rests(`estate:${work}`)) continue
+      const by = builder()
+      if (by) out.push({ kind: 'estate', work, by })
+    }
+  }
+  // Moved house: what the old storehouse holds is the court's, carried over by day.
+  if (s.formerStore && s.storehouse && !s.night && !rests('move')) {
+    const by = fitOne([], s.guards ?? [])
+    if (by) out.push({ kind: 'move', by })
+  }
 
   // The grove: wood from home, safe by day, felled and planted again; before trees far off.
   const saplings = s.saplings ?? 0
@@ -218,8 +248,9 @@ export function plan(s: CourtState): StewardAction[] {
     if (by) out.push({ kind: 'errand', material: 'wood', count: 16, by })
   }
   // Light without coal: charcoal from the court's own logs, in the furnace (indoor work).
-  const coal = s.storeHasCoal || Boolean(s.builderWithCoal)
-  if (s.hall.light > 0 && !coal && s.furnace && s.woodInStore >= 2 && s.storehouse) {
+  const coal = coalToHand
+  const dark = s.hall.light > 0 || (s.estate?.light ?? 0) > 0
+  if (dark && !coal && s.furnace && s.woodInStore >= 2 && s.storehouse) {
     const by = anyone()
     if (by) out.push({ kind: 'charcoal', by })
   }

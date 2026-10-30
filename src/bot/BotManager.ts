@@ -23,7 +23,7 @@ import { compileDesign } from '../build/compile'
 import { validateDesign, type CastleDesign } from '../build/design'
 import { Works, type Worker, type WorksEvent } from '../build/Works'
 import { findCastleSites } from '../build/sites'
-import { Overlord, overlordClient } from '../ai/Overlord'
+import { NEEDED, Overlord, coveredNeeds, overlordClient } from '../ai/Overlord'
 import type { Rect } from '../build/design'
 import type { AppConfig } from '../config'
 import { CourtRoster } from '../court'
@@ -32,6 +32,19 @@ import { errMsg, sleep } from '../util'
 import { Bot } from './Bot'
 import { MATERIALS, type Material } from './gathering'
 import { Household } from '../household'
+import { EstateBook } from '../build/EstateBook'
+import {
+  darkSpots,
+  estateDoorCells,
+  estateLightCells,
+  estateRepairCells,
+  estateWords,
+  homeRoom,
+  surveyEstate,
+  type Estate,
+} from '../build/estate'
+import type { Hall } from '../build/hall'
+import type { Zone } from '../build/site'
 import {
   doorCells,
   lightCells,
@@ -54,6 +67,13 @@ const STATE_DIR = '.state'
 
 /** A palace a royal orders goes up within this many blocks of the spot they chose. */
 const ORDERED_RADIUS = 48
+/** A new home further than this from the old one: the court moves house. */
+const MOVE_FROM = 32
+/** The estate round home is surveyed this often (and soon after a royal makes a home). */
+const ESTATE_MS = 10 * 60_000
+/** A block gone this close to where a royal was lately is taken for the royals' doing. */
+const ROYAL_NEAR = 12
+const ROYAL_TRAIL_MS = 2 * ESTATE_MS
 
 /** A new palace or castle a royal ordered, waiting for its plans. */
 interface OrderedWorks {
@@ -154,6 +174,7 @@ export class BotManager {
         works: () => this.worksLine(),
         magic,
         household: this.household,
+        estate: this.estate,
       })
       bot.on('chat', (event: { from: string }) => {
         if (court.find(event.from)) this.lastRoyalLine = Date.now()
@@ -166,10 +187,7 @@ export class BotManager {
         (job: { work: HallWork; requestedBy: string }) => void this.sendToHall(bot, job)
       )
       bot.on('home', (h: { requestedBy: string; at?: Point }) => {
-        if (!h.at) return
-        const home = this.household.setHome(h.at, h.requestedBy)
-        this.placesCache = undefined
-        this.log.info(`${h.requestedBy} made ${home.x},${home.y},${home.z} the court's home`)
+        if (h.at) this.makeHome(h.at, h.requestedBy)
       })
       bot.on('storehouse', (s: { requestedBy: string; at: Point }) => {
         if (this.household.storehouse && samePoint(this.household.storehouse, s.at)) return
@@ -191,11 +209,188 @@ export class BotManager {
         })
         return true
       }
+      // To a named place (the storehouse left behind), by Merlin's portal.
+      bot.portalTo = async (place: string) => {
+        const merlin = this.bots.find((b) => b.magicAwake())
+        if (!merlin || bot.buildsByMagic()) return false
+        this.placesCache = undefined
+        this.log.info(`${merlin.cfg.name} sends ${bot.cfg.name} to ${place} by portal`)
+        await merlin.castCommand('portal', {
+          target: bot.cfg.name,
+          requestedBy: merlin.cfg.name,
+          args: { place },
+        })
+        return true
+      }
       this.bots.push(bot)
     }
     // Carry on with whatever the court was last building (the overlord's design, once there is one).
     const current = this.courtWorks().current ?? cfg.worksDesign
     if (current) this.startWorks(current)
+  }
+
+  /**
+   * A royal makes a place the court's home. Far from the old one the court moves house: the
+   * field, the mine, the grove and the storehouse start afresh round it (what the old storehouse
+   * holds is carried over), everyone puts down the court's work round the old home and comes,
+   * and the Castellan surveys what stands there, to keep and look after rather than build anew.
+   */
+  private makeHome(at: Point, by: string): void {
+    const old = this.household.home
+    const moving = old !== undefined && Math.hypot(at.x - old.x, at.z - old.z) > MOVE_FROM
+    const home = moving ? this.household.moveHome(at, by) : this.household.setHome(at, by)
+    this.placesCache = undefined
+    this.homeTrips.clear()
+    this.estateRoom = undefined
+    this.estateWork = undefined
+    this.newHome = { by, at: Date.now() }
+    if (moving) {
+      // The old home's work rests and underway say nothing about the new one.
+      this.resting.clear()
+      this.underway.clear()
+      for (const b of this.bots) b.dropCourtWork()
+    }
+    this.log.info(
+      `${by} made ${home.x},${home.y},${home.z} the court's home${moving ? ': the court moves house' : ''}`
+    )
+  }
+
+  /** The Castellan: no builder himself, with staff who report to him. */
+  private castellan(): Bot | undefined {
+    return this.bots.find(
+      (b) => !b.cfg.canBuild && this.bots.some((w) => w.cfg.reportsTo === b.cfg.name)
+    )
+  }
+
+  /** What stands round the court's home, as last seen whole. */
+  private readonly estate = new EstateBook(path.resolve(STATE_DIR, 'estate.json'))
+  /** Where the royals were lately: a block gone near them was theirs to take away. */
+  private royalTrail: Array<{ x: number; z: number; at: number }> = []
+  private lastEstate = 0
+  private surveying = false
+  /** Surveyed since this start: changes made while the court was away are the royals' too. */
+  private estateSeen = false
+  /** A royal just made a home: it is surveyed as soon as a courtier is there, and reported. */
+  private newHome?: { by: string; at: number }
+  /** The room the home is in, when the home is in a castle (its walls do not close a hall). */
+  private estateRoom?: Hall
+  /** The estate's furniture round home, as last surveyed. */
+  private estateFurniture: Estate['furniture'] = {}
+  /** What the estate wants, in blocks (see steward.ts). */
+  private estateWork?: { repair: number; doors: number; light: number }
+
+  private noteRoyals(): void {
+    const now = Date.now()
+    for (const m of this.court.members) {
+      const p = this.bots.map((b) => b.playerPosition(m.player)).find(Boolean)
+      if (p) this.royalTrail.push({ x: p.x, z: p.z, at: now })
+    }
+    this.royalTrail = this.royalTrail.filter((p) => now - p.at < ROYAL_TRAIL_MS)
+  }
+
+  private royalWasNear(x: number, z: number): boolean {
+    return this.royalTrail.some((p) => Math.hypot(p.x - x, p.z - z) < ROYAL_NEAR)
+  }
+
+  /**
+   * The court's estate: surveyed soon after a royal made the home (and the Castellan says what
+   * he found), then every ESTATE_MS, so damage can be told from what the royals changed.
+   */
+  private async upkeepEstate(): Promise<void> {
+    const home = this.household.home
+    if (!home || this.surveying) return
+    const report = this.newHome
+    const due = report ? Date.now() - report.at > 8_000 : Date.now() - this.lastEstate > ESTATE_MS
+    if (!due) return
+    // Someone at home, where the chunks round it are loaded (sendHome brings them).
+    const eyes = this.bots.find((b) => {
+      const p = b.position()
+      return p && Math.hypot(p.x - home.x, p.z - home.z) < 16 && Math.abs(p.y - home.y) < 8
+    })
+    const names = eyes?.fastNames()
+    if (!names) return
+    this.surveying = true
+    try {
+      this.lastEstate = Date.now()
+      this.newHome = undefined
+      const estate = surveyEstate(names, home)
+      const dark = darkSpots(estate, names).length
+      const words = estateWords(estate, dark)
+      this.household.setEstate(estate.buildings, words)
+      if (report || !this.estate.of(home))
+        this.estate.found(estate, words, report?.by ?? home.setBy)
+      else
+        this.estate.update(
+          estate,
+          words,
+          // The first look after a start: whatever changed meanwhile is taken as it is.
+          (x, z) => !this.estateSeen || this.royalWasNear(x, z),
+          (x, y, z) => names(x, y, z) !== undefined
+        )
+      this.estateSeen = true
+      this.estateRoom = homeRoom(estate, names)
+      this.estateFurniture = estate.furniture
+      const stock = this.household.stock.items
+      this.estateWork = {
+        repair: estateRepairCells(
+          this.estate.of(home)?.made ?? {},
+          names,
+          (b) => (stock[b] ?? 0) > 0
+        ).filter((c) => !this.household.hallColumn(c.x, c.z)).length,
+        doors: estateDoorCells(estate, names).length,
+        light: estateLightCells(estate, names, 16).length,
+      }
+      this.log.info(`estate: ${words} Wants: ${JSON.stringify(this.estateWork)}`)
+      if (report) await this.reportEstate(estate, words, dark, report.by)
+    } catch (err) {
+      this.log.warn(`surveying the estate failed: ${errMsg(err)}`)
+    } finally {
+      this.surveying = false
+    }
+  }
+
+  /** The Castellan tells the royal who made the home what stands there, and what the court will do. */
+  private async reportEstate(
+    estate: Estate,
+    words: string,
+    dark: number,
+    by: string
+  ): Promise<void> {
+    const speaker = this.castellan() ?? this.foreman()
+    if (!speaker) return
+    const member = this.court.find(by)
+    const who = member ? `the ${member.title}` : by
+    if (!estate.buildings.length) {
+      await speaker.speak(
+        `You have looked round the court's new home, which ${who} chose: nothing anyone built ` +
+          'stands there yet. Tell them gladly in one short sentence that the court settles here ' +
+          'and makes the place its own.',
+        'We settle here gladly and make the place our own!'
+      )
+      return
+    }
+    const plans = [
+      estate.doorless.length && `hang doors in the ways in that have none`,
+      dark && 'light the dark corners with torches so no monster spawns there',
+      'mend any damage to it',
+      this.household.formerStore && 'carry the old storehouse over',
+    ].filter(Boolean)
+    await speaker.speak(
+      `You have just walked round the court's new home, which ${who} chose. What stands there: ` +
+        `${words} Tell ${who} in two or three short sentences what you found, and that the court ` +
+        'keeps it as it stands and looks after it, pulling nothing down and building nothing anew ' +
+        `that is there already: it will ${plans.join(', ')}.`,
+      `I have looked round our new home. We shall keep it as it stands, light it and mend it.`
+    )
+  }
+
+  /** Where the court builds of its own accord: round the home a royal chose, else its zone. */
+  private buildZone(): Zone | undefined {
+    const zone = this.bots.find((b) => b.cfg.buildZone)?.cfg.buildZone
+    const home = this.household.home
+    if (home && this.court.find(home.setBy))
+      return { center: { x: home.x, y: home.y, z: home.z }, radius: zone?.radius ?? 100 }
+    return zone
   }
 
   /**
@@ -279,9 +474,7 @@ export class BotManager {
   private async keepHouse(): Promise<void> {
     const home = this.household.home
     if (!home || Date.now() - this.lastHousekeeping < HOUSEKEEPING_MS) return
-    const castellan = this.bots.find(
-      (b) => !b.cfg.canBuild && this.bots.some((w) => w.cfg.reportsTo === b.cfg.name)
-    )
+    const castellan = this.castellan()
     const eyes = this.bots.find((b) => {
       const p = b.position()
       return p && !b.buildsByMagic() && Math.hypot(p.x - home.x, p.z - home.z) < 32
@@ -292,8 +485,16 @@ export class BotManager {
     const surveyed = surveyHall(names, home, this.household.hall)
     // Whole: remember it, so damage later (endermen, creepers) can be measured against it.
     if (typeof surveyed !== 'string') this.household.setHall(surveyed)
-    const hall = typeof surveyed === 'string' ? this.household.hall : surveyed
+    // In a castle (doorways three high, rooms opening into rooms): the room the home is in. Its
+    // walls, roof, doors and light are the estate's work; its furniture the hall's.
+    const room = typeof surveyed === 'string' && !this.household.hall ? this.estateRoom : undefined
+    const hall = typeof surveyed === 'string' ? (this.household.hall ?? room) : surveyed
     if (!hall) return void this.log.info(`housekeeping: cannot see the hall (${surveyed})`)
+    /** Furniture of the estate this near home (the King's own furnace, a crafting table). */
+    const nearHome = (kind: string, reach: number) =>
+      (this.estateFurniture[kind] ?? []).some(
+        ([x, , z]) => Math.hypot(x - home.x, z - home.z) <= reach
+      )
     const merlin = this.bots.find((b) => b.cfg.magic)
     const staff = this.bots.filter(
       (b) => b.cfg.reportsTo?.toLowerCase() === castellan.cfg.name.toLowerCase() && !b.cfg.magic
@@ -342,21 +543,33 @@ export class BotManager {
       guards: staff.filter((b) => b.isGuard()).map((b) => b.cfg.name),
       builderWithBeds: carrying(/^bed$/),
       builderWithCoal: carrying(/^(coal|charcoal)$/),
-      hall: {
-        roof: roofCells(hall, names).length,
-        door: doorCells(hall, names).length,
-        light: lightCells(hall, names).length,
-        repair: this.household.hall ? repairCells(this.household.hall, names).length : 0,
-        earth: reinforceCells(hall, names).length,
-        table: tableCells(hall, names).length === 0,
-      },
+      hall: room
+        ? {
+            roof: 0,
+            door: 0,
+            light: 0,
+            repair: 0,
+            earth: 0,
+            table: tableCells(hall, names).length === 0 || nearHome('crafting_table', 24),
+          }
+        : {
+            roof: roofCells(hall, names).length,
+            door: doorCells(hall, names).length,
+            light: lightCells(hall, names).length,
+            repair: this.household.hall ? repairCells(this.household.hall, names).length : 0,
+            earth: reinforceCells(hall, names).length,
+            table: tableCells(hall, names).length === 0,
+          },
       storeHasCoal: sum(/^(coal|charcoal)$/) > 0,
       withoutFood: this.bots
         .filter((b) => b.position() && b.carries(FOOD_ITEM) === 0)
         .map((b) => b.cfg.name),
       foodInStore: sum(FOOD_ITEM) - sum(RAW),
       rawInStore: sum(RAW),
-      furnace: hall.inside.some(([x, z]) => /furnace$/.test(names(x, hall.floorY, z) ?? '')),
+      // (The cook's furnace is any within 16 blocks of home: the estate's count.)
+      furnace:
+        hall.inside.some(([x, z]) => /furnace$/.test(names(x, hall.floorY, z) ?? '')) ||
+        nearHome('furnace', 16),
       builderWithFurnace: carrying(/^furnace$/),
       farm: {
         exists: Boolean(this.household.farm),
@@ -404,7 +617,10 @@ export class BotManager {
       woodInStore: sum(/_log$/) + Math.floor(sum(/_planks$/) / 4),
       freeHand: staff.find((b) => b.isFree() && !b.buildsByMagic())?.cfg.name,
       storehouse: storehouseThere,
-      storehouseLost: Boolean(this.household.storehouse) && !storehouseThere,
+      // Blown up, or left behind when the court moved: the court makes itself a new chest.
+      storehouseLost: !storehouseThere,
+      formerStore: Boolean(this.household.formerStore),
+      estate: this.estateWork,
       // No work outdoors begins after mid-afternoon or before the night's monsters burn off.
       night: !castellan.outdoorTime(),
       resting: [...this.resting].filter(([, until]) => until > Date.now()).map(([kind]) => kind),
@@ -562,6 +778,26 @@ export class BotManager {
         this.doing('forest', forester.startForestry())
         return
       }
+      case 'estate': {
+        const builder = by(action.by)
+        if (!builder) return
+        this.log.info(`housekeeping: ${builder.cfg.name} sees to the estate: ${action.work}`)
+        const work = builder.startEstateWork(action.work, castellan.cfg.name)
+        this.doing(`estate:${action.work}`, work)
+        // Surveyed again afterwards: what it still wants.
+        void work.finally(() => (this.lastEstate = 0))
+        return
+      }
+      case 'move': {
+        const mover = by(action.by)
+        if (!mover) return
+        this.log.info(`housekeeping: ${mover.cfg.name} carries the old storehouse over`)
+        this.doing(
+          'move',
+          mover.startMovingStores().then((n) => n > 0)
+        )
+        return
+      }
       case 'cook': {
         const cook = by(action.by)
         if (!cook) return
@@ -715,8 +951,15 @@ export class BotManager {
     )
     const places = placesFromFiles([...new Set(files)])
     // The household's own places, for Merlin's portal: "take us home".
-    const { home, storehouse } = this.household
+    const { home, storehouse, formerStore } = this.household
     if (home) places.push({ name: 'home', x: home.x + 0.5, y: home.y, z: home.z + 0.5 })
+    if (formerStore)
+      places.push({
+        name: 'the old storehouse',
+        x: formerStore.x + 0.5,
+        y: formerStore.y + 1,
+        z: formerStore.z + 0.5,
+      })
     if (storehouse)
       places.push({
         name: 'the storehouse',
@@ -815,9 +1058,22 @@ export class BotManager {
     const foreman = this.foreman()
     try {
       const scout = this.bots.find((b) => b.state.status === 'spawned')
-      const zone = ordered
-        ? { center: ordered.near, radius: ORDERED_RADIUS }
-        : this.bots.find((b) => b.cfg.buildZone)?.cfg.buildZone
+      const zone = ordered ? { center: ordered.near, radius: ORDERED_RADIUS } : this.buildZone()
+      // What stands round home already (the King's castle): kept clear, and the overlord is
+      // told about it, so it adds what is missing instead of building it all again.
+      const home = this.household.home
+      const estate = home ? this.estate.of(home) : undefined
+      const standing = estate?.buildings.filter((b) => b.rooms.length > 0) ?? []
+      const covered = ordered ? [] : coveredNeeds(standing.flatMap((b) => b.rooms))
+      if (!ordered && standing.length && covered.length === NEEDED.length) {
+        this.log.info('the estate round home has all the court needs: no new castle')
+        await foreman?.speak(
+          "Tell everyone that the master builder looked at the court's home and found it has " +
+            'every room the court needs, so nothing new is built: the court keeps it in repair instead.',
+          'Our home has all we need: we keep it in good repair instead of building anew.'
+        )
+        return
+      }
       if (!scout || !zone)
         return this.log.warn('cannot plan a castle: no bot in the world or no build zone')
       await foreman?.speak(
@@ -840,6 +1096,8 @@ export class BotManager {
         }
       }
       if (this.works) avoid.push(this.works.plan.area)
+      for (const b of estate?.buildings ?? [])
+        avoid.push({ x: b.x, z: b.z, width: b.width, depth: b.depth })
       // What every bot in the world can see, remembered column by column.
       const known = new Map<string, { y: number; name: string }>()
       const look = () => {
@@ -900,6 +1158,7 @@ export class BotManager {
           .map((b) => ({ name: b.cfg.name, role: b.cfg.role })),
         example,
         takenNames: [example?.name, this.works?.plan.title].filter(Boolean) as string[],
+        ...(standing.length && estate ? { standing: { words: estate.words, covered } } : {}),
         ...(ordered
           ? {
               request: `${capital(ordered.by)} orders a new ${ordered.what}, different from the castles already built.`,
@@ -980,7 +1239,8 @@ export class BotManager {
       this.works?.tick(this.workers())
       // Whoever is still free afterwards goes home.
       this.sendHome()
-      void this.keepHouse()
+      this.noteRoyals()
+      void this.upkeepEstate().then(() => this.keepHouse())
     }, 5_000)
   }
 
@@ -1224,12 +1484,14 @@ export class BotManager {
     const [name, verb] = words
     if (name?.toLowerCase() === 'works') return this.worksCommand(words.slice(1))
     if (name?.toLowerCase() === 'household') {
-      // household home|storehouse <x> <y> <z>
+      // household home|storehouse <x> <y> <z> [for <player>]: a home as if they declared it
       const [x, y, z] = words.slice(2, 5).map(Number)
       if (!['home', 'storehouse'].includes(verb) || [x, y, z].some((n) => !Number.isFinite(n)))
-        return this.log.warn('usage: household home|storehouse <x> <y> <z>')
-      if (verb === 'home') this.household.setHome({ x, y, z }, 'the court')
-      else this.household.setStorehouse({ x, y, z }, 'the court')
+        return this.log.warn('usage: household home|storehouse <x> <y> <z> [for <player>]')
+      const forIndex = words.indexOf('for')
+      const by = forIndex > 0 ? words[forIndex + 1] : 'the court'
+      if (verb === 'home') this.makeHome({ x, y, z }, by)
+      else this.household.setStorehouse({ x, y, z }, by)
       this.placesCache = undefined
       return this.log.info(`command: the court's ${verb} is now at ${x},${y},${z}`)
     }

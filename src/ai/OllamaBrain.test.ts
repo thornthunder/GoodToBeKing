@@ -533,6 +533,20 @@ describe('OllamaBrain court behaviour', () => {
       const prompt = withHouse.systemPrompt(survival)
       expect(prompt).toContain("The court's home (chosen by the King) is at 3, 64, 4")
       expect(prompt).toContain('nobody has looked inside yet')
+
+      // With a home, where the court lives is the King's to choose.
+      const princess = { ...at('LittleOne42'), gameMode: 'survival' as const }
+      const hers = await withHouse.onChat(
+        chat('LittleOne42', 'Festaris, this is our new home'),
+        princess
+      )
+      expect(hers?.action).toBeUndefined()
+      const his = await withHouse.onChat(chat('BigDad', 'Festaris, this is our new home'), survival)
+      expect(his?.action).toEqual({ type: 'home', requestedBy: 'BigDad' })
+      household.setEstate([], 'Building 1: a castle of stone bricks.')
+      expect(withHouse.systemPrompt(survival)).toContain(
+        'What stands round it (the court keeps it, lights it and mends it; it never pulls it down): Building 1'
+      )
     })
 
     it('in survival promises no build, palace or undo, and says why', async () => {

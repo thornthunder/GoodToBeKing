@@ -63,9 +63,10 @@ const NUMBERS: Record<string, number> = {
 
 const TO_STORE = /\b(storehouse|stores|store ?room|larder|in(to)? the chest)\b/i
 const HOME = [
-  /\b(make|call|name)\b[^.!?]{0,30}\bour (new )?home\b/i,
-  /\b(this|here)\b[^.!?]{0,30}\b(is|shall be|will be|becomes)\b[^.!?]{0,10}\bour (new )?home\b/i,
+  /\b(make|call|name)\b[^.!?]{0,30}\bour (new )?(home|seat)\b/i,
+  /\b(this|here)\b[^.!?]{0,30}\b(is|shall be|will be|becomes)\b[^.!?]{0,10}\b(our|the court's) (new )?(home|seat)\b/i,
   /\bour (new )?home is here\b/i,
+  /\b(we|the court) (now )?(live|lives|move|moves|settle|settles) (in )?here\b/i,
 ]
 const STOREHOUSE = [
   /\b(this|that|the)\s+(chest|barrel)\b[^.!?]{0,30}\b(storehouse|store|storage|larder|stores)\b/i,

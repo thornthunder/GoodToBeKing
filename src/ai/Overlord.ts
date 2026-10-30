@@ -35,6 +35,11 @@ export interface Brief {
   request?: string
   /** What the sites' directions are measured from (default: the old castle grounds). */
   around?: string
+  /**
+   * What stands round the court's home already (the King's castle), in words, and which of the
+   * court's needs it meets: the new castle adds only what is missing.
+   */
+  standing?: { words: string; covered: string[] }
 }
 
 export interface OverlordResult {
@@ -48,7 +53,7 @@ export interface OverlordResult {
 const MAX_ROUNDS = 10
 
 /** Room types the court needs in every castle, with the reason given back to the overlord. */
-const NEEDED: Array<[string[], string]> = [
+export const NEEDED: Array<[string[], string]> = [
   [['kitchen'], 'a kitchen'],
   [['great_hall', 'dining_hall'], 'a great hall to feast in'],
   [['throne_room'], 'a throne room'],
@@ -63,6 +68,35 @@ const NEEDED: Array<[string[], string]> = [
   [['wizard_study'], "Merlin's study (wizard_study)"],
   [['pantry', 'storeroom'], 'a pantry or storeroom'],
 ]
+
+/**
+ * Which of the court's needs the rooms standing round home meet, by what is in them: a furnace
+ * makes a kitchen, the biggest bare rooms a great hall and a throne room, rooms with beds the
+ * royal bedchambers first, then the staff's. The reasons from NEEDED, in its order.
+ */
+export function coveredNeeds(
+  rooms: Array<{ kind: string; width: number; depth: number; furniture: Record<string, number> }>
+): string[] {
+  const why = (type: string) => NEEDED.find(([types]) => types.includes(type))![1]
+  const covered: string[] = []
+  const count = (kind: string) => rooms.filter((r) => r.kind === kind).length
+  if (count('kitchen')) covered.push(why('kitchen'))
+  const halls = count('hall')
+  if (halls >= 1) covered.push(why('great_hall'))
+  if (halls >= 2) covered.push(why('throne_room'))
+  // Bedchambers in order of rank: the King's, the Princess's, then the staff's.
+  const order = [
+    'royal_bedchamber',
+    'princess_bedchamber',
+    'bedchamber',
+    'apprentices_chamber',
+    'barracks',
+  ]
+  order.slice(0, count('bedchamber')).forEach((t) => covered.push(why(t)))
+  if (count('study')) covered.push(why('wizard_study'))
+  if (count('storeroom')) covered.push(why('pantry'))
+  return NEEDED.map(([, w]) => w).filter((w) => covered.includes(w))
+}
 
 export const DESIGN_GUIDE = `You are the master builder of a royal court on a family Minecraft server. You design castles in a small JSON language; the court's builders then raise every block for you.
 
@@ -117,11 +151,26 @@ function siteLine(s: SiteOption, i: number, around = 'the old castle grounds'): 
 export function briefText(brief: Brief): string {
   const sites = brief.sites.map((s, i) => siteLine(s, i, brief.around)).join('\n')
   const crew = brief.crew.map((c) => `${c.name} (${c.role})`).join(', ')
+  const covered = brief.standing?.covered ?? []
+  const needs = NEEDED.map(([, why]) => why).filter((why) => !covered.includes(why))
+  const standing = brief.standing
+    ? `What stands round the court's home already (built by the royal family, or found; the court keeps it and never pulls it down):\n${brief.standing.words}\n` +
+      (covered.length
+        ? `It already gives the court ${covered.join(', ')}: do not build those again. `
+        : '') +
+      'Your castle stands beside it, on one of the sites below, and adds what it lacks.'
+    : ''
   return [
-    brief.request ?? 'The court asks you for a second castle, different from the first.',
+    brief.request ??
+      (brief.standing
+        ? 'The court asks you for a castle to stand beside its home and give it what it lacks.'
+        : 'The court asks you for a second castle, different from the first.'),
     `The builders: ${crew}.`,
-    'It must have rooms for the royal family (the King and the Princess, who is seven) and for the staff: ' +
-      NEEDED.map(([, why]) => why).join(', ') +
+    standing,
+    (brief.standing
+      ? 'It must have rooms for what the court still lacks: '
+      : 'It must have rooms for the royal family (the King and the Princess, who is seven) and for the staff: ') +
+      needs.join(', ') +
       '. Add whatever else a fine castle has: a chapel, a library, an armoury, stables, towers, gardens.',
     'Choose one of these sites (all are open ground; your area may be smaller than the site but not bigger):',
     sites,
@@ -141,14 +190,18 @@ function stripExample(d: CastleDesign): unknown {
   return { ...rest, area: { width: area.width, depth: area.depth } }
 }
 
-/** Problems beyond the language rules: what the court needs, and doors that open into walls. */
-export function courtProblems(d: CastleDesign): string[] {
+/**
+ * Problems beyond the language rules: what the court needs (less what stands round home
+ * already, `covered`), and doors that open into walls.
+ */
+export function courtProblems(d: CastleDesign, covered: string[] = []): string[] {
   const problems: string[] = []
   const types = new Set(
     d.buildings.flatMap((b) => b.storeys.flatMap((s) => s.rooms.map((r) => r.type)))
   )
   for (const [options, why] of NEEDED)
-    if (!options.some((t) => types.has(t as never))) problems.push(`the castle still needs ${why}`)
+    if (!covered.includes(why) && !options.some((t) => types.has(t as never)))
+      problems.push(`the castle still needs ${why}`)
   if (!d.gates?.length) problems.push('the curtain wall needs a gate so people can come in')
   const solids: Array<{ name: string; rect: Rect }> = [
     ...(d.towers ?? []).map((t) => ({
@@ -374,7 +427,10 @@ export class Overlord {
         continue
       }
       const design = placeOnSite(parsed.design, site)
-      const problems = [...validateDesign(design), ...courtProblems(design)]
+      const problems = [
+        ...validateDesign(design),
+        ...courtProblems(design, brief.standing?.covered),
+      ]
       if (!problems.length) {
         try {
           compileDesign(design)

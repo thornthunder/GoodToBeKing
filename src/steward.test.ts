@@ -362,4 +362,29 @@ describe("the Castellan's account", () => {
     }
     expect(plan(nobody)).toEqual([])
   })
+
+  it('looks after the estate round home by day: mends it, hangs doors, lights it with coal', () => {
+    const estate = { ...base, storeHasCoal: true, estate: { repair: 5, doors: 2, light: 9 } }
+    expect(plan(estate).filter((a) => a.kind === 'estate')).toEqual([
+      { kind: 'estate', work: 'repair', by: 'Henry' },
+      { kind: 'estate', work: 'doors', by: 'George' },
+    ])
+    // Without coal the light waits (and charcoal is made); by night nobody goes round it.
+    const dark = { ...base, estate: { repair: 0, doors: 0, light: 9 } }
+    expect(kinds(dark)).toEqual(['charcoal:Henry'])
+    expect(plan({ ...estate, night: true }).some((a) => a.kind === 'estate')).toBe(false)
+    // Work that came to nothing rests.
+    const resting = { ...estate, resting: ['estate:repair'] }
+    expect(
+      plan(resting)
+        .filter((a) => a.kind === 'estate')
+        .map((a) => a.kind === 'estate' && a.work)
+    ).toEqual(['doors', 'light'])
+  })
+
+  it('carries the storehouse left behind over to the new one, once there is a new one', () => {
+    const moved = { ...base, formerStore: true }
+    expect(plan(moved)).toContainEqual({ kind: 'move', by: 'Henry' })
+    expect(plan({ ...moved, storehouse: false }).some((a) => a.kind === 'move')).toBe(false)
+  })
 })

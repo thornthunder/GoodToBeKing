@@ -43,7 +43,18 @@ interface Saved {
   /** What was in the storehouse when a courtier last opened it: item name -> count. */
   stock?: Record<string, number>
   stockAt?: number
+  /** The storehouse the court left behind when it moved, and what was last seen in it. */
+  formerStore?: Spot & { stock: Record<string, number> }
+  /** The footprints of the buildings round home (see build/estate.ts): kept clear of the court's digging. */
+  estate?: Array<{ x: number; z: number; width: number; depth: number }>
+  /** What stands round home, in words (for the prompts). */
+  estateWords?: string
 }
+
+/** Further than this from the new home, the old storehouse is left behind (and emptied). */
+export const STORE_LEFT_BEHIND = 32
+/** The open ground this far round the estate's buildings is not dug, tilled or planted. */
+const ESTATE_CLEAR = 4
 
 /**
  * The court's household: its home (where courtiers with nothing to do gather) and its storehouse
@@ -73,6 +84,13 @@ export class Household {
   /** The hall as last seen whole, for repairs. */
   get hall(): SavedHall | undefined {
     return this.data.hall
+  }
+
+  /** Is this column part of the hall (its walls or inside), as last seen whole? */
+  hallColumn(x: number, z: number): boolean {
+    const hall = this.hall
+    if (!hall) return false
+    return [...hall.ring, ...hall.inside].some(([hx, hz]) => hx === x && hz === z)
   }
 
   /** Is this spot inside the hall (as last seen whole)? */
@@ -145,7 +163,8 @@ export class Household {
    */
   grounds(): Array<{ x: number; y: number; z: number }> {
     const out: Array<{ x: number; y: number; z: number }> = []
-    if (this.home) out.push(this.home)
+    const home = this.home
+    if (home) out.push(home)
     if (this.storehouse) out.push(this.storehouse)
     const farm = this.farm
     for (const [x, z] of farm?.cells ?? []) out.push({ x, y: farm!.y, z })
@@ -153,6 +172,8 @@ export class Household {
     for (const [x, z] of hall?.ring ?? []) out.push({ x, y: hall!.floorY, z })
     for (const [x, y, z] of this.grove?.spots ?? []) out.push({ x, y, z })
     if (this.mine) out.push(this.mine)
+    // The estate's buildings: nobody digs beside a castle wall either.
+    for (const [x, z] of this.estateColumns(8)) out.push({ x, y: home?.y ?? 64, z })
     return out
   }
 
@@ -172,9 +193,98 @@ export class Household {
     // A new home: the old hall's shape and the beds in it say nothing about it.
     this.data.hall = undefined
     this.data.spawns = undefined
+    this.data.estate = undefined
+    this.data.estateWords = undefined
     this.data.home = { x: Math.floor(p.x), y: Math.floor(p.y), z: Math.floor(p.z), setBy, at: now }
     this.save()
     return this.data.home
+  }
+
+  /**
+   * The court moves house: a new home, and everything it kept round the old one starts afresh
+   * round the new (the field, the mine, the grove, the fishing spot). A storehouse left far
+   * behind is remembered with its stock, to be carried over.
+   */
+  moveHome(p: { x: number; y: number; z: number }, setBy: string, now = Date.now()): Spot {
+    const home = this.setHome(p, setBy, now)
+    this.data.farm = undefined
+    this.data.mine = undefined
+    this.data.grove = undefined
+    this.data.fishing = undefined
+    this.data.noWaterAt = undefined
+    const store = this.data.storehouse
+    if (store && Math.hypot(store.x - home.x, store.z - home.z) > STORE_LEFT_BEHIND) {
+      const left = Object.values(this.data.stock ?? {}).some((n) => n > 0)
+      // An empty one is simply left; one with something in it is emptied into the new one.
+      this.data.formerStore = left ? { ...store, stock: { ...this.data.stock } } : undefined
+      this.data.storehouse = undefined
+      this.data.stock = undefined
+      this.data.stockAt = undefined
+    }
+    this.save()
+    return home
+  }
+
+  /** The storehouse left behind, still to be emptied into the new one. */
+  get formerStore(): (Spot & { stock: Record<string, number> }) | undefined {
+    return this.data.formerStore
+  }
+
+  /** What was left in the old storehouse after a trip (nothing: it is done with). */
+  noteFormerStock(items: Record<string, number> | undefined): void {
+    const store = this.data.formerStore
+    if (!store) return
+    const left = Object.values(items ?? {}).some((n) => n > 0)
+    this.data.formerStore = left && items ? { ...store, stock: items } : undefined
+    this.save()
+  }
+
+  /** The buildings round home, as last surveyed. */
+  get estate(): Array<{ x: number; z: number; width: number; depth: number }> {
+    return this.data.estate ?? []
+  }
+
+  setEstate(
+    areas: Array<{ x: number; z: number; width: number; depth: number }>,
+    words?: string
+  ): void {
+    this.data.estate = areas.map(({ x, z, width, depth }) => ({ x, z, width, depth }))
+    this.data.estateWords = words
+    this.save()
+  }
+
+  /** What stands round home, in words, as last surveyed. */
+  get estateWords(): string | undefined {
+    return this.data.estateWords
+  }
+
+  /** Columns over the estate's buildings and the ground round them, every few blocks. */
+  private estateColumns(step: number): Array<[number, number]> {
+    const out: Array<[number, number]> = []
+    for (const a of this.estate)
+      for (let x = a.x - ESTATE_CLEAR; x <= a.x + a.width + ESTATE_CLEAR; x += step)
+        for (let z = a.z - ESTATE_CLEAR; z <= a.z + a.depth + ESTATE_CLEAR; z += step)
+          out.push([x, z])
+    return out
+  }
+
+  /**
+   * Where the court's own field, grove and mine must not go: the hall (or the home spot), the
+   * field, and every building round home with the ground beside it (the King's castle).
+   */
+  keepClear(withField = true): Array<[number, number]> {
+    const hall = this.hall
+    const home = this.home
+    return [
+      ...(hall
+        ? [...hall.ring, ...hall.inside]
+        : home
+          ? [[home.x, home.z] as [number, number]]
+          : []),
+      ...(withField ? (this.farm?.cells ?? []) : []),
+      ...(this.grove?.spots.map(([x, , z]) => [x, z] as [number, number]) ?? []),
+      ...this.estateColumns(4),
+    ]
   }
 
   setStorehouse(p: { x: number; y: number; z: number }, setBy: string, now = Date.now()): Spot {

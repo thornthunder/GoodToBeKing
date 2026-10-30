@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import type { CastleDesign } from '../build/design'
 import { findCastleSites, type SiteOption } from '../build/sites'
-import { courtProblems, Overlord, placeOnSite } from './Overlord'
+import { briefText, courtProblems, coveredNeeds, NEEDED, Overlord, placeOnSite } from './Overlord'
 import type { ChatMessage, ChatModel } from './OllamaClient'
 
 const great = JSON.parse(
@@ -133,4 +133,36 @@ describe('finding castle sites', () => {
       expect(s.area.z + s.area.depth + 8).toBeLessThanOrEqual(161)
     }
   }, 30_000) // searching the whole zone takes about five seconds
+})
+
+describe('what stands round home already', () => {
+  const room = (kind: string, beds = 0) => ({
+    kind,
+    width: 8,
+    depth: 8,
+    furniture: (beds ? { bed: beds } : {}) as Record<string, number>,
+  })
+
+  it("counts the rooms that meet the court's needs", () => {
+    const covered = coveredNeeds([
+      room('kitchen'),
+      room('hall'),
+      room('bedchamber', 1),
+      room('bedchamber', 1),
+    ])
+    expect(covered).toEqual([NEEDED[0][1], NEEDED[1][1], NEEDED[3][1], NEEDED[4][1]])
+    expect(covered).not.toContain(NEEDED[2][1])
+  })
+
+  it('asks only for what is missing, and tells the overlord what stands', () => {
+    const covered = coveredNeeds([room('kitchen'), room('hall')])
+    const text = briefText({
+      sites: [],
+      crew: [{ name: 'Henry', role: 'apprentice' }],
+      standing: { words: 'Building 1: a keep of stone bricks.', covered },
+    })
+    expect(text).toContain('Building 1: a keep of stone bricks.')
+    expect(text).toContain(`It already gives the court ${NEEDED[0][1]}, ${NEEDED[1][1]}`)
+    expect(text).toContain('It must have rooms for what the court still lacks: a throne room')
+  })
 })
