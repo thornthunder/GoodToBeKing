@@ -876,6 +876,8 @@ export class BotManager {
           setTimeout(() => {
             if (then === 'farm') this.doing('farm', worker.startFarming())
             else if (then === 'forest') this.doing('forest', worker.startForestry())
+            else if (then === 'estate-light')
+              this.doing('estate:light', worker.startEstateWork('light', castellan.cfg.name))
             else this.doing(`hallwork:${then}`, worker.startHallWork(then, castellan.cfg.name))
           }, 2_000)
       }

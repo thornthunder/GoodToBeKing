@@ -511,8 +511,16 @@ export function darkSpots(estate: Estate, names: BlockNames): Array<[number, num
  * Torches until no spot in or round the estate is dark, nearest home first: on a wall at head
  * height indoors (one within three steps), standing on the ground outside. At most `max`.
  */
-export function estateLightCells(estate: Estate, names: BlockNames, max = 24): HandCell[] {
-  const dark = darkSpots(estate, names)
+export function estateLightCells(
+  estate: Estate,
+  names: BlockNames,
+  max = 24,
+  indoorsOnly = false
+): HandCell[] {
+  const inside = new Set(estate.interior.map(([x, y, z]) => key(x, y, z)))
+  const dark = darkSpots(estate, names).filter(
+    ([x, y, z]) => !indoorsOnly || inside.has(key(x, y, z))
+  )
   if (!dark.length) return []
   const { x: hx, z: hz } = estate.home
   dark.sort(([ax, , az], [bx, , bz]) => Math.hypot(ax - hx, az - hz) - Math.hypot(bx - hx, bz - hz))

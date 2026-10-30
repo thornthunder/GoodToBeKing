@@ -1309,7 +1309,8 @@ export class Bot extends EventEmitter {
       const made = this.estate?.of(home)?.made ?? {}
       const cells =
         work === 'light'
-          ? estateLightCells(estate, names, ESTATE_TORCHES)
+          ? // By night only indoors: nobody goes out in the dark.
+            estateLightCells(estate, names, ESTATE_TORCHES, this.isNight())
           : work === 'doors'
             ? estateDoorCells(estate, names)
             : // The hall's own walls and roof are the hall's repairs.

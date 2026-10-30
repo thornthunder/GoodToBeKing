@@ -111,7 +111,7 @@ export type StewardAction =
       count: number
       to: string
       /** What the one given it does with it straight away (hall work, the field, the grove). */
-      then?: HallWork | 'farm' | 'forest'
+      then?: HallWork | 'farm' | 'forest' | 'estate-light'
       why: string
     }
   /** Ask the royal family for Merlin's help instead (they are near). */
@@ -213,15 +213,17 @@ export function plan(s: CourtState): StewardAction[] {
   }
   // The estate round home, by day: what was blown away put back, ways in shut, the dark lit.
   const coalToHand = s.storeHasCoal || Boolean(s.builderWithCoal)
+  // Light first: monsters spawn in a dark room by day too (a creeper in the King's dark house
+  // took four of the court at once). By night only indoors.
   const estate = s.estate
-  if (estate && s.storehouse && !s.night) {
+  if (estate && s.storehouse) {
     const estateJobs: Array<'repair' | 'doors' | 'light'> = []
-    if (estate.repair > 0) estateJobs.push('repair')
-    if (estate.doors > 0) estateJobs.push('doors')
     if (estate.light > 0 && coalToHand) estateJobs.push('light')
+    if (!s.night && estate.repair > 0) estateJobs.push('repair')
+    if (!s.night && estate.doors > 0) estateJobs.push('doors')
     for (const work of estateJobs) {
       if (rests(`estate:${work}`)) continue
-      const by = builder()
+      const by = work === 'light' && s.builderWithCoal ? take(s.builderWithCoal) : builder()
       if (by) out.push({ kind: 'estate', work, by })
     }
   }
@@ -376,9 +378,17 @@ export function plan(s: CourtState): StewardAction[] {
       then: 'furnace',
       why: 'a furnace for the hall',
     })
-  // Coal by magic only when there is no furnace to make charcoal in.
-  if (s.hall.light > 0 && !coal && !s.furnace && someBuilder)
-    wants.push({ item: 'coal', count: 1, to: someBuilder, then: 'light', why: 'coal for torches' })
+  // Coal by magic only when there is no furnace to make charcoal in, or no wood to burn in it
+  // (just moved into a dark house: the old storehouse's logs are still to come).
+  const estateDark = (s.estate?.light ?? 0) > 0
+  if ((s.hall.light > 0 || estateDark) && !coal && (!s.furnace || s.woodInStore < 2) && someBuilder)
+    wants.push({
+      item: 'coal',
+      count: estateDark ? 2 : 1,
+      to: someBuilder,
+      then: s.hall.light > 0 ? 'light' : 'estate-light',
+      why: 'coal for torches',
+    })
   // A fishing rod when no game is to be found and no string to make one of: food for good.
   if (hungry && water === true && !canFish && failed('hunt') && someone && s.storehouse)
     wants.push({ item: 'fishing_rod', count: 1, to: someone, why: 'a fishing rod for the court' })

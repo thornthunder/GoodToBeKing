@@ -363,23 +363,41 @@ describe("the Castellan's account", () => {
     expect(plan(nobody)).toEqual([])
   })
 
-  it('looks after the estate round home by day: mends it, hangs doors, lights it with coal', () => {
+  it('looks after the estate round home: light first, then mends it and hangs doors by day', () => {
     const estate = { ...base, storeHasCoal: true, estate: { repair: 5, doors: 2, light: 9 } }
     expect(plan(estate).filter((a) => a.kind === 'estate')).toEqual([
-      { kind: 'estate', work: 'repair', by: 'Henry' },
-      { kind: 'estate', work: 'doors', by: 'George' },
+      { kind: 'estate', work: 'light', by: 'Henry' },
+      { kind: 'estate', work: 'repair', by: 'George' },
     ])
-    // Without coal the light waits (and charcoal is made); by night nobody goes round it.
+    // Without coal: charcoal from the storehouse's wood in the furnace.
     const dark = { ...base, estate: { repair: 0, doors: 0, light: 9 } }
     expect(kinds(dark)).toEqual(['charcoal:Henry'])
-    expect(plan({ ...estate, night: true }).some((a) => a.kind === 'estate')).toBe(false)
+    // By night only the light goes on (indoors).
+    expect(
+      plan({ ...estate, night: true })
+        .filter((a) => a.kind === 'estate')
+        .map((a) => a.kind === 'estate' && a.work)
+    ).toEqual(['light'])
     // Work that came to nothing rests.
-    const resting = { ...estate, resting: ['estate:repair'] }
+    const resting = { ...estate, resting: ['estate:light'] }
     expect(
       plan(resting)
         .filter((a) => a.kind === 'estate')
         .map((a) => a.kind === 'estate' && a.work)
-    ).toEqual(['doors', 'light'])
+    ).toEqual(['repair', 'doors'])
+  })
+
+  it('has Merlin conjure coal for a dark house with no wood to burn for charcoal', () => {
+    const moved = { ...base, woodInStore: 0, estate: { repair: 0, doors: 0, light: 9 } }
+    expect(plan(moved)).toContainEqual({
+      kind: 'magic',
+      item: 'coal',
+      count: 2,
+      // (Henry goes for wood.)
+      to: 'George',
+      then: 'estate-light',
+      why: 'coal for torches',
+    })
   })
 
   it('carries the storehouse left behind over to the new one, once there is a new one', () => {

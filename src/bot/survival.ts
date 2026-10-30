@@ -193,11 +193,15 @@ export class Survival {
    */
   private async awayFromCreepers(): Promise<boolean> {
     const me = this.bot.entity.position
-    if (this.opts.inside?.(me.floored())) return false
-    const creeper = Object.values(this.bot.entities).find(
-      (e) =>
-        e.name === 'creeper' && e.isValid !== false && e.position.distanceTo(me) <= CREEPER_NEAR
-    )
+    // Inside the hall the walls keep them off, unless one got in (spawned in a dark room) or
+    // stands right by the doorway.
+    const inside = this.opts.inside
+    const indoors = inside?.(me.floored()) ?? false
+    const creeper = Object.values(this.bot.entities).find((e) => {
+      if (e.name !== 'creeper' || e.isValid === false) return false
+      const gap = e.position.distanceTo(me)
+      return indoors ? inside!(e.position.floored()) || gap <= 4 : gap <= CREEPER_NEAR
+    })
     if (!creeper) return false
     this.fleeing = true
     this.log.info(`backing away from a creeper at ${creeper.position.floored()}`)
