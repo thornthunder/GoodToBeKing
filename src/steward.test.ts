@@ -278,6 +278,25 @@ describe("the Castellan's account", () => {
     expect(plan(growing).some((a) => a.kind === 'magic' && a.item === 'birch_sapling')).toBe(false)
   })
 
+  it('fishes by day when food runs short, and has Merlin conjure a rod when no game is found', () => {
+    const short = { ...base, foodInStore: 2, fishing: { rod: true, string: 0 } }
+    expect(kinds(short)).toEqual(['fish:Henry', 'hunt:Bruce'])
+    expect(plan({ ...short, night: true }).some((a) => a.kind === 'fish')).toBe(false)
+    const rodless = {
+      ...base,
+      foodInStore: 2,
+      fishing: { rod: false, string: 0 },
+      resting: ['hunt'],
+    }
+    expect(plan(rodless)).toContainEqual({
+      kind: 'magic',
+      item: 'fishing_rod',
+      count: 1,
+      to: 'Henry',
+      why: 'a fishing rod for the court',
+    })
+  })
+
   it('sends a free hand for wood when the storehouse runs low', () => {
     expect(plan({ ...base, woodInStore: 3 })).toEqual([
       { kind: 'errand', material: 'wood', count: 16, by: 'Henry' },

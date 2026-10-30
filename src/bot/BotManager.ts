@@ -350,7 +350,16 @@ export class BotManager {
       seeds: seedsHad,
       grove: this.groveWork(names),
       woolInStore: sum(/_wool$/),
-      saplings: sum(/_sapling$/) + this.bots.reduce((n, b) => n + b.carries(/_sapling$/), 0),
+      fishing: {
+        rod:
+          sum(/^fishing_rod$/) > 0 ||
+          this.bots.some((b) => b.isFree() && b.carries(/^fishing_rod$/) > 0),
+        string: sum(/^string$/),
+      },
+      // Saplings to hand: the storehouse's, and those a free courtier carries.
+      saplings:
+        sum(/_sapling$/) +
+        this.bots.filter((b) => b.isFree()).reduce((n, b) => n + b.carries(/_sapling$/), 0),
       withSaplings: staff.find((b) => b.isFree() && !b.buildsByMagic() && b.carries(/_sapling$/))
         ?.cfg.name,
       // Guards first: they carry swords. Then anyone of the staff.
@@ -488,6 +497,16 @@ export class BotManager {
         if (!farmer) return
         this.log.info(`housekeeping: ${farmer.cfg.name} tends the wheat field`)
         this.doing('farm', farmer.startFarming())
+        return
+      }
+      case 'fish': {
+        const fisher = by(action.by)
+        if (!fisher) return
+        this.log.info(`housekeeping: ${fisher.cfg.name} goes fishing for the court's food`)
+        this.doing(
+          'fish',
+          fisher.startFishing().then((n) => n > 0)
+        )
         return
       }
       case 'forest': {
@@ -1284,6 +1303,8 @@ export class BotManager {
       void bot.startFarming()
     } else if (verb === 'forest') {
       void bot.startForestry()
+    } else if (verb === 'fish') {
+      void bot.startFishing()
     } else if (verb === 'bed') {
       // <bot> bed: go to bed now, as when a royal lies down at night (survival)
       void bot.goToBed()

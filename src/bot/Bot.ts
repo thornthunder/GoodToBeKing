@@ -38,6 +38,7 @@ import { Vec3 as WorldVec } from 'vec3'
 import type { ChatFloor } from './ChatFloor'
 import { goals, type Pathfinder } from 'mineflayer-pathfinder'
 import { chooseFarm, extendFarm, type Farm } from '../build/farm'
+import { chooseFishingSpot } from '../build/fishing'
 import { chooseGrove } from '../build/grove'
 import { Handbuilder } from '../build/Handbuilder'
 import {
@@ -59,6 +60,7 @@ import type { Household } from '../household'
 import { Cook } from './cooking'
 import { craft, makePlanks } from './crafting'
 import { Farmer } from './farming'
+import { Fisher } from './fishing'
 import { Forester } from './forestry'
 import { Miner, chooseMine } from './mining'
 import { Gatherer, type Material } from './gathering'
@@ -223,6 +225,7 @@ export class Bot extends EventEmitter {
   private cook?: Cook
   private farmer?: Farmer
   private forester?: Forester
+  private fisher?: Fisher
   private miner?: Miner
   /** Eating and, for guards, fighting (survival). */
   private survival?: Survival
@@ -846,6 +849,7 @@ export class Bot extends EventEmitter {
     this.cook = new Cook(body, this.log.child('cook'), this.gatherer)
     this.farmer = new Farmer(body, this.log.child('farm'), this.gatherer)
     this.forester = new Forester(body, this.log.child('grove'), this.gatherer)
+    this.fisher = new Fisher(body, this.log.child('fish'), this.gatherer)
     this.miner = new Miner(body, this.log.child('mine'))
     this.handbuilder = new Handbuilder(body, this.log.child('hands'), this.gatherer, () =>
       this.movement?.configure()
@@ -870,6 +874,7 @@ export class Bot extends EventEmitter {
       this.died = true
       this.gatherer?.cancel()
       this.handbuilder?.cancel()
+      this.fisher?.cancel()
     })
     body.on('respawn', () => {
       if (!this.died) return
@@ -1292,6 +1297,42 @@ export class Bot extends EventEmitter {
     if (!bigger) return
     this.household?.setFarm(bigger)
     this.log.info(`the field grows to ${bigger.cells.length} squares`)
+  }
+
+  /**
+   * Fish for the court's food a few minutes (the water chosen once, near home), the catch into
+   * the storehouse to be cooked. How many fish it caught.
+   */
+  async startFishing(minutes = 4): Promise<number> {
+    const fisher = this.fisher
+    const body = this.body
+    const home = this.household?.home
+    if (!fisher || !body || !home || this.gathering || !byHand(this.gameMode())) return 0
+    let spot = this.household?.fishing
+    if (!spot) {
+      const names = (x: number, y: number, z: number) => body.blockAt(new WorldVec(x, y, z))?.name
+      spot = chooseFishingSpot(names, home)
+      if (!spot) {
+        this.log.info('found no open water near home to fish in')
+        return 0
+      }
+      this.household?.setFishing(spot)
+      this.log.info(`the court fishes at ${spot.water.join(',')}`)
+    }
+    this.gathering = true
+    this.pauseWorks()
+    this.dutyFollowing = false
+    this.movement?.stop()
+    try {
+      const done = await fisher.fish(spot, minutes * 60_000, this.household?.storehouse)
+      if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
+      return done.fish
+    } catch (err) {
+      this.log.warn(`fishing failed: ${errMsg(err)}`)
+      return 0
+    } finally {
+      this.gathering = false
+    }
   }
 
   /**

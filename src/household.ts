@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Farm } from './build/farm'
+import type { FishingSpot } from './build/fishing'
 import type { Grove } from './build/grove'
 import type { Mine } from './bot/mining'
 
@@ -33,6 +34,8 @@ interface Saved {
   mine?: Mine
   /** The court's grove (see build/grove.ts). */
   grove?: Grove
+  /** Where the court fishes (see build/fishing.ts). */
+  fishing?: FishingSpot
   /** Courtiers whose respawn point is a bed in the hall, and which bed. */
   spawns?: Record<string, { x: number; y: number; z: number }>
   /** What was in the storehouse when a courtier last opened it: item name -> count. */
@@ -98,6 +101,15 @@ export class Household {
 
   setFarm(farm: Farm): void {
     this.data.farm = farm
+    this.save()
+  }
+
+  get fishing(): FishingSpot | undefined {
+    return this.data.fishing
+  }
+
+  setFishing(spot: FishingSpot): void {
+    this.data.fishing = spot
     this.save()
   }
 

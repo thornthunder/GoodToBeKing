@@ -58,6 +58,8 @@ export interface CourtState {
   grove?: { exists: boolean; fell: number; plant: number }
   /** Saplings the court has (storehouse and pockets). */
   saplings?: number
+  /** Fishing: a rod to hand (storehouse or a free courtier), string in the storehouse (two make one). */
+  fishing?: { rod: boolean; string: number }
   /** Wool in the storehouse: three make a bed (with three planks). */
   woolInStore?: number
   /** A courtier carrying saplings: the one to plant them. */
@@ -106,6 +108,8 @@ export type StewardAction =
   | { kind: 'arm'; by: string }
   /** Lay out the wheat field, or tend it (till, plant, harvest, bake). */
   | { kind: 'farm'; by: string }
+  /** Fish a while for the court's food. */
+  | { kind: 'fish'; by: string }
   /** Tend the grove: fell what has grown, plant the bare spots. */
   | { kind: 'forest'; by: string }
 
@@ -210,6 +214,13 @@ export function plan(s: CourtState): StewardAction[] {
     const by = anyone([], s.guards ?? [])
     if (by) out.push({ kind: 'farm', by })
   }
+  // Fishing: food that never runs out (the game near home does), by day, not a guard first.
+  const canFish = Boolean(s.fishing?.rod) || (s.fishing?.string ?? 0) >= 2
+  const hungry = s.foodInStore < FOOD_RESERVE && s.rawInStore < FOOD_RESERVE
+  if (hungry && canFish && s.storehouse && !s.night && !rests('fish')) {
+    const by = anyone([], s.guards ?? [])
+    if (by) out.push({ kind: 'fish', by })
+  }
   // Food by hand: cook what was hunted, or hunt (guards first: they carry swords).
   if (s.foodInStore < FOOD_RESERVE && s.storehouse) {
     if (s.rawInStore > 0 && s.furnace) {
@@ -277,6 +288,9 @@ export function plan(s: CourtState): StewardAction[] {
   // Coal by magic only when there is no furnace to make charcoal in.
   if (s.hall.light > 0 && !coal && !s.furnace && someBuilder)
     wants.push({ item: 'coal', count: 1, to: someBuilder, then: 'light', why: 'coal for torches' })
+  // A fishing rod when no game is to be found and no string to make one of: food for good.
+  if (hungry && !canFish && failed('hunt') && someone && s.storehouse)
+    wants.push({ item: 'fishing_rod', count: 1, to: someone, why: 'a fishing rod for the court' })
   // Bread by magic only when there is nothing in store, cooked or raw, to eat.
   if (s.foodInStore === 0 && s.rawInStore === 0)
     for (const hungry of s.withoutFood)
