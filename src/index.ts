@@ -3,12 +3,13 @@ import path from 'node:path'
 import { OllamaClient } from './ai/OllamaClient'
 import { BotManager } from './bot/BotManager'
 import { loadConfig } from './config'
-import { createLogger, setLogLevel } from './logger'
+import { closeLogFiles, createLogger, logToFiles, setLogLevel } from './logger'
 import { errMsg } from './util'
 
 async function main(): Promise<void> {
   const config = loadConfig()
   setLogLevel(config.logLevel)
+  if (LOG_DIR) logToFiles(path.resolve(LOG_DIR))
   const log = createLogger('app')
 
   log.info(
@@ -45,6 +46,7 @@ async function main(): Promise<void> {
     shuttingDown = true
     log.info(`${reason}, disconnecting bots`)
     await manager.stopAll()
+    await closeLogFiles()
     process.exit(0)
   }
   process.on('SIGINT', () => void shutdown('SIGINT received'))
@@ -77,6 +79,8 @@ async function main(): Promise<void> {
 }
 
 const STOP_FILE = process.env.STOP_FILE || '.stop'
+/** A log file a day, kept a week (empty: none). */
+const LOG_DIR = process.env.LOG_DIR ?? '.state/logs'
 /** In Docker this lives in the mounted state folder, so the host can drop commands in. */
 const COMMAND_FILE = process.env.COMMAND_FILE || '.command'
 

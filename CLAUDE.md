@@ -71,7 +71,9 @@ with `receive.denyCurrentBranch updateInstead`), then on the VM `git submodule u
 docker compose up -d --build`. Only one court may run at a time.
 `Dockerfile` + `compose.yaml`: host networking,
 `.env` as env file, `.state` and `config/court.json` mounted, `COMMAND_FILE=.state/.command`,
-`docker compose stop` sends SIGTERM (handled like `.stop`; grace 60 s). Paths stored in `.state`
+`docker compose stop` sends SIGTERM (handled like `.stop`; grace 60 s). The log also goes to
+`.state/logs/court-<UTC day>.log`, kept a week (`LOG_DIR`, empty for none): a rebuild throws the
+container's own log away. Paths stored in `.state`
 must be portable: `court-works.json` written on Windows had backslashes (`courtWorks()` turns
 them into `/`).
 
@@ -116,8 +118,11 @@ Windows, killing a background `npx` shell does not kill its node children at all
   a bed once so it respawns there (the "Respawn point set" pop-up is not read: a tap that went
   through counts). `steward.ts` + `BotManager.keepHouse`: every minute the Castellan takes stock
   (roof, door, beds, torches, a sword per guard, food per courtier, wood in the storehouse) and
-  sees to it: builders and errands by hand, and with no royal near, Merlin's magic (within his
-  ten an hour, two kept for the royals); with a royal near he asks them instead. Repairs go
+  sees to it: builders and errands by hand, and Merlin's magic (within his ten an hour, two kept
+  for the royals); with the King near he asks the King instead, and nobody else (the King's wish,
+  2026-10-31: the Princess was asked nine times in 90 minutes): one question for the most urgent
+  three (`askWords`), at most every 20 minutes, and the King's yes or no within five minutes
+  (`kingAnswers`) has Merlin conjure them or not. Guards do not ask for swords themselves. Repairs go
   against the hall's shape as last seen whole (stone first, then planks, then dirt); a gap is a
   doorway only if it has a door or was one before (worn walls under a standing top course are
   holes). Nobody goes out at night (no field, hunt, grove or wood errands, and the court's own
@@ -253,7 +258,15 @@ Windows, killing a background `npx` shell does not kill its node children at all
   spells and gifts in `.state/magic-<bot>.json`, holds to the King's limit (`MAGIC_PER_HOUR`: at
   most 10 a real hour, all spells together; each casting counts one, each thing conjured, a gift
   or a creature, counts one; travel is free; kept across restarts), and takes gifts back after a
-  day (`clear`, or the saddle off the horse it tagged). `places.ts` names a free spot in every
+  day (`clear`, or the saddle off the horse it tagged; kept in survival, the King's choice). Gifts
+  are food of every kind and simple things; never armour, shields, bows or diamond and netherite
+  (the King, 2026-10-31: "foods, but not advanced weapons"; the iron sword is the most). When a
+  request holds a gift or anything refused, Merlin's answer is made by code (`spellLine`,
+  `giftWords`): what is given, in the number the hour's magic allows, and what is not and why,
+  including things the royal named that the reading left out (`NEVER_GIFTS`). Left to the model
+  he promised a full set of armour for one sword, two cakes the hour had no magic for, and a
+  "protective ward" no spell makes; no bot remembers facts about what magic can do
+  (`aboutMagicPowers`), or such a boast comes back in every prompt. `places.ts` names a free spot in every
   room of the castles built and being built. Spells only for royals and courtiers, never on a
   royal who outranks the one asking; only the King teaches a spell, and Merlin learns it after
   repeating it back and a "yes". `Bot.command` sends a command and waits for `command_output`.

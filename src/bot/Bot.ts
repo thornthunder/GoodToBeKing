@@ -393,7 +393,6 @@ export class Bot extends EventEmitter {
     // Asleep: nothing to do till morning (or till a royal speaks to it).
     if (this.body?.isSleeping) return
     this.lookAfterSelf()
-    this.askForSword()
     this.performDuty()
     this.keepPost()
     this.deliverReports()
@@ -411,27 +410,6 @@ export class Bot extends EventEmitter {
       .then(() => (this.isFree() ? survival.closeDoors() : undefined))
       .catch((err) => this.log.warn(`looking after itself failed: ${errMsg(err)}`))
       .finally(() => (this.surviving = false))
-  }
-
-  private lastSwordAsk = 0
-
-  /** A guard without a weapon asks the King for a sword by Merlin's magic (survival). */
-  private askForSword(): void {
-    const body = this.body
-    if (!body || this.cfg.duty?.kind !== 'escort' || !byHand(this.gameMode())) return
-    if (Date.now() - this.lastSwordAsk < 30 * 60_000) return
-    if (body.inventory.items().some((i) => /_(sword|axe)$/.test(i.name))) return
-    const king = this.court?.members.find((m) => m.role === 'king')
-    const pos = king && body.players[king.player]?.entity?.position
-    const me = body.entity?.position
-    if (!king || !pos || !me || pos.distanceTo(me) > 24) return
-    this.lastSwordAsk = Date.now()
-    this.log.info('asking the King for a sword')
-    void this.speak(
-      `You are a guard of the royal family with no sword to protect them. Ask the King politely, ` +
-        'in one short sentence and in character, whether he would have Merlin conjure you one.',
-      'Your Majesty, might Merlin conjure me a sword, so I can guard the court?'
-    )
   }
 
   /**

@@ -5,7 +5,7 @@ import { createLogger } from '../logger'
 import type { BrainContext, ChatEvent } from './Brain'
 import { CourtMemory } from './CourtMemory'
 import { HailLog } from './HailLog'
-import { OllamaBrain, type BrainOptions } from './OllamaBrain'
+import { OllamaBrain, aboutMagicPowers, giftWords, type BrainOptions } from './OllamaBrain'
 import type { ChatMessage, ChatModel } from './OllamaClient'
 import { CourtRules, OrderBook, type Reading } from './orders'
 import { Magic } from '../magic/Magic'
@@ -946,7 +946,62 @@ describe('OllamaBrain court behaviour', () => {
       readings.push(order('Cast sparkles on the Princess.', sparkles))
       const again = await brain.onChat(chat('LittleOne42', 'again!'), ctx('LittleOne42'))
       expect(again?.action).toBeUndefined()
-      expect(calls[1].at(-1)?.content).toContain('the magic is spent')
+      // Refused: Merlin says why in his own words, made by code (the model is not asked).
+      expect(again?.say).toMatch(
+        /^Alas, Your Highness: my magic must rest: it gathers again in \d+ minutes?\.$/
+      )
+      expect(calls).toHaveLength(1)
+    })
+
+    it('says exactly what he conjured, and what is beyond his magic', async () => {
+      const magic = new Magic()
+      const { brain, calls, readings } = makeBrain('A full set of armour!', {}, new HailLog(), {
+        magic,
+      })
+      readings.push(
+        order('Give the Princess iron armour and an iron sword.', {
+          spells: [{ id: 'gift', target: 'speaker', item: 'iron_sword' }],
+        })
+      )
+      const reply = await brain.onChat(
+        chat('LittleOne42', 'merlin can I have a full set of iron armour and an iron sword'),
+        ctx('LittleOne42')
+      )
+      expect(reply?.action).toEqual({
+        type: 'cast',
+        casts: [{ spell: 'gift', args: { item: 'iron_sword' }, target: 'LittleOne42' }],
+        requestedBy: 'LittleOne42',
+      })
+      expect(reply?.say).toMatch(
+        /^\w[\w-]*, Your Highness: an iron sword for you! Armour is beyond my magic\.$/
+      )
+      expect(calls).toHaveLength(0)
+
+      // Two cakes with one magic left this hour: one cake, and he says one.
+      const ok = async () => ({ ok: true, count: 1, output: [] })
+      const sparkles = magic.find('sparkles')!
+      const who = { requester: 'LittleOne42', target: 'LittleOne42', merlin: 'Merlin' }
+      while (magic.magicLeft() > 1) await magic.cast(sparkles, {}, who, ok)
+      readings.push(
+        order('Two cakes for the Princess.', {
+          spells: [{ id: 'gift', target: 'speaker', item: 'cake', count: 2 }],
+        })
+      )
+      const cake = await brain.onChat(chat('LittleOne42', 'two cakes please'), ctx('LittleOne42'))
+      expect(cake?.say).toMatch(/: a cake for you!$/)
+
+      // A netherite sword: not his to give.
+      readings.push(
+        order('A netherite sword for the Princess.', {
+          spells: [{ id: 'gift', target: 'speaker', item: 'netherite_sword' }],
+        })
+      )
+      const sword = await brain.onChat(
+        chat('LittleOne42', 'merlin give me a netherite sword'),
+        ctx('LittleOne42')
+      )
+      expect(sword?.action).toBeUndefined()
+      expect(sword?.say).toBe('Alas, Your Highness: netherite sword is beyond my magic.')
     })
 
     it('casts several spells in the order asked: both of us to the castle, then the court', async () => {
@@ -1047,7 +1102,10 @@ describe('OllamaBrain court behaviour', () => {
         ctx('LittleOne42')
       )
       expect(reply?.action).toBeUndefined()
-      expect(calls[0].at(-1)?.content).toContain('outranks the Princess, and needs their own wish')
+      expect(reply?.say).toBe(
+        'Alas, Your Highness: the Floating for the King needs their own wish.'
+      )
+      expect(calls).toHaveLength(0)
     })
 
     it('learns a spell the King teaches once he confirms it, and only from the King', async () => {
@@ -1120,5 +1178,31 @@ describe('OllamaBrain court behaviour', () => {
     expect(prompt).toContain('suitable for a young child')
     expect(prompt).toContain('Never ask anyone for personal information')
     expect(prompt).not.toMatch(/\n\n\n/)
+  })
+})
+
+describe('giftWords', () => {
+  it('says gifts as Merlin would', () => {
+    expect(giftWords('iron_sword', 1)).toBe('an iron sword')
+    expect(giftWords('bread', 4)).toBe('4 loaves of bread')
+    expect(giftWords('bread', 1)).toBe('a loaf of bread')
+    expect(giftWords('cake', 2)).toBe('2 cakes')
+    expect(giftWords('dried_kelp', 8)).toBe('8 dried kelp')
+    expect(giftWords('baked_potato', 4)).toBe('4 baked potatoes')
+    expect(giftWords('poppy', 4)).toBe('4 poppies')
+    expect(giftWords('torch', 8)).toBe('8 torches')
+  })
+})
+
+describe('aboutMagicPowers', () => {
+  it('knows a claim about what magic can do from what happened', () => {
+    expect(
+      aboutMagicPowers('Merlin can magic pleasant weather, fireworks, or a protective ward.')
+    ).toBe(true)
+    expect(aboutMagicPowers('Merlin cannot conjure shields.')).toBe(true)
+    expect(aboutMagicPowers('Merlin has not yet learned the magic to conjure a feast.')).toBe(true)
+    expect(aboutMagicPowers('Merlin conjured an iron sword for Bruce.')).toBe(false)
+    expect(aboutMagicPowers("The Princess's favourite snack is dried kelp.")).toBe(false)
+    expect(aboutMagicPowers('The Princess can build very fast.')).toBe(false)
   })
 })

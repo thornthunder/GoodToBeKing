@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { plan, type CourtState } from './steward'
+import { askWords, plan, type CourtState } from './steward'
 
 /** A court that has all it needs: Henry and George build, Bruce and Dyke guard, all free. */
 const base: CourtState = {
-  royalNear: false,
+  kingNear: false,
   merlinAwake: true,
   magicLeft: 10,
   guardsUnarmed: [],
@@ -102,7 +102,7 @@ describe("the Castellan's account", () => {
     expect(plan(woolly).some((a) => a.kind === 'magic')).toBe(false)
   })
 
-  it('asks the royal family instead when one is near, and keeps magic for them', () => {
+  it('asks the King instead when he is near, all in one question, and keeps magic for him', () => {
     const empty = {
       ...base,
       foodInStore: 0,
@@ -111,10 +111,16 @@ describe("the Castellan's account", () => {
       freeBuilders: [],
       freeBuilder: undefined,
     }
-    expect(plan({ ...empty, royalNear: true })).toContainEqual({
+    expect(plan({ ...empty, kingNear: true })).toContainEqual({
       kind: 'ask',
       what: 'food for Dyke',
+      wants: [{ item: 'bread', count: 4, to: 'Dyke', why: 'food for Dyke' }],
     })
+    const asks = plan({ ...empty, kingNear: true, withoutFood: ['Dyke', 'Henry'] }).filter(
+      (a) => a.kind === 'ask'
+    )
+    expect(asks).toHaveLength(1)
+    expect(asks[0]).toMatchObject({ what: 'food for Dyke and Henry' })
     expect(plan({ ...empty, magicLeft: 5 }).filter((a) => a.kind === 'magic')).toEqual([])
     expect(plan({ ...empty, magicLeft: 6 })).toContainEqual({
       kind: 'magic',
@@ -404,5 +410,17 @@ describe("the Castellan's account", () => {
     const moved = { ...base, formerStore: true }
     expect(plan(moved)).toContainEqual({ kind: 'move', by: 'Henry' })
     expect(plan({ ...moved, storehouse: false }).some((a) => a.kind === 'move')).toBe(false)
+  })
+})
+
+describe('askWords', () => {
+  it('tells each thing once', () => {
+    expect(askWords(['food for Dyke', 'food for Henry', 'beds for the court'])).toBe(
+      'food for Dyke and Henry and beds for the court'
+    )
+    expect(askWords(['a sword for Bruce', 'a sword for Dyke', 'food for Henry'])).toBe(
+      'a sword for Bruce and Dyke and food for Henry'
+    )
+    expect(askWords(['wood'])).toBe('wood')
   })
 })

@@ -55,7 +55,9 @@ import {
 } from './orders'
 import type { Magic } from '../magic/Magic'
 import {
+  GIFTS,
   MAGIC_PER_HOUR,
+  castingCost,
   needs,
   stepGuide,
   tidySteps,
@@ -373,15 +375,17 @@ export class OllamaBrain implements Brain {
         riddleNote,
       ].filter(Boolean)
       move = turn
-      say = await this.generate(ctx, {
-        note: notes.join('\n') || undefined,
-        ...(ability ? { ability, address: member?.address ?? 'my friend' } : {}),
-        // A royal who names the bot (even misspelled) or answers it gets a reply, not silence.
-        insist:
-          member && (answeringUs || mentionsNameLoosely(event.message, ctx.botName))
-            ? `(${speaker} is talking to you, ${ctx.botName}: answer kindly.)`
-            : undefined,
-      })
+      say = turn.line
+        ? this.said(turn.line)
+        : await this.generate(ctx, {
+            note: notes.join('\n') || undefined,
+            ...(ability ? { ability, address: member?.address ?? 'my friend' } : {}),
+            // A royal who names the bot (even misspelled) or answers it gets a reply, not silence.
+            insist:
+              member && (answeringUs || mentionsNameLoosely(event.message, ctx.botName))
+                ? `(${speaker} is talking to you, ${ctx.botName}: answer kindly.)`
+                : undefined,
+          })
     } finally {
       clearTimeout(thinking)
     }
@@ -624,7 +628,7 @@ export class OllamaBrain implements Brain {
    * it needs and whether it is ready. Those that can be cast are; the note says what was cast and
    * why the others were not.
    */
-  private spellTurn(member: CourtMember, requests: SpellRequest[]): Turn {
+  private spellTurn(member: CourtMember, requests: SpellRequest[], message?: string): Turn {
     const magic = this.magic
     if (!magic || requests.length === 0) return { note: '' }
     const giver = `the ${member.title}`
@@ -639,6 +643,13 @@ export class OllamaBrain implements Brain {
     const casts: Array<{ spell: string; args: SpellArgs; target: string }> = []
     const cast: string[] = []
     const refused: string[] = []
+    // The same, as Merlin says it: what is given (as it will be given) and what is not.
+    const given: string[] = []
+    const declined: string[] = []
+    let gifts = false
+    let left = magic.magicLeft()
+    const whom = (target: string) =>
+      target === member.player ? 'you' : target === this.cfg.name ? 'me' : this.labelOf(target)
     for (const request of requests) {
       const spell = request.id === 'unknown' ? undefined : magic.find(request.id)
       if (!spell) {
@@ -648,6 +659,7 @@ export class OllamaBrain implements Brain {
             .map((s) => s.name)
             .join(', ')}; the King can teach you new ones)`
         )
+        declined.push('that is a magic I do not know')
         continue
       }
       const target = this.spellTarget(request.target, member)
@@ -655,6 +667,7 @@ export class OllamaBrain implements Brain {
         refused.push(
           `${spell.name}: you cannot tell on whom; you work magic only on the royal family and the court`
         )
+        declined.push(`I cannot tell for whom the ${spell.name} is`)
         continue
       }
       const onTarget = spell.steps.some(
@@ -664,6 +677,7 @@ export class OllamaBrain implements Brain {
         refused.push(
           `${spell.name}: it is for someone who outranks ${giver}, and needs their own wish`
         )
+        declined.push(`the ${spell.name} for ${this.labelOf(target)} needs their own wish`)
         continue
       }
       const args: SpellArgs = {
@@ -673,11 +687,19 @@ export class OllamaBrain implements Brain {
         creature: request.creature,
         effect: request.effect,
       }
+      const isGift = spell.steps.some((s) => s.kind === 'give')
+      if (isGift) gifts = true
       const problem = magic.check(spell, args)
-      if (problem) {
-        refused.push(`${spell.name}: ${problem}`)
+      // What it costs of the hour (as Magic counts it), and so what is still left for the rest.
+      const cost = castingCost(spell)
+      const max = args.item ? (GIFTS[args.item] ?? 0) : 0
+      const count = isGift ? Math.min(Math.floor(args.count ?? 1), max, left - cost) : 0
+      if (problem || (isGift && count < 1)) {
+        refused.push(`${spell.name}: ${problem ?? 'the magic is spent for this hour'}`)
+        declined.push(declinedWords(problem ?? 'magic is spent', args))
         continue
       }
+      left -= cost + count
       casts.push({ spell: spell.id, args, target })
       const on =
         target === member.player
@@ -686,7 +708,18 @@ export class OllamaBrain implements Brain {
             ? 'yourself'
             : this.labelOf(target)
       cast.push(`${spell.name} on ${on}${args.place ? ` (to ${args.place})` : ''}: ${spell.does}`)
+      given.push(
+        isGift && args.item
+          ? `${giftWords(args.item, count)} for ${whom(target)}`
+          : `${spell.name}${args.place ? ` to ${args.place}` : ''} for ${whom(target)}`
+      )
     }
+    // What the royal asked for that Merlin never conjures, though the reading left it out ("a full
+    // set of iron armour and an iron sword" read as the sword alone).
+    if (gifts && message)
+      for (const [re, words] of NEVER_GIFTS)
+        if (re.test(message) && !declined.some((d) => re.test(d)))
+          declined.push(`${words} beyond my magic`)
     const notes = [
       cast.length
         ? `(You cast now, in this order: ${cast.join('; ')} Say so in one or two short, magical sentences, saying truly who goes where.)`
@@ -695,11 +728,16 @@ export class OllamaBrain implements Brain {
         ? `(You cannot cast ${cast.length ? 'the rest' : 'it'}: ${refused.join('; ')}. Say so kindly, in character.)`
         : '',
     ]
+    // A gift, or anything refused: Merlin's words come from what is cast, not from the model,
+    // which promised "a full set of iron armour" for a sword and two cakes the hour had no
+    // magic left for.
+    const line = gifts || declined.length ? spellLine(member.address, given, declined) : undefined
     return {
       ...(casts.length
         ? { action: { type: 'cast' as const, casts, requestedBy: member.player } }
         : {}),
       note: join(...notes),
+      line,
     }
   }
 
@@ -731,12 +769,11 @@ export class OllamaBrain implements Brain {
         `At once, ${member.address}: to the hall!`,
         `Hold fast, ${member.address}: home in a twinkling!`,
       ]
-      const say = lines[Math.floor(Math.random() * lines.length)]
-      this.remember({ role: 'assistant', content: say })
+      const say = this.said(lines[Math.floor(Math.random() * lines.length)])
       this.hear(`${ctx.botName}: ${say}`)
       return { say, action: turn.action }
     }
-    const say = await this.generate(ctx, { note: turn.note })
+    const say = turn.line ? this.said(turn.line) : await this.generate(ctx, { note: turn.note })
     if (say) this.hear(`${ctx.botName}: ${say}`)
     return say ? { say } : null
   }
@@ -796,7 +833,7 @@ export class OllamaBrain implements Brain {
       }
     }
     // A spell is cast at once, never kept as a standing order.
-    if (reading.spells?.length && this.magic) return this.spellTurn(member, reading.spells)
+    if (reading.spells?.length && this.magic) return this.spellTurn(member, reading.spells, message)
     const replaced = replaces.length ? `(It replaces ${this.describe(replaces)}.)` : ''
     this.orders.remove(replaces.filter((id) => id.startsWith('O')))
     if (reading.type === 'rule') {
@@ -1365,6 +1402,12 @@ export class OllamaBrain implements Brain {
     for (const item of parsed.facts ?? []) {
       const subject = subjects.find((s) => s.label === item.about)
       if (!subject || !item.fact) continue
+      // What magic can do is the spell list's to say: remembered, a wizard's own boast ("Merlin
+      // can weave a protective ward") came back in every prompt, and he offered it for days.
+      if (aboutMagicPowers(item.fact)) {
+        this.log.debug(`not remembered (about magic's powers): ${item.fact}`)
+        continue
+      }
       for (const fact of this.memory.add(subject.key, [
         { text: item.fact, private: item.private === true, secret: item.secret === true },
       ])) {
@@ -1528,6 +1571,13 @@ export class OllamaBrain implements Brain {
     return job.finally(() => {
       this.pending--
     })
+  }
+
+  /** A reply made by code, kept in the history as if the model had given it. */
+  private said(line: string): string {
+    this.remember({ role: 'assistant', content: line })
+    this.lastReplyAt = Date.now()
+    return line
   }
 
   private remember(message: ChatMessage): void {
@@ -1743,6 +1793,8 @@ export interface StaffMember {
 interface Turn {
   action?: BotAction
   note: string
+  /** The reply itself, made by code (what Merlin cast): the model is not asked. */
+  line?: string
   /** A request the bot cannot fulfil: guard the reply against promises. */
   ability?: MissingAbility
 }
@@ -1834,4 +1886,70 @@ function listWords(names: string[], last: 'and' | 'or' = 'and'): string {
 /** Notes for the model, one per line, skipping empty ones. */
 function join(...notes: Array<string | undefined>): string {
   return notes.filter(Boolean).join('\n')
+}
+
+/** Things a royal may ask Merlin for that he never conjures (the King's wish: no armour or advanced weapons). */
+const NEVER_GIFTS: Array<[RegExp, string]> = [
+  [/\barmou?r\b|\bhelmets?\b|\bchestplates?\b|\bleggings\b|\bboots\b/i, 'armour is'],
+  [/\bshields?\b/i, 'shields are'],
+  [/\b(cross)?bows?\b|\barrows?\b/i, 'bows and arrows are'],
+  [/\bdiamonds?\b/i, 'diamond things are'],
+  [/\bnetherite\b/i, 'netherite things are'],
+  [/\bpotions?\b/i, 'potions are'],
+  [/\btridents?\b/i, 'tridents are'],
+  [/\belytras?\b/i, 'elytras are'],
+  [/\btotems?\b/i, 'totems are'],
+  [/\benchant/i, 'enchantments are'],
+]
+
+/** Food and stuff counted by the heap, not one by one. */
+const MASS =
+  /^(cooked_(beef|chicken|cod|salmon|mutton|rabbit)|dried_kelp|sweet_berries|oak_planks|cobblestone|coal|wheat_seeds|beetroot)$/
+
+/** "an iron sword", "4 loaves of bread", "2 cakes", "some dried kelp". */
+export function giftWords(item: string, count: number): string {
+  if (item === 'bread') return count === 1 ? 'a loaf of bread' : `${count} loaves of bread`
+  const name = item.replace(/_/g, ' ')
+  if (MASS.test(item)) return count === 1 ? `some ${name}` : `${count} ${name}`
+  if (count === 1) return `${/^[aeiou]/.test(name) ? 'an' : 'a'} ${name}`
+  const plural = /[^aeiou]y$/.test(name)
+    ? `${name.slice(0, -1)}ies`
+    : /(o|ch|sh|s|x)$/.test(name)
+      ? `${name}es`
+      : `${name}s`
+  return `${count} ${plural}`
+}
+
+/** Why Merlin did not cast it, as he says it. */
+function declinedWords(problem: string, args: SpellArgs): string {
+  const minutes = /gathers again in (\d+ minutes?)/.exec(problem)?.[1]
+  if (/magic is spent/.test(problem))
+    return `my magic must rest${minutes ? `: it gathers again in ${minutes}` : ' a while'}`
+  if (/needs a place/.test(problem)) return 'I know no such place'
+  if (/gift must be/.test(problem))
+    return `${(args.item ?? 'that').replace(/_/g, ' ')} is beyond my magic`
+  if (/creature must be/.test(problem)) return `I cannot summon ${args.creature ?? 'that'}`
+  if (/effect must be/.test(problem)) return 'I know no such charm'
+  return 'that I cannot do'
+}
+
+/** Merlin's answer to a spell request: what he cast, and what not and why. */
+export function spellLine(address: string, given: string[], declined: string[]): string {
+  const list = (xs: string[]) =>
+    xs.length < 2 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`
+  if (!given.length) return `Alas, ${address}: ${list(declined)}.`
+  const sorry = declined.length
+    ? `${list(declined)[0].toUpperCase()}${list(declined).slice(1)}.`
+    : ''
+  const opener = ['Behold', 'There', 'Abracadabra', 'Ta-da'][Math.floor(Math.random() * 4)]
+  return `${opener}, ${address}: ${list(given)}!${sorry ? ` ${sorry}` : ''}`
+}
+
+/** A fact about what magic can or cannot do ("Merlin can conjure a protective ward"). */
+export function aboutMagicPowers(fact: string): boolean {
+  return (
+    /\b(can|cannot|can't|could|couldn't|is able|is unable|unable|knows how|has not (yet )?learned|does not (possess|know))\b/i.test(
+      fact
+    ) && /\b(magic|conjur\w*|spells?|cast\w*|wards?|summon\w*|enchant\w*|charms?)\b/i.test(fact)
+  )
 }

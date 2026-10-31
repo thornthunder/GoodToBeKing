@@ -49,7 +49,9 @@ export type Creature = (typeof CREATURES)[number]
  * materials help the court in survival, but sparingly: see MAGIC_PER_HOUR.
  */
 export const GIFTS: Record<string, number> = {
-  cake: 1,
+  // Food of every kind (the King's wish, 2026-10-31: "Merlin should be able to conjure foods,
+  // but not advanced weapons": no armour, shields, bows, diamond or netherite).
+  cake: 2,
   cookie: 8,
   bread: 4,
   apple: 4,
@@ -72,6 +74,20 @@ export const GIFTS: Record<string, number> = {
   cooked_cod: 4,
   baked_potato: 4,
   carrot: 4,
+  potato: 4,
+  dried_kelp: 8,
+  cooked_porkchop: 4,
+  cooked_mutton: 4,
+  cooked_salmon: 4,
+  cooked_rabbit: 4,
+  pumpkin_pie: 4,
+  melon_slice: 8,
+  beetroot: 4,
+  golden_carrot: 4,
+  honey_bottle: 4,
+  mushroom_stew: 1,
+  rabbit_stew: 1,
+  beetroot_soup: 1,
   oak_log: 10,
   birch_sapling: 6,
   fishing_rod: 1,

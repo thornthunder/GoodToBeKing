@@ -1,7 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { CourtMemory } from '../ai/CourtMemory'
-import { CourtRules, OrderBook } from '../ai/orders'
+import { CourtRules, OrderBook, confirmation, rankOf } from '../ai/orders'
+import type { ChatEvent } from '../ai/Brain'
 import { isGetMeHome } from '../ai/text'
 import { HailLog } from '../ai/HailLog'
 import { Magic } from '../magic/Magic'
@@ -27,7 +28,7 @@ import { findCastleSites } from '../build/sites'
 import { NEEDED, Overlord, coveredNeeds, overlordClient } from '../ai/Overlord'
 import type { Rect } from '../build/design'
 import type { AppConfig } from '../config'
-import { CourtRoster } from '../court'
+import { CourtRoster, type CourtMember } from '../court'
 import type { Logger } from '../logger'
 import { errMsg, sleep } from '../util'
 import { Bot } from './Bot'
@@ -55,7 +56,7 @@ import {
   surveyHall,
   tableCells,
 } from '../build/hall'
-import { plan, type CourtState, type StewardAction } from '../steward'
+import { plan, type CourtState, type MagicWant, type StewardAction } from '../steward'
 import { RAW } from './cooking'
 import { farmNeed } from '../build/farm'
 import { groveNeed } from '../build/grove'
@@ -189,8 +190,10 @@ export class BotManager {
         household: this.household,
         estate: this.estate,
       })
-      bot.on('chat', (event: { from: string }) => {
+      bot.on('chat', (event: ChatEvent) => {
         if (court.find(event.from)) this.lastRoyalLine = Date.now()
+        // Every bot hears the line: the Castellan's ears are the ones that count.
+        if (bot === this.castellan()) this.kingAnswers(event)
       })
       bot.on('commission', (request: CommissionRequest) => this.commission(bot, request))
       bot.on('works', (order: WorksOrder) => void this.orderWorks(bot, order))
@@ -501,8 +504,8 @@ export class BotManager {
 
   private lastHousekeeping = 0
   private lastMagicRequest = 0
-  /** What the Castellan last asked the royal family for, and when (so he does not nag). */
-  private readonly asked = new Map<string, number>()
+  /** What the Castellan last asked the King for, and when (once in ASK_MS: he does not nag). */
+  private askedKing: { at: number; wants: MagicWant[] } = { at: 0, wants: [] }
   /** Work that came to nothing lately, and until when it rests (see steward.ts `resting`). */
   private readonly resting = new Map<string, number>()
   /** Work someone is doing right now: nobody else is sent to do it too. */
@@ -578,15 +581,19 @@ export class BotManager {
         .reduce((total, [, n]) => total + n, 0)
     const seedsHad =
       sum(/^wheat_seeds$/) + this.bots.reduce((n, b) => n + b.carries(/^wheat_seeds$/), 0)
-    const royals = this.bots
-      .flatMap((b) => this.court.members.map((m) => b.playerPosition(m.player)))
-      .filter((p): p is Point => p !== undefined)
+    // Only the King is asked before Merlin's magic (his wish, 2026-10-31).
+    const king = this.king()
+    const kingAt = king
+      ? this.bots.map((b) => b.playerPosition(king.player)).find((p) => p !== undefined)
+      : undefined
     const near = (b: Bot | undefined) => {
       const p = b?.position()
-      return p !== undefined && royals.some((r) => Math.hypot(r.x - p.x, r.z - p.z) < 32)
+      return (
+        p !== undefined && kingAt !== undefined && Math.hypot(kingAt.x - p.x, kingAt.z - p.z) < 32
+      )
     }
     const state: CourtState = {
-      royalNear: near(castellan) || near(merlin),
+      kingNear: near(castellan) || near(merlin),
       merlinAwake: merlin?.magicAwake() ?? false,
       magicLeft: merlin?.magicLeft() ?? 0,
       guardsUnarmed: this.bots
@@ -886,13 +893,12 @@ export class BotManager {
         return
       }
       case 'ask': {
-        if (Date.now() - (this.asked.get(action.what) ?? 0) < 15 * 60_000) return
-        this.asked.set(action.what, Date.now())
-        this.log.info(`housekeeping: asking the royal family for ${action.what}`)
+        if (Date.now() - this.askedKing.at < ASK_MS) return
+        this.askedKing = { at: Date.now(), wants: action.wants }
+        this.log.info(`housekeeping: asking the King for ${action.what}`)
         await castellan.speak(
           `The court needs ${action.what}, which only Merlin's magic can provide just now. Ask ` +
-            'the royal family nearby, politely and in one short sentence, whether Merlin may ' +
-            'conjure it.',
+            'the King, politely and in one short sentence, whether Merlin may conjure it.',
           `Your Majesty, might Merlin conjure ${action.what}?`
         )
         return
@@ -900,40 +906,72 @@ export class BotManager {
       case 'magic': {
         if (!merlin || Date.now() - this.lastMagicRequest < MAGIC_REQUEST_MS) return
         this.lastMagicRequest = Date.now()
-        const before = merlin.magicLeft()
-        this.log.info(
-          `housekeeping: ${castellan.cfg.name} asks ${merlin.cfg.name} for ${action.why}`
-        )
-        await castellan.speak(
-          `You ask Merlin, the court wizard, to conjure ${action.why} (${action.count} ` +
-            `${action.item.replace(/_/g, ' ')} for ${action.to}). Say it to him in one short, ` +
-            'polite sentence.',
-          `Merlin, might you conjure ${action.why}?`
-        )
-        await merlin.castCommand('gift', {
-          target: action.to,
-          requestedBy: castellan.cfg.name,
-          args: { item: action.item, count: action.count },
-        })
-        if (merlin.magicLeft() >= before) return
-        await merlin.speak(
-          `At Festaris's request you have just conjured ${action.why}. Say so in one short, ` +
-            'magical sentence.',
-          'There! It is done.'
-        )
-        // The beds or coal go straight to work.
-        const then = action.then
-        const worker = by(action.to)
-        if (then && worker)
-          setTimeout(() => {
-            if (then === 'farm') this.doing('farm', worker.startFarming())
-            else if (then === 'forest') this.doing('forest', worker.startForestry())
-            else if (then === 'estate-light')
-              this.doing('estate:light', worker.startEstateWork('light', castellan.cfg.name))
-            else this.doing(`hallwork:${then}`, worker.startHallWork(then, castellan.cfg.name))
-          }, 2_000)
+        await this.conjureFor(castellan, merlin, action)
       }
     }
+  }
+
+  /** The King, the highest rank at court. */
+  private king(): CourtMember | undefined {
+    const top = Math.max(1, ...this.court.members.map((m) => rankOf(m.role)))
+    return this.court.members.find((m) => rankOf(m.role) >= top)
+  }
+
+  /** The King answers the Castellan's question: on his yes Merlin conjures what was asked. */
+  private kingAnswers(event: ChatEvent): void {
+    const asked = this.askedKing
+    if (!asked.wants.length || Date.now() - asked.at > ANSWER_MS) return
+    if (event.kind === 'system' || event.from !== this.king()?.player) return
+    const answer = confirmation(event.message)
+    if (!answer) return
+    this.askedKing = { at: asked.at, wants: [] }
+    this.log.info(
+      `housekeeping: the King says ${answer} to ${asked.wants.map((w) => w.why).join(', ')}`
+    )
+    const castellan = this.castellan()
+    const merlin = this.bots.find((b) => b.cfg.magic)
+    if (answer === 'no' || !castellan || !merlin) return
+    void (async () => {
+      for (const want of asked.wants) await this.conjureFor(castellan, merlin, want)
+    })().catch((err) => this.log.warn(`conjuring for the court failed: ${errMsg(err)}`))
+  }
+
+  /** The Castellan asks Merlin for something the court needs, and it goes straight to work. */
+  private async conjureFor(castellan: Bot, merlin: Bot, action: MagicWant): Promise<void> {
+    const by = (name?: string) => this.bots.find((b) => b.cfg.name === name)
+    const before = merlin.magicLeft()
+    this.log.info(`housekeeping: ${castellan.cfg.name} asks ${merlin.cfg.name} for ${action.why}`)
+    await castellan.speak(
+      `You ask Merlin, the court wizard, to conjure ${action.why} (${action.count} ` +
+        `${action.item.replace(/_/g, ' ')} for ${action.to}). Say it to him in one short, ` +
+        'polite sentence.',
+      `Merlin, might you conjure ${action.why}?`
+    )
+    await merlin.castCommand('gift', {
+      target: action.to,
+      requestedBy: castellan.cfg.name,
+      args: { item: action.item, count: action.count },
+    })
+    const given = before - merlin.magicLeft()
+    if (given <= 0) return
+    // The very thing and number: a model left to it said "a baked potato" for one bread.
+    const what = `${given} ${action.item.replace(/_/g, ' ')}`
+    await merlin.speak(
+      `At Festaris's request you have just conjured ${what} for ${action.to} (${action.why}). ` +
+        `Say so in one short, magical sentence, naming exactly ${what}.`,
+      `There! ${what[0].toUpperCase()}${what.slice(1)} for ${action.to}.`
+    )
+    // The beds or coal go straight to work.
+    const then = action.then
+    const worker = by(action.to)
+    if (then && worker)
+      setTimeout(() => {
+        if (then === 'farm') this.doing('farm', worker.startFarming())
+        else if (then === 'forest') this.doing('forest', worker.startForestry())
+        else if (then === 'estate-light')
+          this.doing('estate:light', worker.startEstateWork('light', castellan.cfg.name))
+        else this.doing(`hallwork:${then}`, worker.startHallWork(then, castellan.cfg.name))
+      }, 2_000)
   }
 
   /** The Castellan sets one of his builders to work on the hall: the nearest free one. */
@@ -1787,6 +1825,10 @@ const REST_MS = 10 * 60_000
 /** How often the Castellan takes stock of what the court needs, and asks Merlin for magic. */
 const HOUSEKEEPING_MS = 60_000
 const MAGIC_REQUEST_MS = 3 * 60_000
+/** The Castellan asks the King for Merlin's help at most this often. */
+const ASK_MS = 20 * 60_000
+/** The King's yes or no counts this long after the question. */
+const ANSWER_MS = 5 * 60_000
 /** Food a courtier may carry (see bot/survival.ts). */
 const FOOD_ITEM = new RegExp(`^(${FOODS.join('|')})$`)
 /** Before sending the same bot home again. */

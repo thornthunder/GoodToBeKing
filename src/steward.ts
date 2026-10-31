@@ -6,8 +6,11 @@ import type { Material } from './bot/gathering'
  * do about it, most urgent first. Pure: BotManager gathers the state and carries out the plan.
  */
 export interface CourtState {
-  /** A royal is near the Castellan or Merlin: ask them rather than Merlin. */
-  royalNear: boolean
+  /**
+   * The King is near the Castellan or Merlin: ask him before Merlin's magic. Nobody else is asked
+   * (the King's wish, 2026-10-31: the Princess was asked nine times in an hour and a half).
+   */
+  kingNear: boolean
   /** Merlin is online with his magic awake, and how much of the hour's magic is left. */
   merlinAwake: boolean
   magicLeft: number
@@ -101,6 +104,9 @@ export interface CourtState {
   formerStore?: boolean
 }
 
+/** Something Merlin may conjure for the court. */
+export type MagicWant = Omit<Extract<StewardAction, { kind: 'magic' }>, 'kind'>
+
 export type StewardAction =
   /** Work on the hall by a builder (`by`: this one; planned work always names one). */
   | { kind: 'hallwork'; work: HallWork; by?: string }
@@ -114,8 +120,8 @@ export type StewardAction =
       then?: HallWork | 'farm' | 'forest' | 'estate-light'
       why: string
     }
-  /** Ask the royal family for Merlin's help instead (they are near). */
-  | { kind: 'ask'; what: string }
+  /** Ask the King for Merlin's help instead (he is near): `wants`, granted on his yes. */
+  | { kind: 'ask'; what: string; wants: MagicWant[] }
   /** A free hand fetches this for the storehouse. */
   | { kind: 'errand'; material: Material; count: number; by?: string }
   /** Hunt this many animals for meat (by the King's rule), into the storehouse. */
@@ -319,7 +325,7 @@ export function plan(s: CourtState): StewardAction[] {
   // Magic: swords, beds, seeds, a furnace, coal, food; only for what the court cannot get by hand.
   const someBuilder = builders.find((b) => free.has(b)) ?? s.freeBuilder
   const someone = someBuilder ?? [...free][0] ?? s.freeHand
-  const wants: Array<Omit<Extract<StewardAction, { kind: 'magic' }>, 'kind'>> = []
+  const wants: MagicWant[] = []
   // The storehouse lost and no wood to make a chest of: everything else waits on it.
   if (s.storehouseLost && failed('hallwork:chest') && someBuilder)
     wants.push({
@@ -395,8 +401,11 @@ export function plan(s: CourtState): StewardAction[] {
   // The most urgent want; from Merlin, the most urgent he can still grant this hour.
   const first = wants[0]
   const affordable = wants.find((w) => s.magicLeft - w.count >= MAGIC_RESERVE)
-  if (first && s.royalNear) out.push({ kind: 'ask', what: first.why })
-  else if (affordable && s.merlinAwake) out.push({ kind: 'magic', ...affordable })
+  if (first && s.kingNear) {
+    // One question for the most urgent few, not one for each.
+    const asked = wants.slice(0, 3)
+    out.push({ kind: 'ask', what: askWords(asked.map((w) => w.why)), wants: asked })
+  } else if (affordable && s.merlinAwake) out.push({ kind: 'magic', ...affordable })
 
   // Stone: the mine, by day.
   if (
@@ -416,4 +425,20 @@ export function plan(s: CourtState): StewardAction[] {
     if (by) out.push({ kind: 'errand', material: 'wood', count: 16, by })
   }
   return out
+}
+
+/** "food for Dyke and Henry, and beds for the court": wants with the same thing told once. */
+export function askWords(whys: string[]): string {
+  const groups = new Map<string, string[]>()
+  for (const why of whys) {
+    const at = why.indexOf(' for ')
+    const what = at > 0 ? why.slice(0, at) : why
+    const whom = at > 0 ? why.slice(at + 5) : ''
+    const list = groups.get(what) ?? []
+    if (whom && !list.includes(whom)) list.push(whom)
+    groups.set(what, list)
+  }
+  const and = (xs: string[]) =>
+    xs.length < 2 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`
+  return and([...groups].map(([what, whom]) => (whom.length ? `${what} for ${and(whom)}` : what)))
 }
