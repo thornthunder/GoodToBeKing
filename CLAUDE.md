@@ -184,7 +184,10 @@ Windows, killing a background `npx` shell does not kill its node children at all
   once sown with 16 seeds spare; hoe via `bot/crafting.ts`, which crafts at a table within 24
   blocks or puts one down and takes it back; seeds from grass (the farmer breaks grass for a
   plot's worth more while the field may grow; seeds found count as work), Merlin's eight only to start;
-  harvest, replant, bread to the storehouse), `bot/hunting.ts` (the King's rule: never a named, tame, owned or leashed
+  harvest, replant, bread to the storehouse; a dry field gets water: the storehouse's bucket, or
+  one of three iron (kept back from arming meanwhile), filled at the fishing water and poured
+  into the field's middle square from the square beside it, `Bot.startWatering`; a bucket fills
+  looking at a source, and pours across the first solid face looked at), `bot/hunting.ts` (the King's rule: never a named, tame, owned or leashed
   animal nor a baby; only cows, pigs, sheep, chickens, rabbits; 16 blocks from players, not by
   fences, two of a kind always left; game animals' entity data is read for this), `bot/cooking.ts`
   (raw meat cooked with wood: the furnaces near home are tried in turn, the court's own in the

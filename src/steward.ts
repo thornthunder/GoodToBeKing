@@ -103,6 +103,11 @@ export interface CourtState {
   /** A storehouse left behind when the court moved, with things still in it. */
   formerStore?: boolean
   /**
+   * The field is dry, water is known (the fishing spot) and the court has a bucket or the iron
+   * for one: a bucket of water poured into the field's middle (crops grow faster by water).
+   */
+  waterField?: boolean
+  /**
    * Free hands with nothing else to do gather the basics by day (the King's wish, 2026-10-31):
    * the mine for coal, iron, copper and stone, then wood for the store.
    */
@@ -145,6 +150,8 @@ export type StewardAction =
   | { kind: 'farm'; by: string }
   /** Fish a while for the court's food. */
   | { kind: 'fish'; by: string }
+  /** Fetch a bucket of water for the dry field. */
+  | { kind: 'water'; by: string }
   /** Tend the grove: fell what has grown, plant the bare spots. */
   | { kind: 'forest'; by: string }
   /** Work on the estate round home: mend it, hang doors, light the dark. */
@@ -275,6 +282,11 @@ export function plan(s: CourtState): StewardAction[] {
   if (stoneFirst) {
     const by = anyone()
     if (by) out.push({ kind: 'mine', by, want: 16 })
+  }
+  // Water for a dry field, by day (a walk to the lake and back).
+  if (s.waterField && s.storehouse && !s.night && !rests('water')) {
+    const by = fitOne([], s.guards ?? [])
+    if (by) out.push({ kind: 'water', by })
   }
   // The field: bread is the court's food for good (hunting thins the animals out).
   if (

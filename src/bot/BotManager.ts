@@ -857,6 +857,14 @@ export class BotManager {
       resting: [...this.resting].filter(([, until]) => until > Date.now()).map(([kind]) => kind),
       underway: [...this.underway],
       basics: true,
+      waterField: Boolean(
+        this.household.farm &&
+          !this.household.farm.watered &&
+          this.household.fishing &&
+          (sum(/^(bucket|water_bucket)$/) > 0 ||
+            sum(/^iron_ingot$/) >= IRON_FOR_BUCKET ||
+            this.bots.some((b) => b.isFree() && b.carries(/^(bucket|water_bucket)$/) > 0))
+      ),
     }
     const actions = plan(state)
     this.log.debug(`housekeeping: ${JSON.stringify(state)} -> ${JSON.stringify(actions)}`)
@@ -985,6 +993,13 @@ export class BotManager {
         if (!farmer) return
         this.log.info(`housekeeping: ${farmer.cfg.name} tends the wheat field`)
         this.doing('farm', farmer.startFarming())
+        return
+      }
+      case 'water': {
+        const carrier = by(action.by)
+        if (!carrier) return
+        this.log.info(`housekeeping: ${carrier.cfg.name} fetches water for the field`)
+        this.doing('water', carrier.startWatering())
         return
       }
       case 'fish': {
@@ -2378,6 +2393,8 @@ const MAGIC_REQUEST_MS = 3 * 60_000
 const SUMMON_WAIT_MS = 3 * 60_000
 /** The other mind's bots join in their own time: at least this long before the gathering. */
 const OTHER_MIND_MS = 2 * 60_000
+/** A bucket is three iron. */
+const IRON_FOR_BUCKET = 3
 /** Below this many meals and raw meat in the storehouse, a soldier off the round hunts. */
 const ARMY_FOOD = 16
 /** Soldiers on patrol at once, and how long a shift walks before the next takes over. */

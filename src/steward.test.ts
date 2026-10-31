@@ -429,6 +429,13 @@ describe("the Castellan's account", () => {
     expect(kinds({ ...idle, night: true })).toEqual([])
   })
 
+  it('fetches water for a dry field by day, before tending it', () => {
+    const dry = { ...base, waterField: true, farm: { exists: true, work: 3 } }
+    expect(kinds(dry).slice(0, 2)).toEqual(['water:Henry', 'farm:George'])
+    expect(kinds({ ...dry, night: true })).not.toContain('water:Henry')
+    expect(kinds({ ...dry, resting: ['water'] })).not.toContain('water:Henry')
+  })
+
   it('carries the storehouse left behind over to the new one, once there is a new one', () => {
     const moved = { ...base, formerStore: true }
     expect(plan(moved)).toContainEqual({ kind: 'move', by: 'Henry' })

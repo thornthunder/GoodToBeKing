@@ -37,7 +37,15 @@ import { SEE_THROUGH } from '../build/sites'
 import { Vec3 as WorldVec } from 'vec3'
 import type { ChatFloor } from './ChatFloor'
 import { goals, type Pathfinder } from 'mineflayer-pathfinder'
-import { MAX_FIELD, PLOT_SEEDS, chooseFarm, extendFarm, type Farm } from '../build/farm'
+import {
+  MAX_FIELD,
+  PLOT_SEEDS,
+  chooseFarm,
+  extendFarm,
+  waterCell,
+  wateredFarm,
+  type Farm,
+} from '../build/farm'
 import { chooseFishingSpot, type FishingSpot } from '../build/fishing'
 import { chooseGrove } from '../build/grove'
 import { Handbuilder } from '../build/Handbuilder'
@@ -981,7 +989,8 @@ export class Bot extends EventEmitter {
       this.household?.setSpawn(this.cfg.name, undefined)
     })
     body.on('death', () => {
-      this.log.info('died')
+      const at = this.position()
+      this.log.info(`died${at ? ` at ${fmtVec(at)}` : ''}`)
       // Where (the court counts deaths at home: an overrun home is no place to send anyone).
       this.emit('died', this.position())
       this.died = true
@@ -1583,6 +1592,156 @@ export class Bot extends EventEmitter {
    * Fish for the court's food a few minutes (the water chosen once, near home), the catch into
    * the storehouse to be cooked. How many fish it caught.
    */
+  /**
+   * A bucket of water for the dry field: the storehouse's bucket (or one made of three iron),
+   * filled at the court's fishing water, poured into the field's middle square (dug out first).
+   * Tried on the Dev world, 2026-10-31: a bucket fills when the bot looks at a water source and
+   * uses it; full, it pours across the face of the first solid block it looks at.
+   */
+  async startWatering(): Promise<boolean> {
+    const body = this.body
+    const farm = this.household?.farm
+    const spot = this.household?.fishing
+    const chest = this.household?.storehouse
+    if (!body || !farm || farm.watered || !spot || !chest || this.gathering) return false
+    if (!byHand(this.gameMode())) return false
+    const at = waterCell(farm)
+    if (!at) return false
+    this.gathering = true
+    this.pauseWorks()
+    this.dutyFollowing = false
+    this.movement?.stop()
+    const log = this.log.child('water')
+    const walker = body as unknown as { pathfinder: Pathfinder }
+    const walk = async (x: number, y: number, z: number, range: number) => {
+      try {
+        await withTimeout(walker.pathfinder.goto(new goals.GoalNear(x, y, z, range)), 90_000)
+        return true
+      } catch (err) {
+        walker.pathfinder.setGoal(null)
+        log.info(`could not walk to ${x},${y},${z}: ${errMsg(err)}`)
+        return false
+      }
+    }
+    const use = async (item: string, look: WorldVec) => {
+      const held = body.inventory.items().find((i) => i.name === item)
+      if (!held) return false
+      await body.equip(held, 'hand')
+      await body.lookAt(look, true)
+      body.activateItem()
+      await sleep(1_200)
+      body.deactivateItem()
+      await sleep(500)
+      return true
+    }
+    try {
+      // A bucket: the storehouse's, else three iron (and wood for a table) to make one.
+      if (this.carries(/^(bucket|water_bucket)$/) === 0)
+        await this.gatherer?.withChest(chest, async (window) => {
+          const items = window.containerItems()
+          const bucket =
+            items.find((i) => i.name === 'water_bucket') ?? items.find((i) => i.name === 'bucket')
+          const take = async (re: RegExp, n: number) => {
+            for (const item of window.containerItems().filter((i) => re.test(i.name))) {
+              if (n <= 0) return
+              const k = Math.min(n, item.count)
+              await withTimeout(window.withdraw(item.type, item.metadata, k), 5_000)
+              n -= k
+            }
+          }
+          if (bucket) await withTimeout(window.withdraw(bucket.type, bucket.metadata, 1), 5_000)
+          else {
+            await take(/^iron_ingot$/, 3)
+            await take(/^crafting_table$/, 1)
+            if (this.carries(/^crafting_table$/) === 0) await take(/_planks$/, 4)
+          }
+          return 0
+        })
+      if (this.carries(/^(bucket|water_bucket)$/) === 0 && this.carries(/^iron_ingot$/) >= 3)
+        await craft(body, log, 'bucket', 1)
+      if (this.carries(/^(bucket|water_bucket)$/) === 0) {
+        log.info('no bucket, and no iron to make one')
+        return false
+      }
+      // Filled at the court's fishing water.
+      if (this.carries(/^water_bucket$/) === 0) {
+        const [sx, sy, sz] = spot.stand
+        const [wx, wy, wz] = spot.water
+        if (!(await walk(sx, sy, sz, 1))) return false
+        await use('bucket', new WorldVec(wx + 0.5, wy + 0.9, wz + 0.5))
+        if (this.carries(/^water_bucket$/) === 0) {
+          log.info(`the bucket did not fill at ${wx},${wy},${wz}`)
+          return false
+        }
+        log.info('filled a bucket at the lake')
+      }
+      // Into the field's middle square: wheat and farmland dug out, the water poured on the floor.
+      // Poured from the square beside it (walking does not trample farmland): from further off
+      // the look would meet the next square's top first, and the water would run over the wheat.
+      const [x, z] = at
+      const beside = [
+        [x + 1, z],
+        [x - 1, z],
+        [x, z + 1],
+        [x, z - 1],
+      ].find(([bx, bz]) => farm.cells.some(([cx, cz]) => cx === bx && cz === bz))
+      if (!beside) return false
+      try {
+        await withTimeout(
+          walker.pathfinder.goto(new goals.GoalBlock(beside[0], farm.y + 1, beside[1])),
+          90_000
+        )
+      } catch (err) {
+        walker.pathfinder.setGoal(null)
+        log.info(`could not get beside the field's middle: ${errMsg(err)}`)
+        return false
+      }
+      for (const y of [farm.y + 1, farm.y]) {
+        const block = body.blockAt(new WorldVec(x, y, z))
+        if (block && !/^(air|water)$/.test(block.name))
+          await withTimeout(body.dig(block, true), 5_000).catch(() => {})
+      }
+      const floor = body.blockAt(new WorldVec(x, farm.y - 1, z))
+      const hole = body.blockAt(new WorldVec(x, farm.y, z))?.name
+      if (!floor || floor.boundingBox !== 'block' || hole !== 'air') {
+        log.info(`no hole to pour into at ${x},${farm.y},${z} (${hole} on ${floor?.name})`)
+        return false
+      }
+      await use('water_bucket', new WorldVec(x + 0.5, farm.y, z + 0.5))
+      const poured = /water$/.test(body.blockAt(new WorldVec(x, farm.y, z))?.name ?? '')
+      if (!poured) {
+        // Gone anywhere else (onto the wheat beside it): scooped straight back up.
+        for (let dx = -2; dx <= 2; dx++)
+          for (let dz = -2; dz <= 2; dz++) {
+            const p = new WorldVec(x + dx, farm.y + 1, z + dz)
+            const b = body.blockAt(p)
+            if (b?.name === 'water' && Number(b.getProperties?.()?.liquid_depth ?? 0) === 0)
+              await use('bucket', p.offset(0.5, 0.5, 0.5))
+          }
+        log.info(`the water did not go into the field at ${x},${farm.y},${z}`)
+        return false
+      }
+      this.household?.setFarm(wateredFarm(farm, at))
+      log.info(`poured water into the field at ${x},${farm.y},${z}: it drinks now`)
+      return true
+    } catch (err) {
+      log.warn(`watering failed: ${errMsg(err)}`)
+      return false
+    } finally {
+      // The bucket (and what was left of the iron and wood) back into the storehouse.
+      await this.gatherer
+        ?.withChest(chest, async (window) => {
+          for (const item of body.inventory.items())
+            if (/^(bucket|water_bucket|iron_ingot|crafting_table)$/.test(item.name))
+              await withTimeout(window.deposit(item.type, item.metadata, item.count), 5_000)
+          return 0
+        })
+        .catch(() => 0)
+      this.noteStock()
+      this.gathering = false
+    }
+  }
+
   /** Open water to fish in near home, if this bot can see any (see build/fishing.ts). */
   findFishingSpot(): FishingSpot | undefined {
     const home = this.household?.home
@@ -1882,7 +2041,10 @@ export class Bot extends EventEmitter {
     armour: Array<{ piece: keyof typeof ARMOUR; metal: 'iron' | 'copper' }>
   } {
     const body = this.body
-    let iron = stock.iron_ingot ?? 0
+    // Three iron are kept for a bucket while the field is dry and the court has none.
+    const bucket = (stock.bucket ?? 0) + (stock.water_bucket ?? 0) > 0
+    const keep = this.household?.farm && !this.household.farm.watered && !bucket ? 3 : 0
+    let iron = Math.max(0, (stock.iron_ingot ?? 0) - keep)
     let copper = stock.copper_ingot ?? 0
     const has = swordTier(bestSword(body?.inventory.items().map((i) => i.name) ?? []))
     const swordMetal =

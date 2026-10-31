@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chooseFarm, extendFarm, farmNeed, MAX_FIELD } from './farm'
+import { chooseFarm, extendFarm, farmNeed, MAX_FIELD, waterCell, wateredFarm } from './farm'
 import type { BlockNames } from './hall'
 
 /** Flat grass at y 64, air above; `extra` adds water, walls and the like. */
@@ -49,5 +49,23 @@ describe('the farm', () => {
     expect(farmNeed('stone', 'air')).toBeNull()
     // Its soil dug out: dirt goes in first.
     expect(farmNeed('air', 'air')).toBe('fill')
+  })
+})
+
+describe('water for the field', () => {
+  it("goes into the square nearest the field's middle, which leaves the field", () => {
+    const cells: Array<[number, number]> = []
+    for (let x = 94; x < 98; x++) for (let z = 6; z < 10; z++) cells.push([x, z])
+    const farm = { y: 68, cells, watered: false }
+    const at = waterCell(farm)
+    // The middle of 94..97 and 6..9 is 95.5, 7.5: one of the four squares round it.
+    expect(at && Math.hypot(at[0] - 95.5, at[1] - 7.5)).toBeCloseTo(Math.SQRT1_2)
+    const wet = wateredFarm(farm, at as [number, number])
+    expect(wet.cells).toHaveLength(15)
+    expect(wet).toMatchObject({ watered: true, water: at })
+    // Every square left drinks: within four of the water.
+    expect(
+      wet.cells.every(([x, z]) => Math.max(Math.abs(x - at![0]), Math.abs(z - at![1])) <= 4)
+    ).toBe(true)
   })
 })

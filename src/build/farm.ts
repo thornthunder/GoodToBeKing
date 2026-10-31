@@ -10,6 +10,8 @@ export interface Farm {
   cells: Array<[number, number]>
   /** Near water (crops grow faster), or dry. */
   watered: boolean
+  /** The square the court poured water into (it is no longer part of the field). */
+  water?: [number, number]
 }
 
 /** What a square of the field needs right now. */
@@ -71,6 +73,31 @@ export function chooseFarm(
 export const MAX_FIELD = 160
 /** Seeds kept back for the next plot (four by four). */
 export const PLOT_SEEDS = SIDE * SIDE
+
+/**
+ * The square for a bucket of water: the field's square nearest its middle (farmland drinks from
+ * four blocks away: the first plot all round it, and the plots beside it partly).
+ */
+export function waterCell(farm: Farm): [number, number] | undefined {
+  if (!farm.cells.length) return undefined
+  const xs = farm.cells.map(([x]) => x)
+  const zs = farm.cells.map(([, z]) => z)
+  const mx = (Math.min(...xs) + Math.max(...xs)) / 2
+  const mz = (Math.min(...zs) + Math.max(...zs)) / 2
+  return [...farm.cells].sort(
+    ([ax, az], [bx, bz]) => Math.hypot(ax - mx, az - mz) - Math.hypot(bx - mx, bz - mz)
+  )[0]
+}
+
+/** The field with water poured into this square: the square leaves it, the rest drinks. */
+export function wateredFarm(farm: Farm, at: [number, number]): Farm {
+  return {
+    ...farm,
+    cells: farm.cells.filter(([x, z]) => x !== at[0] || z !== at[1]),
+    watered: true,
+    water: at,
+  }
+}
 
 /**
  * Another plot of four by four beside the field, at its height, on flat untouched soil clear of
