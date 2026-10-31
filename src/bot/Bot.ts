@@ -69,6 +69,7 @@ import type { BlockNames } from '../build/hall'
 import { Cook } from './cooking'
 import { craft, makePlanks } from './crafting'
 import { Farmer } from './farming'
+import { bestSword, materialOf, type Gear } from '../army'
 import { Fisher } from './fishing'
 import { Forester } from './forestry'
 import { Miner, chooseMine } from './mining'
@@ -143,6 +144,8 @@ const ARMOUR_SLOT = {
 } as const
 /** Inventory slots of the armour worn (mineflayer's numbering). */
 const ARMOUR_INDEX = { helmet: 5, chestplate: 6, leggings: 7, boots: 8 } as const
+/** The off-hand slot (mineflayer's numbering). */
+const OFFHAND_INDEX = 45
 
 /** What the builders do for the estate round home. */
 export type EstateWork = 'light' | 'doors' | 'repair'
@@ -776,6 +779,22 @@ export class Bot extends EventEmitter {
   }
 
   /** Where a player stands, if this bot can see them. */
+  /** What this bot wears and carries, for "Bless the Army"; undefined when not in the world. */
+  gear(): Gear | undefined {
+    const body = this.body
+    if (!body || this.state.status !== 'spawned') return undefined
+    const slot = (i: number) => body.inventory.slots[i]?.name
+    const items = body.inventory.items().map((i) => i.name)
+    return {
+      head: materialOf(slot(ARMOUR_INDEX.helmet)),
+      chest: materialOf(slot(ARMOUR_INDEX.chestplate)),
+      legs: materialOf(slot(ARMOUR_INDEX.leggings)),
+      feet: materialOf(slot(ARMOUR_INDEX.boots)),
+      sword: bestSword(items),
+      shield: items.includes('shield') || slot(OFFHAND_INDEX) === 'shield',
+    }
+  }
+
   /** Is this player on the server (seen in the player list)? */
   isOnline(player: string): boolean {
     return this.body?.players?.[player] !== undefined
@@ -831,6 +850,8 @@ export class Bot extends EventEmitter {
 
     const options: MineflayerBotOptions = {
       ...serverOptions(server),
+      // Fewer chunks, less to decode on our one thread (guards keep near home).
+      ...(this.cfg.viewDistance ? { viewDistance: this.cfg.viewDistance } : {}),
       username: this.cfg.name,
       auth: auth.offline ? 'offline' : 'microsoft',
       offline: auth.offline,
@@ -1026,6 +1047,7 @@ export class Bot extends EventEmitter {
       case 'cast':
         // The King called the court from the other world: the court comes (see BotManager).
         if (action.summonCourt) this.emit('summonCourt', action.requestedBy)
+        if (action.blessArmy) this.emit('blessArmy', action.requestedBy)
         if (action.casts.length) void this.castSpell(action)
         return
       case 'gather':

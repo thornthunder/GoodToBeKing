@@ -83,7 +83,8 @@ export class Magic {
     private readonly opts: {
       file?: string
       /** The court's bots, for spells on the whole court. */
-      court?: string[]
+      /** The court's bots (those online, given as a function). */
+      court?: string[] | (() => string[])
       places?: () => Place[]
     } = {}
   ) {
@@ -206,7 +207,10 @@ export class Magic {
     try {
       casts = commandsFor(spell, {
         ...who,
-        court: (this.opts.court ?? []).filter((n) => n !== who.merlin),
+        court: (typeof this.opts.court === 'function'
+          ? this.opts.court()
+          : (this.opts.court ?? [])
+        ).filter((n) => n !== who.merlin),
         placeOf: (name) => this.place(name),
         args,
         giftId,
@@ -254,6 +258,12 @@ export class Magic {
       this.save()
     }
     return { ok: true }
+  }
+
+  /** Something given by commands of the court's own (the army's blessing): it fades after a day. */
+  noteGift(to: string, what: string, undo: string[], now = Date.now()): void {
+    this.gifts.push({ id: String(this.next++), to, what, undo, at: now, until: now + DAY })
+    this.save()
   }
 
   /** Gifts whose day is over, for these players (the ones online), not tried a moment ago. */

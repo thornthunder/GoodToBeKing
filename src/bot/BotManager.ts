@@ -58,12 +58,13 @@ import {
 } from '../build/hall'
 import { plan, type CourtState, type MagicWant, type StewardAction } from '../steward'
 import { Presence, worldWords } from '../presence'
+import { ArmyBoard, blessingSteps, wantsBlessing, type Gear } from '../army'
 import { RAW } from './cooking'
 import { farmNeed } from '../build/farm'
 import { groveNeed } from '../build/grove'
 import { FOODS } from './survival'
 import type { HallWork } from '../ai/Brain'
-import { ChatFloor } from './ChatFloor'
+import { ChatFloor, FilePartners } from './ChatFloor'
 
 /** Runtime state that should survive restarts (git-ignored). */
 const STATE_DIR = '.state'
@@ -76,6 +77,13 @@ const SHARED_DIR = process.env.SHARED_STATE_DIR || STATE_DIR
 const WORLD = process.env.COURT_WORLD
 /** The world the court lives in when the King has not called it away. */
 const HOME_WORLD = process.env.COURT_HOME_WORLD || 'dev'
+/**
+ * The mind this process is (COURT_DIVISION): "household" (Festaris's staff and Merlin: food,
+ * construction, supplies, repairs) or "army" (Sarge's soldiers: security). Unset: one mind, all.
+ */
+const DIVISION = process.env.COURT_DIVISION as 'household' | 'army' | undefined
+/** The household's mind keeps house, the works and the estate; the army only follows them. */
+const HOUSEHOLD = DIVISION !== 'army'
 
 /** A palace a royal orders goes up within this many blocks of the spot they chose. */
 const ORDERED_RADIUS = 48
@@ -142,14 +150,26 @@ export class BotManager {
     const court = new CourtRoster(cfg.court)
     this.court = court
     const botNames = cfg.bots.map((b) => b.name)
+    // This mind's bots; the other mind's are fellow courtiers it does not run.
+    const mine = cfg.bots.filter((b) => !DIVISION || (b.division ?? 'household') === DIVISION)
+    const mineNames = mine.map((b) => b.name)
+    const foreign = botNames.filter((n) => !mineNames.includes(n))
     // Who speaks: bots in configured order for the royals; the Castellan first for guests.
-    const castellanFirst = [...botNames].sort(
+    const castellanFirst = [...mineNames].sort(
       (a, b) => Number(isCastellan(cfg, b)) - Number(isCastellan(cfg, a))
     )
     // "GMH" (Get Me Home) from a royal is Merlin's to answer: he takes them to the hall.
     const wizard = cfg.bots.find((b) => b.magic)?.name
-    const floor = new ChatFloor(botNames, castellanFirst, (event) =>
-      wizard && isGetMeHome(event.message) && court.find(event.from) ? wizard : undefined
+    const floor = new ChatFloor(
+      mineNames,
+      castellanFirst,
+      (event) =>
+        wizard && isGetMeHome(event.message) && court.find(event.from) ? wizard : undefined,
+      {
+        foreign,
+        herald: HOUSEHOLD,
+        partners: DIVISION ? new FilePartners(path.resolve(STATE_DIR, 'floor.json')) : undefined,
+      }
     )
     const staff = cfg.bots.map((b) => ({
       name: b.name,
@@ -161,16 +181,18 @@ export class BotManager {
     const rules = new CourtRules(path.resolve(SHARED_DIR, 'rules.json'))
     // What each bot built, so "take it down" removes only that bot's own blocks.
     const builds = new BuildLog(path.resolve(STATE_DIR, 'builds.json'))
-    for (const botCfg of cfg.bots) {
+    for (const botCfg of mine) {
       const botLog = log.child(botCfg.name)
       const ai = new OllamaClient(botCfg.ai, botLog.child('ollama'))
       const hails = new HailLog(path.resolve(SHARED_DIR, `${botCfg.name}.hails.json`))
       const magic = botCfg.magic
-        ? new Magic({
+        ? (this.magic = new Magic({
             file: path.resolve(STATE_DIR, `magic-${botCfg.name.toLowerCase()}.json`),
-            court: botNames,
+            // The court's bots online, of either mind (a gathering tps only those).
+            court: () =>
+              botNames.filter((n) => this.bots.some((b) => b.cfg.magic && b.isOnline(n))),
             places: () => this.places(),
-          })
+          }))
         : undefined
       const brain = new OllamaBrain(botCfg, ai, court, botLog.child('brain'), {
         household: this.household,
@@ -209,9 +231,11 @@ export class BotManager {
         if (court.find(event.from)) this.lastRoyalLine = Date.now()
         // Every bot hears the line: the Castellan's ears are the ones that count.
         if (bot === this.castellan()) this.kingAnswers(event)
+        if (bot === this.sarge()) this.kingBlesses(event)
       })
       bot.on('commission', (request: CommissionRequest) => this.commission(bot, request))
       bot.on('summonCourt', (by: string) => this.summonCourt(bot, by))
+      bot.on('blessArmy', (by: string) => void this.blessArmy(bot, by))
       bot.on('works', (order: WorksOrder) => void this.orderWorks(bot, order))
       bot.on('gather', (errand: Errand) => void this.sendOnErrand(bot, errand))
       bot.on(
@@ -275,7 +299,7 @@ export class BotManager {
     }
     // Carry on with whatever the court was last building (the overlord's design, once there is one).
     const current = this.courtWorks().current ?? cfg.worksDesign
-    if (current) this.startWorks(current)
+    if (current && HOUSEHOLD) this.startWorks(current)
   }
 
   /**
@@ -520,6 +544,14 @@ export class BotManager {
 
   private lastHousekeeping = 0
   private lastMagicRequest = 0
+  /** Merlin's magic (in the household's mind). */
+  private magic?: Magic
+  /** The army's report and Merlin's blessing, between the two minds of this world. */
+  private readonly board = new ArmyBoard(path.resolve(STATE_DIR))
+  private lastArmyRound = 0
+  /** When Sarge last asked the King for the blessing (once in BLESS_ASK_MS). */
+  private blessAsked = 0
+  private blessing = false
   /** Where the court is (in which world), shared with the court of the other world. */
   private readonly presence = WORLD
     ? new Presence(path.resolve(SHARED_DIR, 'presence.json'), WORLD, HOME_WORLD)
@@ -936,6 +968,148 @@ export class BotManager {
     }
   }
 
+  /** The army's leader: the soldier whom the rest of the army reports to (Sarge). */
+  private sarge(): Bot | undefined {
+    return this.bots.find(
+      (b) => b.cfg.division === 'army' && this.bots.some((s) => s.cfg.reportsTo === b.cfg.name)
+    )
+  }
+
+  /**
+   * The army keeps itself (its own mind): every minute it tells the household's mind what each
+   * soldier wears and carries, arms a soldier without a sword from the storehouse, and Sarge asks
+   * the King, when he is near and the army lacks arms, to have Merlin bless it.
+   */
+  private async keepArmy(): Promise<void> {
+    if (Date.now() - this.lastArmyRound < ARMY_ROUND_MS) return
+    this.lastArmyRound = Date.now()
+    const sarge = this.sarge()
+    const soldiers: Record<string, Gear> = {}
+    for (const b of this.bots) {
+      const gear = b.gear()
+      if (gear) soldiers[b.cfg.name] = gear
+    }
+    const leader = sarge?.cfg.name ?? ''
+    const old = this.board.report()
+    this.board.writeReport({ at: Date.now(), leader, soldiers, request: old?.request })
+    // A sword from the storehouse for one soldier without (the household's stock, as last seen).
+    const stock = this.household.stock.items
+    const canArm =
+      this.household.storehouse &&
+      ((stock.cobblestone ?? 0) >= 2 ||
+        Object.entries(stock).some(([n, k]) => /_(log|planks)$/.test(n) && k > 0))
+    const unarmed = this.bots.find(
+      (b) => soldiers[b.cfg.name] && !soldiers[b.cfg.name].sword && b.isFree()
+    )
+    if (
+      canArm &&
+      unarmed &&
+      !this.underway.has('arm') &&
+      (this.resting.get('arm') ?? 0) < Date.now()
+    ) {
+      this.log.info(`the army: ${unarmed.cfg.name} makes a sword from the storehouse`)
+      this.doing('arm', unarmed.startArming())
+    }
+    // Sarge asks the King for the blessing: the army lacks arms, the King is near, not blessed today.
+    const king = this.king()
+    const blessed = this.board.blessing()
+    if (
+      !sarge ||
+      !king ||
+      !wantsBlessing(soldiers, leader) ||
+      (blessed && Date.now() - blessed.at < BLESSING_MS) ||
+      Date.now() - this.blessAsked < BLESS_ASK_MS
+    )
+      return
+    const kingAt = sarge.playerPosition(king.player)
+    const p = sarge.position()
+    if (!kingAt || !p || Math.hypot(kingAt.x - p.x, kingAt.z - p.z) > 32) return
+    this.blessAsked = Date.now()
+    this.log.info('the army: Sarge asks the King for the blessing')
+    await sarge.speak(
+      'Some of your soldiers have no proper armour, sword or shield. Ask the King, in one short, ' +
+        'brisk sentence, whether he would have Merlin bless the army.',
+      'Your Majesty, would you have Merlin bless the army?'
+    )
+  }
+
+  /** The King answers Sarge's question: on his yes the household's Merlin is asked to bless. */
+  private kingBlesses(event: ChatEvent): void {
+    if (Date.now() - this.blessAsked > ANSWER_MS) return
+    if (event.kind === 'system' || event.from !== this.king()?.player) return
+    const answer = confirmation(event.message)
+    if (!answer) return
+    this.blessAsked = Date.now() - ANSWER_MS - 1
+    this.log.info(`the army: the King says ${answer} to the blessing`)
+    if (answer === 'no') return
+    const report = this.board.report()
+    if (report) this.board.writeReport({ ...report, request: { by: event.from, at: Date.now() } })
+  }
+
+  /** Merlin (the household's mind) watches for a blessing the King granted Sarge. */
+  private watchBlessing(): void {
+    const request = this.board.report()?.request
+    const merlin = this.bots.find((b) => b.cfg.magic && b.magicAwake())
+    if (!request || !merlin || this.blessing) return
+    if (request.at <= (this.board.blessing()?.requestAt ?? 0)) return
+    if (Date.now() - request.at > 10 * 60_000) return
+    void this.blessArmy(merlin, request.by, request.at)
+  }
+
+  /**
+   * "Bless the Army", on the King's word: copper armour, a copper sword and a shield for every
+   * soldier with nothing better, iron for Sarge, from what the army last reported; once a day,
+   * and it fades after a day like all of Merlin's gifts.
+   */
+  private async blessArmy(merlin: Bot, by: string, requestAt?: number): Promise<void> {
+    if (this.blessing) return
+    this.blessing = true
+    try {
+      const address = this.court.find(by)?.address ?? 'Your Majesty'
+      const last = this.board.blessing()
+      const done = (at: number) => this.board.writeBlessing({ at, by, requestAt })
+      if (last && Date.now() - last.at < BLESSING_MS) {
+        done(last.at)
+        merlin.chat(
+          `The army was blessed today, ${address}; the blessing fades by tomorrow, and then I may bless it again.`
+        )
+        return
+      }
+      const report = this.board.report()
+      if (!report || Date.now() - report.at > 3 * 60_000) {
+        merlin.chat(`Alas, ${address}: I cannot see the army just now.`)
+        return
+      }
+      const soldiers = Object.fromEntries(
+        Object.entries(report.soldiers).filter(([name]) => merlin.isOnline(name))
+      )
+      const steps = blessingSteps(soldiers, report.leader)
+      if (!steps.length) {
+        done(last?.at ?? 0)
+        merlin.chat(`Every soldier is armed already, ${address}!`)
+        return
+      }
+      let given = 0
+      for (const step of steps) {
+        const result = await merlin.command(step.command)
+        if (!result.ok) {
+          this.log.info(`the blessing: "${step.command}" refused: ${result.output.join('; ')}`)
+          continue
+        }
+        this.magic?.noteGift(step.to, step.item, [step.undo])
+        given++
+      }
+      done(Date.now())
+      const blessed = new Set(steps.map((s) => s.to)).size
+      this.log.info(`the blessing: ${given} pieces for ${blessed} soldiers, by ${by}'s word`)
+      merlin.chat(
+        `Behold, ${address}: the army is blessed! Copper for the soldiers, iron for ${report.leader || 'their sergeant'}.`
+      )
+    } finally {
+      this.blessing = false
+    }
+  }
+
   /** The King, the highest rank at court. */
   private king(): CourtMember | undefined {
     const top = Math.max(1, ...this.court.members.map((m) => rankOf(m.role)))
@@ -1061,7 +1235,8 @@ export class BotManager {
 
   private placesCache?: { at: number; places: Place[] }
   /** The court's home and storehouse (survival). */
-  private readonly household = new Household(path.resolve(STATE_DIR, 'household.json'))
+  /** The household's own record; the army's mind follows it (read only). */
+  private readonly household = new Household(path.resolve(STATE_DIR, 'household.json'), !HOUSEHOLD)
   /** When each bot was last sent home, and how many walks in a row did not get it there. */
   private readonly homeTrips = new Map<string, { at: number; walks: number }>()
 
@@ -1394,18 +1569,26 @@ export class BotManager {
       // One failing step must not take the court down (a bot still joining once did: the
       // whole process died, and every bot was kept out for a minute as already connected).
       try {
-        // The royal family's wishes first, then the castle.
-        this.assignCommissions()
-        this.works?.tick(this.workers())
+        if (HOUSEHOLD) {
+          // The royal family's wishes first, then the castle.
+          this.assignCommissions()
+          this.works?.tick(this.workers())
+        }
         // Whoever is still free afterwards goes home.
         this.sendHome()
-        this.noteRoyals()
+        if (HOUSEHOLD) this.noteRoyals()
       } catch (err) {
         this.log.warn(`the court's round failed: ${errMsg(err)}`)
       }
-      void this.upkeepEstate()
-        .then(() => this.keepHouse())
-        .catch((err) => this.log.warn(`housekeeping failed: ${errMsg(err)}`))
+      if (HOUSEHOLD)
+        void this.upkeepEstate()
+          .then(() => this.keepHouse())
+          .catch((err) => this.log.warn(`housekeeping failed: ${errMsg(err)}`))
+      if (!HOUSEHOLD)
+        void this.keepArmy().catch((err) =>
+          this.log.warn(`the army's round failed: ${errMsg(err)}`)
+        )
+      if (HOUSEHOLD) this.watchBlessing()
       void this.followCourt().catch((err) =>
         this.log.warn(`following the court failed: ${errMsg(err)}`)
       )
@@ -1909,7 +2092,9 @@ export class BotManager {
     if (!summoned) return
     const travellers = this.bots.filter((b) => !b.cfg.everywhere)
     const arrived = travellers.every((b) => b.position() !== undefined)
-    if (!arrived && Date.now() - summoned.at < SUMMON_WAIT_MS) return
+    const waited = Date.now() - summoned.at
+    // The other mind's bots come in their own process: give them time too.
+    if ((!arrived || (DIVISION && waited < OTHER_MIND_MS)) && waited < SUMMON_WAIT_MS) return
     this.summoned = undefined
     if (!summoned.merlin.isOnline(summoned.by)) return
     await summoned.merlin.castCommand('gather', {
@@ -1940,6 +2125,14 @@ const HOUSEKEEPING_MS = 60_000
 const MAGIC_REQUEST_MS = 3 * 60_000
 /** Merlin gathers the court to the King when all have come, or after this long anyway. */
 const SUMMON_WAIT_MS = 3 * 60_000
+/** The other mind's bots join in their own time: at least this long before the gathering. */
+const OTHER_MIND_MS = 2 * 60_000
+/** The army's round: its report to the household, a sword made, the blessing asked for. */
+const ARMY_ROUND_MS = 60_000
+/** Sarge asks the King for the blessing at most this often. */
+const BLESS_ASK_MS = 30 * 60_000
+/** The army is blessed once a day (the gifts fade after a day). */
+const BLESSING_MS = 24 * 60 * 60_000
 /** The Castellan asks the King for Merlin's help at most this often. */
 const ASK_MS = 20 * 60_000
 /** The King's yes or no counts this long after the question. */

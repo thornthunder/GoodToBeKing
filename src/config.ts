@@ -119,6 +119,16 @@ export interface BotConfig {
   magic?: boolean
   /** In every world at once (Merlin); the rest of the court is in one (see presence.ts). */
   everywhere?: boolean
+  /**
+   * The mind it belongs to: "household" (the default: Festaris's food, construction, supplies
+   * and repairs, and Merlin) or "army" (Sarge's security). Each runs in its own process
+   * (COURT_DIVISION); one process runs them all when that is unset.
+   */
+  division?: 'household' | 'army'
+  /** Chunks it asks the server to send around it (12 when unset); guards near home need fewer. */
+  viewDistance?: number
+  /** What it writes down: all it hears (the default), or only talk it took part in or was named in. */
+  remembers?: 'all' | 'own'
 }
 
 /** "escort" = follow the first of `royals` who is online and in sight, unless told otherwise. */

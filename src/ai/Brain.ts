@@ -78,6 +78,8 @@ export type BotAction =
       requestedBy: string
       /** The King asked to bring everyone, and the court is in the other world: it comes. */
       summonCourt?: boolean
+      /** The King bids Merlin bless the army (see army.ts). */
+      blessArmy?: boolean
     }
   /** Build it yourself, now. */
   | { type: 'build'; blueprint: BlueprintId; palette: Palette; requestedBy: string }

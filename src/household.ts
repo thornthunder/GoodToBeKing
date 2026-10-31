@@ -60,16 +60,44 @@ const ESTATE_CLEAR = 4
  * The court's household: its home (where courtiers with nothing to do gather) and its storehouse
  * (a chest the royal family pointed out), with what was last seen in it. File-backed.
  */
-export class Household {
-  private data: Saved = {}
+/** A followed household is looked at again this often. */
+const FOLLOW_MS = 2_000
 
-  constructor(private readonly file?: string) {
-    if (file && fs.existsSync(file)) {
-      try {
-        this.data = JSON.parse(fs.readFileSync(file, 'utf8')) as Saved
-      } catch {
-        // A broken file: the court simply has no home yet.
-      }
+export class Household {
+  private saved: Saved = {}
+  private mtime = 0
+  private checked = 0
+
+  /**
+   * @param follow read only, as another mind keeps it (the army follows the household's): read
+   *   again when the file changed, never written
+   */
+  constructor(
+    private readonly file?: string,
+    private readonly follow = false
+  ) {
+    this.load()
+  }
+
+  private get data(): Saved {
+    if (this.follow && Date.now() - this.checked > FOLLOW_MS) this.load()
+    return this.saved
+  }
+
+  private set data(value: Saved) {
+    this.saved = value
+  }
+
+  private load(): void {
+    this.checked = Date.now()
+    if (!this.file || !fs.existsSync(this.file)) return
+    try {
+      const mtime = fs.statSync(this.file).mtimeMs
+      if (mtime === this.mtime) return
+      this.saved = JSON.parse(fs.readFileSync(this.file, 'utf8')) as Saved
+      this.mtime = mtime
+    } catch {
+      // A broken file (or one being written): the court simply has no home yet.
     }
   }
 
@@ -317,7 +345,7 @@ export class Household {
   }
 
   private save(): void {
-    if (!this.file) return
+    if (!this.file || this.follow) return
     fs.mkdirSync(path.dirname(this.file), { recursive: true })
     fs.writeFileSync(this.file, JSON.stringify(this.data, null, 2))
   }

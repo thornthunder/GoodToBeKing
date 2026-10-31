@@ -93,6 +93,24 @@ changed). The King asking Merlin to bring everyone in the world the court is not
 them to him. A court the King left in a world other than home goes home a day after he was last
 there (`returnIfForgotten`, `AWAY_MS`). The King's wish, 2026-10-31.
 
+The court has two minds (the King's design, 2026-10-31), one process each in every world
+(`COURT_DIVISION`; compose services `court` and `army`, containers `…-court`/`…-court-army` and
+`…-test`/`…-test-army`): the **household** (Merlin, Festaris, Henry, George, Joan, Wat: food,
+construction, supplies, repairs; it keeps house, the estate and the works) and the **army**
+(Sarge and nine soldiers: Bruce, Dyke, Aldric, Cedric, Edwin, Osric, Percy, Rowan, Tobias:
+security). One process ran out of thread at about eight bots. The army follows the household's
+`household.json` read only (`Household(file, follow)`); a line naming a soldier, or from a player
+last talking with one (`FilePartners`, `.state/floor.json`), is the army's, the rest the
+household's, which alone has the herald. The army reports each soldier's gear every minute in
+`.state/army.json`, makes swords from the storehouse, and Sarge asks the King (near, at most every
+30 minutes) whether Merlin may bless the army; the King's yes to Sarge, or "Merlin, bless the
+army", has the household's Merlin cast it (`BotManager.blessArmy`, `army.ts blessingSteps`):
+copper armour, a copper sword and a shield where a soldier has nothing better, iron for Sarge;
+once a day (`.state/blessing.json`), outside the hour's ten, fading after a day like every gift.
+Ordinary soldiers write down only talk they took part in or were named in (`remembers: own`)
+and ask for six chunks around them (`viewDistance`). Commands for the army's bots go to
+`.state/.command-army`; its log to `.state/logs/army`.
+
 ### Stopping a running app
 
 Create a file named `.stop` in the project root. The app checks for it every second, sends

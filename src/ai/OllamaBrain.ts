@@ -443,6 +443,14 @@ export class OllamaBrain implements Brain {
     const heard = this.heard
     this.heard = undefined
     if (!heard) return
+    // A soldier of the ranks writes down only the talk he took part in or was named in: ten of
+    // them noting every word near the hall kept the memory model busy for minutes.
+    const name = this.cfg.name
+    if (
+      this.cfg.remembers === 'own' &&
+      !heard.lines.some((l) => l.startsWith(`${name}:`) || mentionsName(l, name))
+    )
+      return
     const earlier = this.lastHeard
     this.lastHeard = heard.lines.slice(-4)
     this.learning = this.learning
@@ -670,10 +678,20 @@ export class OllamaBrain implements Brain {
     let gifts = false
     /** The court is called over from this world (the King asked to bring everyone). */
     let summon: string | undefined
+    /** The King bids Merlin bless the army. */
+    let bless = false
     let left = magic.magicLeft()
     const whom = (target: string) =>
       target === member.player ? 'you' : target === this.cfg.name ? 'me' : this.labelOf(target)
     for (const request of requests) {
+      // The King's own spell: the army clothed in copper, Sarge in iron (see army.ts).
+      if (request.id === BLESS_ARMY.id) {
+        if (rankOf(member.role) < this.topRank()) {
+          refused.push(`${BLESS_ARMY.name}: only the King may bid it`)
+          declined.push('only the King may bid me bless the army')
+        } else bless = true
+        continue
+      }
       const spell = request.id === 'unknown' ? undefined : magic.find(request.id)
       if (!spell) {
         refused.push(
@@ -766,17 +784,20 @@ export class OllamaBrain implements Brain {
     // magic left for.
     const line = summon
       ? `At once, ${member.address}! I call the court here from ${summon}: they will be with you in a minute.`
-      : gifts || declined.length
-        ? spellLine(member.address, given, declined)
-        : undefined
+      : bless && !casts.length
+        ? `At once, ${member.address}: I bless the army!`
+        : gifts || declined.length
+          ? spellLine(member.address, given, declined)
+          : undefined
     return {
-      ...(casts.length || summon
+      ...(casts.length || summon || bless
         ? {
             action: {
               type: 'cast' as const,
               casts,
               requestedBy: member.player,
               ...(summon ? { summonCourt: true } : {}),
+              ...(bless ? { blessArmy: true } : {}),
             },
           }
         : {}),
@@ -846,7 +867,10 @@ export class OllamaBrain implements Brain {
     const magic = this.magic
     if (!magic) return undefined
     return {
-      spells: magic.spells().map((s) => ({ id: s.id, does: s.does, needs: needs(s) })),
+      spells: [
+        ...magic.spells().map((s) => ({ id: s.id, does: s.does, needs: needs(s) })),
+        { id: BLESS_ARMY.id, does: BLESS_ARMY.does, needs: [] },
+      ],
       places: magic.places().map((p) => p.name),
       guide: stepGuide(),
     }
@@ -1695,10 +1719,7 @@ export class OllamaBrain implements Brain {
           'When someone talks to one of them by name, let that one answer.',
       `- ${this.chainOfCommand()}`,
       this.magic &&
-        `- You work magic: ${this.magic
-          .spells()
-          .map((s) => s.name)
-          .join(', ')}. You cast a spell when ` +
+        `- You work magic: ${[...this.magic.spells().map((s) => s.name), `${BLESS_ARMY.name} (only on the King's word, once a day)`].join(', ')}. You cast a spell when ` +
           'the royal family asks; the magic happens by itself, so just talk about it. You know no ' +
           `other spells, but the King can teach you new ones. By the King's own rule your magic ` +
           `does at most ${MAGIC_PER_HOUR} things an hour, all spells together: each casting counts ` +
@@ -2009,4 +2030,14 @@ export function aboutMagicPowers(fact: string): boolean {
   return /\b(can|cannot|can't|could|couldn't|is (not )?able to|is unable to|unable to|knows how to|has not (yet )?learned|does not (possess|know how to))\s+(\w+\s+){0,2}(magic|conjure|cast|summon\w*|enchant\w*|weave|spells?|charms?)\b/i.test(
     fact
   )
+}
+
+/**
+ * The King's spell (2026-10-31): Merlin clothes the army where it has nothing better, copper for
+ * the soldiers and iron for Sarge; cast by the court (see BotManager.blessArmy), not by steps.
+ */
+const BLESS_ARMY = {
+  id: 'bless_army',
+  name: 'Bless the Army',
+  does: "Clothes every soldier of the army in copper armour with a copper sword and a shield, and Sarge in iron, where they have nothing better; only on the King's word, once a day; it fades after a day.",
 }

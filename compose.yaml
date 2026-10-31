@@ -2,6 +2,10 @@
 #   docker compose up -d --build        start (or rebuild after a git pull)
 #   docker compose logs -f              watch the court
 #   docker compose stop                 every bot says goodbye properly
+#
+# The court has two minds, one process each: the household (Merlin, Festaris and his staff: food,
+# construction, supplies, repairs) and the army (Sarge and his soldiers: security). They share
+# this world's .state; one process would have to run all sixteen bots on one thread.
 services:
   court:
     build: .
@@ -12,17 +16,34 @@ services:
     # the game server, and Ollama answers at localhost.
     network_mode: host
     env_file: .env
-    environment:
+    environment: &environment
+      COURT_DIVISION: household
       # Developer commands: write a line to ./.state/.command on the host.
       COMMAND_FILE: .state/.command
       # One folder for the courts of both worlds (COURT_WORLD in .env): each courtier's memories,
       # orders and hails, the royals' rules, and which world the court is in. COURT_SHARED in .env
       # names it on the host (the same for both checkouts).
       SHARED_STATE_DIR: .shared
-    volumes:
+    volumes: &volumes
       - ./.state:/app/.state
       - ${COURT_SHARED:-./.shared}:/app/.shared
       - ./config/court.json:/app/config/court.json:ro
       - /etc/localtime:/etc/localtime:ro
-    # Six bots disconnect one by one; a hard kill would leave their sessions on the server.
+    # The bots disconnect one by one; a hard kill would leave their sessions on the server.
+    stop_grace_period: 60s
+  army:
+    # The court's image (built by the service above).
+    image: goodtobeking-court
+    container_name: goodtobeking-court-army
+    depends_on: [court]
+    restart: unless-stopped
+    network_mode: host
+    env_file: .env
+    environment:
+      <<: *environment
+      COURT_DIVISION: army
+      # Commands for the army's bots: ./.state/.command-army.
+      COMMAND_FILE: .state/.command-army
+      LOG_DIR: .state/logs/army
+    volumes: *volumes
     stop_grace_period: 60s

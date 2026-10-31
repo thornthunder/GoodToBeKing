@@ -72,4 +72,32 @@ describe('ChatFloor', () => {
     floor.setOnline('Merlin', false)
     expect(floor.responder(line('King', 'GMH!'))).toBe('Bruce')
   })
+
+  it("in two minds: lines for the other mind's bots are left to it", () => {
+    const partners = new Map<string, { bot: string; at: number }>()
+    const shared = {
+      get: (p: string) => partners.get(p),
+      set: (p: string, bot: string, at: number) => void partners.set(p, { bot, at }),
+    }
+    const household = new ChatFloor(['Merlin', 'Festaris'], undefined, undefined, {
+      foreign: ['Sarge', 'Bruce'],
+      partners: shared,
+    })
+    const army = new ChatFloor(['Sarge', 'Bruce'], undefined, undefined, {
+      foreign: ['Merlin', 'Festaris'],
+      herald: false,
+      partners: shared,
+    })
+    for (const b of ['Merlin', 'Festaris']) household.setOnline(b, true)
+    for (const b of ['Sarge', 'Bruce']) army.setOnline(b, true)
+    expect(household.responder(line('King', 'Bruce, stand guard'))).toBeNull()
+    expect(army.responder(line('King', 'Bruce, stand guard'))).toBe('Bruce')
+    expect(household.responder(line('King', 'hello everyone'))).toBe('Merlin')
+    expect(army.responder(line('King', 'hello everyone'))).toBeNull()
+    expect(army.isHerald('Sarge')).toBe(false)
+    // Talking with Bruce: the next unnamed line is his.
+    army.replied('Bruce', 'King')
+    expect(household.responder(line('King', 'and stay there'))).toBeNull()
+    expect(army.responder(line('King', 'and stay there'))).toBe('Bruce')
+  })
 })
