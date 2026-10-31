@@ -37,31 +37,39 @@ function standable(names: BlockNames, x: number, y: number, z: number): boolean 
   )
 }
 
+/** Offsets within `reach`, nearest first (the search stops at the first water that will do). */
+function nearestFirst(reach: number): Array<[number, number]> {
+  const out: Array<[number, number, number]> = []
+  for (let dx = -reach; dx <= reach; dx++)
+    for (let dz = -reach; dz <= reach; dz++) {
+      const far = Math.hypot(dx, dz)
+      if (far <= reach) out.push([dx, dz, far])
+    }
+  return out.sort((a, b) => a[2] - b[2]).map(([dx, dz]) => [dx, dz])
+}
+
 /**
  * The nearest open water within `reach` of home (the surface within eight blocks of home's
- * height) with a shore spot two to four blocks from it, so a cast lands in the water.
+ * height) with a shore spot two to four blocks from it, so a cast lands in the water. (On the
+ * Dev world the nearest lake lies 65 blocks from home: a walk of half a minute.)
  */
 export function chooseFishingSpot(
   names: BlockNames,
   home: { x: number; y: number; z: number },
-  reach = 64
+  reach = 96
 ): FishingSpot | undefined {
-  const options: Array<{ spot: FishingSpot; far: number }> = []
-  for (let dx = -reach; dx <= reach; dx += 1)
-    for (let dz = -reach; dz <= reach; dz += 1) {
-      const far = Math.hypot(dx, dz)
-      if (far > reach) continue
-      const x = home.x + dx
-      const z = home.z + dz
-      for (let y = home.y + 8; y >= home.y - 8; y--) {
-        if (!WATER.test(names(x, y, z) ?? '')) continue
-        if (!openWater(names, x, y, z)) break
-        const stand = shoreNear(names, x, y, z)
-        if (stand) options.push({ spot: { water: [x, y, z], stand }, far })
-        break
-      }
+  for (const [dx, dz] of nearestFirst(reach)) {
+    const x = home.x + dx
+    const z = home.z + dz
+    for (let y = home.y + 8; y >= home.y - 8; y--) {
+      if (!WATER.test(names(x, y, z) ?? '')) continue
+      if (!openWater(names, x, y, z)) break
+      const stand = shoreNear(names, x, y, z)
+      if (stand) return { water: [x, y, z], stand }
+      break
     }
-  return options.sort((a, b) => a.far - b.far)[0]?.spot
+  }
+  return undefined
 }
 
 /** A dry spot on the shore two to four blocks from the water, at the water's height or one up. */

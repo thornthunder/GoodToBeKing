@@ -750,6 +750,15 @@ export class BotManager {
         p !== undefined && kingAt !== undefined && Math.hypot(kingAt.x - p.x, kingAt.z - p.z) < 32
       )
     }
+    // Water to fish in, looked for once in an hour (fishing needs a rod, and Merlin conjures one
+    // only once the court knows of water: without this nobody ever looked).
+    if (this.household.waterNearHome() === undefined) {
+      const spot = eyes.findFishingSpot()
+      if (spot) {
+        this.household.setFishing(spot)
+        this.log.info(`housekeeping: water to fish in at ${spot.water.join(',')}`)
+      } else this.household.noteNoWater()
+    }
     const state: CourtState = {
       kingNear: near(castellan) || near(merlin),
       merlinAwake: merlin?.magicAwake() ?? false,

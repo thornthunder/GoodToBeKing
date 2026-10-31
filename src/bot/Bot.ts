@@ -38,7 +38,7 @@ import { Vec3 as WorldVec } from 'vec3'
 import type { ChatFloor } from './ChatFloor'
 import { goals, type Pathfinder } from 'mineflayer-pathfinder'
 import { MAX_FIELD, PLOT_SEEDS, chooseFarm, extendFarm, type Farm } from '../build/farm'
-import { chooseFishingSpot } from '../build/fishing'
+import { chooseFishingSpot, type FishingSpot } from '../build/fishing'
 import { chooseGrove } from '../build/grove'
 import { Handbuilder } from '../build/Handbuilder'
 import {
@@ -1583,6 +1583,13 @@ export class Bot extends EventEmitter {
    * Fish for the court's food a few minutes (the water chosen once, near home), the catch into
    * the storehouse to be cooked. How many fish it caught.
    */
+  /** Open water to fish in near home, if this bot can see any (see build/fishing.ts). */
+  findFishingSpot(): FishingSpot | undefined {
+    const home = this.household?.home
+    const names = this.fastNames()
+    return home && names ? chooseFishingSpot(names, home) : undefined
+  }
+
   async startFishing(minutes = 4): Promise<number> {
     const fisher = this.fisher
     const body = this.body
