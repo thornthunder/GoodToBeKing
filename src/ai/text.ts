@@ -44,7 +44,7 @@ export function cleanChatReply(text: string, botName: string, otherLabels: strin
 
 /** True when `message` contains `name` as a whole word, case-insensitively. */
 /**
- * "GMH" (Get Me Home): the King's signal for Merlin to take him back to the hall at once.
+ * "GMH" (Get Me Home): a royal's signal for Merlin to take them back to the hall at once.
  * Upper or lower case, dots allowed ("G.M.H."), alone or in a line ("Merlin, GMH!").
  */
 export function isGetMeHome(message: string): boolean {

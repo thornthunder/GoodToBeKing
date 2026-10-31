@@ -258,9 +258,9 @@ Windows, killing a background `npx` shell does not kill its node children at all
   royal who outranks the one asking; only the King teaches a spell, and Merlin learns it after
   repeating it back and a "yes". `Bot.command` sends a command and waits for `command_output`.
   One request can hold up to three spells, cast in order ("take us both to the castle and gather
-  the court" = portal, portal, gather). "GMH" (Get Me Home) from the King is routed to Merlin
-  (`ChatFloor` route, `isGetMeHome`) and cast at once without the model reading it: Portal on the
-  King to "home" (the home spot), else the castles' great hall, with a fixed line; the model
+  the court" = portal, portal, gather). "GMH" (Get Me Home) from any royal is routed to Merlin
+  (`ChatFloor` route, `isGetMeHome`) and cast at once without the model reading it: Portal on
+  them to "home" (the home spot), else the castles' great hall, with a fixed line; the model
   speaks only when it cannot be cast. A taught spell is tidied first (`tidySteps`: one thing per
   step, missing whom = the target).
 - Bedrock horses: a saddle can only go on a tame horse ("commands.generic.exception" otherwise);

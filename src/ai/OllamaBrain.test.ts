@@ -1016,7 +1016,7 @@ describe('OllamaBrain court behaviour', () => {
       expect(again?.action).toMatchObject({ casts: [{ args: { place: 'home' } }] })
     })
 
-    it('"GMH" with the magic asleep, or from the Princess, is no portal', async () => {
+    it('"GMH" with the magic asleep, or from a guest, is no portal; the Princess goes home', async () => {
       const magic = new Magic({ places: () => [{ name: 'home', x: 1, y: 2, z: 3 }] })
       const { brain, calls } = makeBrain('My magic sleeps.', {}, new HailLog(), { magic })
       magic.available = false
@@ -1025,7 +1025,14 @@ describe('OllamaBrain court behaviour', () => {
       expect(calls[0].at(-1)?.content).toContain('Your magic is asleep')
       magic.available = true
       const princess = await brain.onChat(chat('LittleOne42', 'GMH'), ctx('LittleOne42'))
-      expect(princess?.action).toBeUndefined()
+      expect(princess?.action).toEqual({
+        type: 'cast',
+        casts: [{ spell: 'portal', args: { place: 'home' }, target: 'LittleOne42' }],
+        requestedBy: 'LittleOne42',
+      })
+      expect(princess?.say).toContain('Your Highness')
+      const guest = await brain.onChat(chat('Stranger', 'GMH'), ctx('Stranger'))
+      expect(guest?.action).toBeUndefined()
     })
 
     it('will not work magic on a royal who outranks the one asking', async () => {

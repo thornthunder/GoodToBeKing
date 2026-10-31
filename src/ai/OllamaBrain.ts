@@ -318,15 +318,9 @@ export class OllamaBrain implements Brain {
       const whispered = event.kind === 'whisper' ? `(whispered to ${ctx.botName} alone) ` : ''
       this.hear(`${whispered}${this.court.label(event.from)}: ${event.message}`, member)
     }
-    // "GMH" (Get Me Home), the King's signal: Merlin portals him to the hall at once, without
-    // the model reading the line first (it may be said with a creeper at his heels).
-    if (
-      member &&
-      this.magic &&
-      ctx.hears !== false &&
-      rankOf(member.role) >= this.topRank() &&
-      isGetMeHome(event.message)
-    ) {
+    // "GMH" (Get Me Home), the royals' signal: Merlin portals them to the hall at once, without
+    // the model reading the line first (it may be said with a creeper at their heels).
+    if (member && this.magic && ctx.hears !== false && isGetMeHome(event.message)) {
       return this.getMeHome(member, ctx)
     }
     // Royal orders are read by the bot that answers, by every bot named, and by everyone who
@@ -710,7 +704,7 @@ export class OllamaBrain implements Brain {
   }
 
   /**
-   * The King said "GMH": Portal on him to the court's hall (the home spot, else the great hall of
+   * A royal said "GMH": Portal on them to the court's hall (the home spot, else the great hall of
    * the castles), with a line of Merlin's own at once. Only when it cannot be cast (no hall known,
    * magic asleep) does the model put the reason in words.
    */
