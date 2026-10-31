@@ -27,6 +27,8 @@ const FILLER_ORDER = [GROUPS.stone, /_planks$/, /^dirt$/]
 const EARTH_ORDER = [/^dirt$/, GROUPS.stone, /_planks$/]
 export const itemsFor = (block: string): RegExp => GROUPS[block] ?? new RegExp(`^${block}$`)
 
+/** How far above its feet a builder towers up to a spot (a hall's roof from its floor). */
+const TOWER_HIGH = 6
 /** Blocks a builder towers up on when a spot is out of reach, and takes away afterwards. */
 const SCAFFOLD = /^(dirt|cobblestone)$/
 /** What a block may be placed into. */
@@ -130,7 +132,9 @@ export class Handbuilder {
     const events = this.bot as unknown as NodeJS.EventEmitter
     events.on('blockPlaced', onPlaced)
     try {
-      this.useBuildingRules(true)
+      // Towers only to reach a spot nothing stands by (see reach): walking to materials and back,
+      // the pathfinder raised pillars up a palace's outer wall, and a builder fell from one.
+      this.useBuildingRules(false)
       await this.getMaterials(job, storehouse, stayIn)
       placing = true
       if (!this.cancelled) await this.placeAll(job, result)
@@ -454,9 +458,12 @@ export class Handbuilder {
       }
       const ref = this.reference(c)
       if (!ref) return false
-      const order = c.block === 'filler' ? FILLER_ORDER : c.block === 'earth' ? EARTH_ORDER : undefined
+      const order =
+        c.block === 'filler' ? FILLER_ORDER : c.block === 'earth' ? EARTH_ORDER : undefined
       const item = order
-        ? order.map((kind) => this.bot.inventory.items().find((i) => kind.test(i.name))).find(Boolean)
+        ? order
+            .map((kind) => this.bot.inventory.items().find((i) => kind.test(i.name)))
+            .find(Boolean)
         : this.bot.inventory.items().find((i) => itemsFor(c.block).test(i.name))
       if (!item) return false
       try {
@@ -518,12 +525,17 @@ export class Handbuilder {
       }
       if (this.inReach(c)) return true
     }
-    // Nowhere to stand: let the pathfinder tower up close to it.
+    // Nowhere to stand: let the pathfinder tower up close to it, a few blocks at most (a roof
+    // from the floor under it, not a storey up from the ground outside).
+    const tower = c.y - this.bot.entity.position.y <= TOWER_HIGH
+    this.useBuildingRules(tower)
     try {
       await withTimeout(this.bot.pathfinder.goto(new goals.GoalNear(c.x, c.y, c.z, 3)), 30_000)
     } catch (err) {
       this.log.debug(`could not get near ${key(c)}: ${errMsg(err)}`)
       this.bot.pathfinder.setGoal(null)
+    } finally {
+      this.useBuildingRules(false)
     }
     return this.inReach(c)
   }

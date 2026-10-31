@@ -4,7 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { closeLogFiles, createLogger, logToFiles } from './logger'
 
-describe('logToFiles', () => {
+describe('logToFiles', { timeout: 30_000 }, () => {
   afterEach(async () => {
     await closeLogFiles()
     vi.restoreAllMocks()

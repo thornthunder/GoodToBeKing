@@ -562,16 +562,23 @@ export class Bot extends EventEmitter {
         .filter((i) => FOOD_ITEM.test(i.name))
         .reduce((n, i) => n + i.count, 0) ?? 0
     const before = count()
-    await gatherer.withChest(chest, async (window) => {
-      let left = 4
-      for (const item of window.containerItems().filter((i) => FOOD_ITEM.test(i.name))) {
-        if (left <= 0) break
-        const n = Math.min(left, item.count)
-        await window.withdraw(item.type, item.metadata, n)
-        left -= n
-      }
-      return 0
-    })
+    // Busy meanwhile: once the home was a long walk from the storehouse, the hungry were called
+    // home halfway there every minute, and never ate.
+    this.gathering = true
+    try {
+      await gatherer.withChest(chest, async (window) => {
+        let left = 4
+        for (const item of window.containerItems().filter((i) => FOOD_ITEM.test(i.name))) {
+          if (left <= 0) break
+          const n = Math.min(left, item.count)
+          await window.withdraw(item.type, item.metadata, n)
+          left -= n
+        }
+        return 0
+      })
+    } finally {
+      this.gathering = false
+    }
     this.noteStock()
     return Math.max(0, count() - before)
   }
