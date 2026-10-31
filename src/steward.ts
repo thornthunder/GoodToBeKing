@@ -418,9 +418,11 @@ export function plan(s: CourtState): StewardAction[] {
       why: 'coal for torches',
     })
   // A fishing rod when food runs short, water is known and no string to make one of: food for
-  // good (string comes only from spiders, which nobody hunts; game near home runs out).
+  // good (string comes only from spiders, which nobody hunts; game near home runs out). Before
+  // the loaves: four of them at a time spent the hour's magic every hour (2026-10-31), and the
+  // rod, one thing, never fitted in what was left.
   if (hungry && water === true && !canFish && someone && s.storehouse)
-    wants.push({ item: 'fishing_rod', count: 1, to: someone, why: 'a fishing rod for the court' })
+    wants.unshift({ item: 'fishing_rod', count: 1, to: someone, why: 'a fishing rod for the court' })
   // The most urgent want; from Merlin, the most urgent he can still grant this hour.
   const first = wants[0]
   const affordable = wants.find((w) => s.magicLeft - w.count >= MAGIC_RESERVE)

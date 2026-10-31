@@ -316,6 +316,16 @@ describe("the Castellan's account", () => {
       to: 'Henry',
       why: 'a fishing rod for the court',
     })
+    // Courtiers with nothing to eat: the rod before the loaves (one thing, food for good), and
+    // the loaves the round after.
+    const starving = { ...rodless, foodInStore: 0, withoutFood: ['Henry', 'George', 'Bruce'] }
+    expect(plan(starving)).toContainEqual(
+      expect.objectContaining({ kind: 'magic', item: 'fishing_rod' })
+    )
+    const rodded = { ...starving, fishing: { rod: true, string: 0, water: true } }
+    expect(plan(rodded)).toContainEqual(
+      expect.objectContaining({ kind: 'magic', item: 'bread', to: 'Henry' })
+    )
     // No water near home: no fishing, and no rod for it.
     const dry = { ...short, fishing: { rod: true, string: 0, water: false } }
     expect(plan(dry).some((a) => a.kind === 'fish')).toBe(false)
