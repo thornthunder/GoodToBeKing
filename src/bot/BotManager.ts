@@ -1391,14 +1391,24 @@ export class BotManager {
   private runWorks(): void {
     clearInterval(this.worksTimer)
     this.worksTimer = setInterval(() => {
-      // The royal family's wishes first, then the castle.
-      this.assignCommissions()
-      this.works?.tick(this.workers())
-      // Whoever is still free afterwards goes home.
-      this.sendHome()
-      this.noteRoyals()
-      void this.upkeepEstate().then(() => this.keepHouse())
-      void this.followCourt()
+      // One failing step must not take the court down (a bot still joining once did: the
+      // whole process died, and every bot was kept out for a minute as already connected).
+      try {
+        // The royal family's wishes first, then the castle.
+        this.assignCommissions()
+        this.works?.tick(this.workers())
+        // Whoever is still free afterwards goes home.
+        this.sendHome()
+        this.noteRoyals()
+      } catch (err) {
+        this.log.warn(`the court's round failed: ${errMsg(err)}`)
+      }
+      void this.upkeepEstate()
+        .then(() => this.keepHouse())
+        .catch((err) => this.log.warn(`housekeeping failed: ${errMsg(err)}`))
+      void this.followCourt().catch((err) =>
+        this.log.warn(`following the court failed: ${errMsg(err)}`)
+      )
     }, 5_000)
   }
 

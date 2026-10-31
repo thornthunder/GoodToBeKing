@@ -321,7 +321,7 @@ export class Bot extends EventEmitter {
         this.court?.members.find((m) => m.title.toLowerCase() === title.toLowerCase())
       )
       .map((m) => m?.player)
-      .find((player) => player && body.players[player]?.entity)
+      .find((player) => player && body.players?.[player]?.entity)
   }
 
   /**
@@ -494,7 +494,7 @@ export class Bot extends EventEmitter {
     if (!body || !this.court) return []
     return [...this.state.players.values()]
       .filter((p) => this.court?.find(p.name))
-      .map((p) => body.players[p.name]?.entity?.position)
+      .map((p) => body.players?.[p.name]?.entity?.position)
       .filter((p): p is WorldVec => p !== undefined)
   }
 
@@ -687,7 +687,7 @@ export class Bot extends EventEmitter {
     if (post?.type !== 'follow' || !movement || this.building) return
     const current = movement.current()
     if (current?.kind === 'following' && current.target === post.target) return
-    if (!this.body?.players[post.target]?.entity) return
+    if (!this.body?.players?.[post.target]?.entity) return
     this.mason?.cancel()
     if (movement.follow(post.target, { quiet: true }) === 'ok') {
       this.dutyFollowing = false
@@ -778,11 +778,11 @@ export class Bot extends EventEmitter {
   /** Where a player stands, if this bot can see them. */
   /** Is this player on the server (seen in the player list)? */
   isOnline(player: string): boolean {
-    return this.body?.players[player] !== undefined
+    return this.body?.players?.[player] !== undefined
   }
 
   playerPosition(name: string): Point | undefined {
-    const p = this.body?.players[name]?.entity?.position
+    const p = this.body?.players?.[name]?.entity?.position
     return p ? { x: p.x, y: p.y, z: p.z } : undefined
   }
 
@@ -2199,7 +2199,7 @@ export class Bot extends EventEmitter {
     const me = vec(this.body?.entity?.position) ?? this.state.position
     const lower = name.toLowerCase()
     const p = [...this.state.players.values()].find((x) => x.name.toLowerCase() === lower)
-    const pos = p && (vec(this.body?.players[p.name]?.entity?.position) ?? p.position)
+    const pos = p && (vec(this.body?.players?.[p.name]?.entity?.position) ?? p.position)
     return me && pos ? distance(me, pos) : undefined
   }
 
@@ -2265,7 +2265,7 @@ export class Bot extends EventEmitter {
       players: [...this.state.players.values()]
         .filter((p) => !this.isBot(p.name))
         .map((p) => {
-          const pos = vec(this.body?.players[p.name]?.entity?.position) ?? p.position
+          const pos = vec(this.body?.players?.[p.name]?.entity?.position) ?? p.position
           return { name: p.name, distance: me && pos ? distance(me, pos) : undefined }
         }),
       position: me,

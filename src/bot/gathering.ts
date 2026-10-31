@@ -530,7 +530,7 @@ export class Gatherer {
   /** Bring the things to the player and toss them over. Returns how many were handed over. */
   private async deliver(material: Material, count: number, player: string): Promise<number> {
     for (let attempt = 1; attempt <= 3; attempt++) {
-      const target = this.bot.players[player]?.entity
+      const target = this.bot.players?.[player]?.entity
       if (!target) {
         this.log.info(`${player} is out of sight: keeping the ${material}`)
         return 0
@@ -545,7 +545,7 @@ export class Gatherer {
         await sleep(1_000)
       }
     }
-    const near = this.bot.players[player]?.entity
+    const near = this.bot.players?.[player]?.entity
     const gap = near?.position.distanceTo(this.bot.entity.position)
     if (!near || gap === undefined || gap > TOSS_RANGE + 2) {
       this.log.info(

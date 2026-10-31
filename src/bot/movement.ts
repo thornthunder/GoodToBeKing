@@ -115,7 +115,7 @@ export class Movement {
 
   /** Keep walking after a player until told to stop. */
   follow(player: string, opts: { distance?: number; quiet?: boolean } = {}): MoveResult {
-    const entity = this.bot.players[player]?.entity
+    const entity = this.bot.players?.[player]?.entity
     if (!entity) return 'not_visible'
     this.stuck.reset()
     this.quiet = opts.quiet ?? false
@@ -130,7 +130,7 @@ export class Movement {
 
   /** Walk to where a player is now, then stop. */
   comeTo(player: string): MoveResult {
-    const entity = this.bot.players[player]?.entity
+    const entity = this.bot.players?.[player]?.entity
     if (!entity) return 'not_visible'
     this.stuck.reset()
     this.activity = { kind: 'coming', target: player }
