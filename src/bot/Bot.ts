@@ -1896,11 +1896,18 @@ export class Bot extends EventEmitter {
               ? Math.min(3, item.count)
               : /_planks$/.test(item.name) && noPick() && wood < 12
                 ? Math.min(12 - wood, item.count)
-                : item.name === 'crafting_table' && noPick() && this.carries(/^crafting_table$/) === 0
-                  ? 1
-                  : item.name === 'cobblestone' && !stonePick && this.carries(/^cobblestone$/) < 3
-                    ? Math.min(3, item.count)
-                    : 0
+                : // Two lumps of coal for torches in the dark branches (the rest light the house).
+                  /^(coal|charcoal)$/.test(item.name) &&
+                    this.carries(/^(torch|coal|charcoal)$/) === 0 &&
+                    item.count >= 4
+                  ? 2
+                  : item.name === 'crafting_table' &&
+                      noPick() &&
+                      this.carries(/^crafting_table$/) === 0
+                    ? 1
+                    : item.name === 'cobblestone' && !stonePick && this.carries(/^cobblestone$/) < 3
+                      ? Math.min(3, item.count)
+                      : 0
           if (n > 0) await withTimeout(window.withdraw(item.type, item.metadata, n), 5_000)
         }
         return 0

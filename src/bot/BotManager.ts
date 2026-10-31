@@ -424,9 +424,7 @@ export class BotManager {
           estate,
           words,
           // The first look after a start: whatever changed meanwhile is taken as it is.
-          (x, z, y) =>
-            !this.estateSeen ||
-            (this.royalWasNear(x, z) && !this.blownAway(x, y, z)),
+          (x, z, y) => !this.estateSeen || (this.royalWasNear(x, z) && !this.blownAway(x, y, z)),
           (x, y, z) => names(x, y, z) !== undefined
         )
       this.estateSeen = true
@@ -859,11 +857,11 @@ export class BotManager {
       basics: true,
       waterField: Boolean(
         this.household.farm &&
-          !this.household.farm.watered &&
-          this.household.fishing &&
-          (sum(/^(bucket|water_bucket)$/) > 0 ||
-            sum(/^iron_ingot$/) >= IRON_FOR_BUCKET ||
-            this.bots.some((b) => b.isFree() && b.carries(/^(bucket|water_bucket)$/) > 0))
+        !this.household.farm.watered &&
+        this.household.fishing &&
+        (sum(/^(bucket|water_bucket)$/) > 0 ||
+          sum(/^iron_ingot$/) >= IRON_FOR_BUCKET ||
+          this.bots.some((b) => b.isFree() && b.carries(/^(bucket|water_bucket)$/) > 0))
       ),
     }
     const actions = plan(state)
@@ -1430,6 +1428,11 @@ export class BotManager {
     if (then && worker)
       setTimeout(() => {
         if (then === 'farm') this.doing('farm', worker.startFarming())
+        else if (then === 'fish')
+          this.doing(
+            'fish',
+            worker.startFishing().then((n) => n > 0)
+          )
         else if (then === 'forest') this.doing('forest', worker.startForestry())
         else if (then === 'estate-light')
           this.doing('estate:light', worker.startEstateWork('light', castellan.cfg.name))

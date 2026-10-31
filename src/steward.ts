@@ -127,7 +127,7 @@ export type StewardAction =
       count: number
       to: string
       /** What the one given it does with it straight away (hall work, the field, the grove). */
-      then?: HallWork | 'farm' | 'forest' | 'estate-light'
+      then?: HallWork | 'farm' | 'forest' | 'estate-light' | 'fish'
       why: string
     }
   /** Ask the King for Merlin's help instead (he is near): `wants`, granted on his yes. */
@@ -422,7 +422,13 @@ export function plan(s: CourtState): StewardAction[] {
   // the loaves: four of them at a time spent the hour's magic every hour (2026-10-31), and the
   // rod, one thing, never fitted in what was left.
   if (hungry && water === true && !canFish && someone && s.storehouse)
-    wants.unshift({ item: 'fishing_rod', count: 1, to: someone, why: 'a fishing rod for the court' })
+    wants.unshift({
+      item: 'fishing_rod',
+      count: 1,
+      to: someone,
+      then: 'fish',
+      why: 'a fishing rod for the court',
+    })
   // The most urgent want; from Merlin, the most urgent he can still grant this hour.
   const first = wants[0]
   const affordable = wants.find((w) => s.magicLeft - w.count >= MAGIC_RESERVE)
@@ -430,7 +436,12 @@ export function plan(s: CourtState): StewardAction[] {
     // One question for the most urgent few, not one for each.
     const asked = wants.slice(0, 3)
     out.push({ kind: 'ask', what: askWords(asked.map((w) => w.why)), wants: asked })
-  } else if (affordable && s.merlinAwake) out.push({ kind: 'magic', ...affordable })
+  } else if (affordable && s.merlinAwake) {
+    out.push({ kind: 'magic', ...affordable })
+    // Whoever it is for keeps free for what it is for (a rod went to a miner, who took it down
+    // the mine and died there with it).
+    if (affordable.then) free.delete(affordable.to)
+  }
 
   // Stone: the mine, by day.
   let mining = stoneFirst

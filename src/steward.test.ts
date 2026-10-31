@@ -314,6 +314,8 @@ describe("the Castellan's account", () => {
       item: 'fishing_rod',
       count: 1,
       to: 'Henry',
+      // Henry fishes with it straight away (and is given nothing else meanwhile).
+      then: 'fish',
       why: 'a fishing rod for the court',
     })
     // Courtiers with nothing to eat: the rod before the loaves (one thing, food for good), and
