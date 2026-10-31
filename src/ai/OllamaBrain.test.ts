@@ -1204,5 +1204,19 @@ describe('aboutMagicPowers', () => {
     expect(aboutMagicPowers('Merlin conjured an iron sword for Bruce.')).toBe(false)
     expect(aboutMagicPowers("The Princess's favourite snack is dried kelp.")).toBe(false)
     expect(aboutMagicPowers('The Princess can build very fast.')).toBe(false)
+    expect(aboutMagicPowers('Merlin can use a summoning spell to bring the court together.')).toBe(
+      true
+    )
+    expect(aboutMagicPowers('Merlin stated that he cannot conjure netherite items.')).toBe(true)
+    // What the first cleanup took by mistake.
+    expect(
+      aboutMagicPowers(
+        'Festaris can build a little tower, a magic arch, a flower garden, or a simple castle.'
+      )
+    ).toBe(false)
+    expect(
+      aboutMagicPowers('Merlin does not know who was responsible for the blowing up of the Castle.')
+    ).toBe(false)
+    expect(aboutMagicPowers('Festaris asked if Merlin could conjure food for Bruce.')).toBe(false)
   })
 })

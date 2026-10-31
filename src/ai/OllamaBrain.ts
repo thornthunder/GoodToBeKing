@@ -1945,11 +1945,14 @@ export function spellLine(address: string, given: string[], declined: string[]):
   return `${opener}, ${address}: ${list(given)}!${sorry ? ` ${sorry}` : ''}`
 }
 
-/** A fact about what magic can or cannot do ("Merlin can conjure a protective ward"). */
+/**
+ * A fact about what magic can or cannot do ("Merlin can conjure a protective ward"): a claim word
+ * right before a magic word. Not "Festaris can build ... a magic arch", "the Castle", or "asked
+ * if Merlin could conjure": a cleanup that matched those threw good memories away.
+ */
 export function aboutMagicPowers(fact: string): boolean {
-  return (
-    /\b(can|cannot|can't|could|couldn't|is able|is unable|unable|knows how|has not (yet )?learned|does not (possess|know))\b/i.test(
-      fact
-    ) && /\b(magic|conjur\w*|spells?|cast\w*|wards?|summon\w*|enchant\w*|charms?)\b/i.test(fact)
+  if (/\basked (if|whether)\b/i.test(fact)) return false
+  return /\b(can|cannot|can't|could|couldn't|is (not )?able to|is unable to|unable to|knows how to|has not (yet )?learned|does not (possess|know how to))\s+(\w+\s+){0,2}(magic|conjure|cast|summon\w*|enchant\w*|weave|spells?|charms?)\b/i.test(
+    fact
   )
 }
