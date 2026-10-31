@@ -117,6 +117,8 @@ export interface BotConfig {
   works: boolean
   /** Works magic (Merlin): needs operator rights on the server, and cheats on. */
   magic?: boolean
+  /** In every world at once (Merlin); the rest of the court is in one (see presence.ts). */
+  everywhere?: boolean
 }
 
 /** "escort" = follow the first of `royals` who is online and in sight, unless told otherwise. */

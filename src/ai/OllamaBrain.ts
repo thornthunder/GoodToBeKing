@@ -74,6 +74,7 @@ import {
   mentionsName,
   mentionsNameLoosely,
 } from './text'
+import { worldWords } from '../presence'
 
 /** Do not hail the same player again if they rejoin within this window. */
 export const REHAIL_AFTER_MS = 10 * 60_000
@@ -198,6 +199,7 @@ export class OllamaBrain implements Brain {
   /** The builds the royal family asked for (shared by the court). */
   private readonly commissions?: CommissionBook
   private readonly household?: Household
+  private readonly realm?: Realm
   /** An order or rule from the King that clashes with others, waiting for "yes" or "no". */
   private pendingOrder?: {
     member: CourtMember
@@ -223,6 +225,7 @@ export class OllamaBrain implements Brain {
     this.magic = opts.magic
     this.commissions = opts.commissions
     this.household = opts.household
+    this.realm = opts.realm
   }
 
   /** Writes down what was heard now and resolves once every extraction has finished (for tests). */
@@ -561,6 +564,24 @@ export class OllamaBrain implements Brain {
   }
 
   /** The court's home and storehouse, as far as the royal family has chosen them. */
+  /** Which world this is; for Merlin, where the rest of the court is. */
+  private realmSection(): string | undefined {
+    const realm = this.realm
+    if (!realm) return undefined
+    const here = worldWords(realm.here)
+    if (!this.cfg.everywhere) return `- This is ${here}.`
+    const courtIn = realm.courtIn()
+    const others = this.staff.map((s) => s.name)
+    return (
+      `- You are in two worlds at once, by your magic: this is ${here}. ` +
+      (courtIn === realm.here
+        ? `The rest of the court (${listWords(others)}) is here with you.`
+        : `The rest of the court (${listWords(others)}) is in ${worldWords(courtIn)} now, not here.`) +
+      ` Only the King can call them to the world he is in, by asking you to bring everyone; a day ` +
+      `after he was last in another world they go back to ${worldWords(realm.home)} by themselves.`
+    )
+  }
+
   private householdSection(): string | undefined {
     const h = this.household
     if (!h?.home && !h?.storehouse) return undefined
@@ -647,6 +668,8 @@ export class OllamaBrain implements Brain {
     const given: string[] = []
     const declined: string[] = []
     let gifts = false
+    /** The court is called over from this world (the King asked to bring everyone). */
+    let summon: string | undefined
     let left = magic.magicLeft()
     const whom = (target: string) =>
       target === member.player ? 'you' : target === this.cfg.name ? 'me' : this.labelOf(target)
@@ -678,6 +701,16 @@ export class OllamaBrain implements Brain {
           `${spell.name}: it is for someone who outranks ${giver}, and needs their own wish`
         )
         declined.push(`the ${spell.name} for ${this.labelOf(target)} needs their own wish`)
+        continue
+      }
+      // Bringing everyone while the court is in the other world: the King calls them over.
+      const away = this.realm && this.realm.courtIn() !== this.realm.here
+      if (away && spell.steps.some((s) => s.kind === 'teleport' && s.who === 'court')) {
+        const from = worldWords(this.realm?.courtIn() ?? '')
+        if (rankOf(member.role) < this.topRank()) {
+          refused.push(`${spell.name}: the court is in ${from}, and only the King calls it here`)
+          declined.push(`the court is in ${from}, and only the King may call it here`)
+        } else summon = from
         continue
       }
       const args: SpellArgs = {
@@ -731,10 +764,21 @@ export class OllamaBrain implements Brain {
     // A gift, or anything refused: Merlin's words come from what is cast, not from the model,
     // which promised "a full set of iron armour" for a sword and two cakes the hour had no
     // magic left for.
-    const line = gifts || declined.length ? spellLine(member.address, given, declined) : undefined
+    const line = summon
+      ? `At once, ${member.address}! I call the court here from ${summon}: they will be with you in a minute.`
+      : gifts || declined.length
+        ? spellLine(member.address, given, declined)
+        : undefined
     return {
-      ...(casts.length
-        ? { action: { type: 'cast' as const, casts, requestedBy: member.player } }
+      ...(casts.length || summon
+        ? {
+            action: {
+              type: 'cast' as const,
+              casts,
+              requestedBy: member.player,
+              ...(summon ? { summonCourt: true } : {}),
+            },
+          }
         : {}),
       note: join(...notes),
       line,
@@ -1642,6 +1686,7 @@ export class OllamaBrain implements Brain {
             : `- You do not build yourself; ${listWords(this.staff.filter((s) => s.canBuild).map((s) => s.name)) || 'others'} build for the court.`,
       this.commissionsSection(),
       this.householdSection(),
+      this.realmSection(),
       !handWork &&
         (this.cfg.canBuild || this.builders().length > 0) &&
         '- The court builds wherever the royal family asks, never breaking anything anyone made.',
@@ -1779,6 +1824,15 @@ export interface BrainOptions {
   commissions?: CommissionBook
   /** The court's home and storehouse (survival), shared by the court. */
   household?: Household
+  /** Which world this is, and which one the court is in (see presence.ts). */
+  realm?: Realm
+}
+
+/** The worlds: this bot's, the court's own, and the one the court is in now. */
+export interface Realm {
+  here: string
+  home: string
+  courtIn: () => string
 }
 
 export interface StaffMember {

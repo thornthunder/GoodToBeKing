@@ -776,6 +776,11 @@ export class Bot extends EventEmitter {
   }
 
   /** Where a player stands, if this bot can see them. */
+  /** Is this player on the server (seen in the player list)? */
+  isOnline(player: string): boolean {
+    return this.body?.players[player] !== undefined
+  }
+
   playerPosition(name: string): Point | undefined {
     const p = this.body?.players[name]?.entity?.position
     return p ? { x: p.x, y: p.y, z: p.z } : undefined
@@ -1019,7 +1024,9 @@ export class Bot extends EventEmitter {
         })
         return
       case 'cast':
-        void this.castSpell(action)
+        // The King called the court from the other world: the court comes (see BotManager).
+        if (action.summonCourt) this.emit('summonCourt', action.requestedBy)
+        if (action.casts.length) void this.castSpell(action)
         return
       case 'gather':
         // The Castellan's errands go to whichever of his staff is free (see BotManager).

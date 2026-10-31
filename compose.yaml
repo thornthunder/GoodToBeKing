@@ -15,8 +15,13 @@ services:
     environment:
       # Developer commands: write a line to ./.state/.command on the host.
       COMMAND_FILE: .state/.command
+      # One folder for the courts of both worlds (COURT_WORLD in .env): each courtier's memories,
+      # orders and hails, the royals' rules, and which world the court is in. COURT_SHARED in .env
+      # names it on the host (the same for both checkouts).
+      SHARED_STATE_DIR: .shared
     volumes:
       - ./.state:/app/.state
+      - ${COURT_SHARED:-./.shared}:/app/.shared
       - ./config/court.json:/app/config/court.json:ro
       - /etc/localtime:/etc/localtime:ro
     # Six bots disconnect one by one; a hard kill would leave their sessions on the server.

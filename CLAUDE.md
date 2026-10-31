@@ -77,6 +77,22 @@ container's own log away. Paths stored in `.state`
 must be portable: `court-works.json` written on Windows had backslashes (`courtWorks()` turns
 them into `/`).
 
+### Two worlds, one court
+
+The court lives in the Dev world (the test server on the court VM, survival; the Princess's name
+for it); the Creative world is the family's main server. Each world has its own container
+(`~/court-test` with `COURT_WORLD=dev`, `~/GoodToBeKing` with `COURT_WORLD=creative`), and both
+mount one host folder (`COURT_SHARED`, `/home/jean/court-shared`) as `.shared`
+(`SHARED_STATE_DIR`): each courtier's memories, orders and hails, the royals' rules, and
+`presence.json`, the world the court is in (`src/presence.ts`). Everything of a world stays in
+its own `.state` (home, storehouse, estate, castle works, commissions, Merlin's gifts and his
+hour's magic). Merlin (`everywhere: true`) is in both worlds; the rest connect only where the
+court is (`BotManager.followCourt`, every 5 s, reading the file the other court may have
+changed). The King asking Merlin to bring everyone in the world the court is not in calls it over
+(`summonCourt`; the King only): the other court's bots leave, this one's join, and Merlin gathers
+them to him. A court the King left in a world other than home goes home a day after he was last
+there (`returnIfForgotten`, `AWAY_MS`). The King's wish, 2026-10-31.
+
 ### Stopping a running app
 
 Create a file named `.stop` in the project root. The app checks for it every second, sends

@@ -76,6 +76,8 @@ export type BotAction =
       type: 'cast'
       casts: Array<{ spell: string; args: SpellArgs; target: string }>
       requestedBy: string
+      /** The King asked to bring everyone, and the court is in the other world: it comes. */
+      summonCourt?: boolean
     }
   /** Build it yourself, now. */
   | { type: 'build'; blueprint: BlueprintId; palette: Palette; requestedBy: string }

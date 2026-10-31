@@ -1071,6 +1071,40 @@ describe('OllamaBrain court behaviour', () => {
       expect(again?.action).toMatchObject({ casts: [{ args: { place: 'home' } }] })
     })
 
+    it('brings the court over from the other world for the King, and only for him', async () => {
+      let courtIn = 'dev'
+      const { brain, calls, readings } = makeBrain('unused', {}, new HailLog(), {
+        magic: new Magic(),
+        realm: { here: 'creative', home: 'dev', courtIn: () => courtIn },
+      })
+      const gather = { lasting: false, spells: [{ id: 'gather', target: 'speaker' }] }
+      readings.push(order('Bring everyone.', gather))
+      const reply = await brain.onChat(chat('BigDad', 'merlin bring everyone'), ctx('BigDad'))
+      expect(reply).toEqual({
+        say: 'At once, Your Majesty! I call the court here from the Dev world: they will be with you in a minute.',
+        action: { type: 'cast', casts: [], requestedBy: 'BigDad', summonCourt: true },
+      })
+      readings.push(order('Bring everyone.', gather))
+      const princess = await brain.onChat(
+        chat('LittleOne42', 'merlin bring everyone'),
+        ctx('LittleOne42')
+      )
+      expect(princess).toEqual({
+        say: 'Alas, Your Highness: the court is in the Dev world, and only the King may call it here.',
+      })
+      expect(calls).toHaveLength(0)
+      // The court is here: an ordinary gathering.
+      courtIn = 'creative'
+      readings.push(order('Bring everyone.', gather))
+      const here = await brain.onChat(chat('BigDad', 'merlin bring everyone'), ctx('BigDad'))
+      expect(here?.action).toEqual({
+        type: 'cast',
+        casts: [{ spell: 'gather', args: {}, target: 'BigDad' }],
+        requestedBy: 'BigDad',
+      })
+      expect(brain.systemPrompt(ctx('BigDad'))).not.toContain('two worlds')
+    })
+
     it('"GMH" with the magic asleep, or from a guest, is no portal; the Princess goes home', async () => {
       const magic = new Magic({ places: () => [{ name: 'home', x: 1, y: 2, z: 3 }] })
       const { brain, calls } = makeBrain('My magic sleeps.', {}, new HailLog(), { magic })

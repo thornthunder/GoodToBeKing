@@ -57,6 +57,7 @@ import {
   tableCells,
 } from '../build/hall'
 import { plan, type CourtState, type MagicWant, type StewardAction } from '../steward'
+import { Presence, worldWords } from '../presence'
 import { RAW } from './cooking'
 import { farmNeed } from '../build/farm'
 import { groveNeed } from '../build/grove'
@@ -66,6 +67,15 @@ import { ChatFloor } from './ChatFloor'
 
 /** Runtime state that should survive restarts (git-ignored). */
 const STATE_DIR = '.state'
+/**
+ * What goes with each courtier from world to world (memories, orders, hails), the royals' rules,
+ * and where the court is: one folder for the courts of both worlds (SHARED_STATE_DIR).
+ */
+const SHARED_DIR = process.env.SHARED_STATE_DIR || STATE_DIR
+/** This court's world ("dev", "creative"); unset: one world, every bot in it. */
+const WORLD = process.env.COURT_WORLD
+/** The world the court lives in when the King has not called it away. */
+const HOME_WORLD = process.env.COURT_HOME_WORLD || 'dev'
 
 /** A palace a royal orders goes up within this many blocks of the spot they chose. */
 const ORDERED_RADIUS = 48
@@ -148,13 +158,13 @@ export class BotManager {
       reportsTo: b.reportsTo,
     }))
     // The rules the royal family lays down bind the whole court.
-    const rules = new CourtRules(path.resolve(STATE_DIR, 'rules.json'))
+    const rules = new CourtRules(path.resolve(SHARED_DIR, 'rules.json'))
     // What each bot built, so "take it down" removes only that bot's own blocks.
     const builds = new BuildLog(path.resolve(STATE_DIR, 'builds.json'))
     for (const botCfg of cfg.bots) {
       const botLog = log.child(botCfg.name)
       const ai = new OllamaClient(botCfg.ai, botLog.child('ollama'))
-      const hails = new HailLog(path.resolve(STATE_DIR, `${botCfg.name}.hails.json`))
+      const hails = new HailLog(path.resolve(SHARED_DIR, `${botCfg.name}.hails.json`))
       const magic = botCfg.magic
         ? new Magic({
             file: path.resolve(STATE_DIR, `magic-${botCfg.name.toLowerCase()}.json`),
@@ -168,13 +178,18 @@ export class BotManager {
         // Each bot remembers only what it heard itself, so one can keep a secret and news
         // travels by being told.
         memory: new CourtMemory(
-          path.resolve(STATE_DIR, `memory-${botCfg.name.toLowerCase()}.json`)
+          path.resolve(SHARED_DIR, `memory-${botCfg.name.toLowerCase()}.json`)
         ),
         staff,
-        orders: new OrderBook(path.resolve(STATE_DIR, `orders-${botCfg.name.toLowerCase()}.json`)),
+        orders: new OrderBook(path.resolve(SHARED_DIR, `orders-${botCfg.name.toLowerCase()}.json`)),
         rules,
         magic,
         commissions: this.commissions,
+        realm: this.presence && {
+          here: this.presence.here,
+          home: this.presence.home,
+          courtIn: () => this.presence?.world ?? '',
+        },
       })
       const bot = new Bot(botCfg, brain, botLog, {
         // Our own helper scripts' players (the surveyor) are ignored like fellow bots.
@@ -196,6 +211,7 @@ export class BotManager {
         if (bot === this.castellan()) this.kingAnswers(event)
       })
       bot.on('commission', (request: CommissionRequest) => this.commission(bot, request))
+      bot.on('summonCourt', (by: string) => this.summonCourt(bot, by))
       bot.on('works', (order: WorksOrder) => void this.orderWorks(bot, order))
       bot.on('gather', (errand: Errand) => void this.sendOnErrand(bot, errand))
       bot.on(
@@ -504,6 +520,15 @@ export class BotManager {
 
   private lastHousekeeping = 0
   private lastMagicRequest = 0
+  /** Where the court is (in which world), shared with the court of the other world. */
+  private readonly presence = WORLD
+    ? new Presence(path.resolve(SHARED_DIR, 'presence.json'), WORLD, HOME_WORLD)
+    : undefined
+  /** Bots of this court that are in the other world now. */
+  private readonly away = new Set<Bot>()
+  private moving = false
+  /** The King called the court here: Merlin gathers them to him once they have come. */
+  private summoned?: { by: string; at: number; merlin: Bot }
   /** What the Castellan last asked the King for, and when (once in ASK_MS: he does not nag). */
   private askedKing: { at: number; wants: MagicWant[] } = { at: 0, wants: [] }
   /** Work that came to nothing lately, and until when it rests (see steward.ts `resting`). */
@@ -1373,6 +1398,7 @@ export class BotManager {
       this.sendHome()
       this.noteRoyals()
       void this.upkeepEstate().then(() => this.keepHouse())
+      void this.followCourt()
     }, 5_000)
   }
 
@@ -1781,7 +1807,15 @@ export class BotManager {
 
   /** Connect bots one after another; a failure does not stop the others (auto-reconnect takes over). */
   async startAll(staggerMs = 2_000): Promise<void> {
-    for (const [i, bot] of this.bots.entries()) {
+    // The court is in one world; Merlin in every one.
+    const away = this.bots.filter((b) => !this.inThisWorld(b))
+    for (const bot of away) this.away.add(bot)
+    if (this.presence)
+      this.log.info(
+        `this is ${worldWords(this.presence.here)}; the court is in ${worldWords(this.presence.world)}` +
+          (away.length ? ` (not here: ${away.map((b) => b.cfg.name).join(', ')})` : '')
+      )
+    for (const [i, bot] of this.bots.filter((b) => !this.away.has(b)).entries()) {
       if (i > 0) await sleep(staggerMs)
       try {
         await bot.connect()
@@ -1806,6 +1840,75 @@ export class BotManager {
       setTimeout(() => void this.planNextCastle(), 30_000)
   }
 
+  /** Is this bot in this world: everywhere (Merlin), or where the court is. */
+  private inThisWorld(bot: Bot): boolean {
+    return !this.presence || bot.cfg.everywhere === true || this.presence.courtHere()
+  }
+
+  /**
+   * The court follows the King from world to world: its bots join this one or leave it to match
+   * the shared presence file (the court of the other world may have changed it). The King's being
+   * here is noted, and a court he left here a day ago goes home.
+   */
+  private async followCourt(): Promise<void> {
+    const presence = this.presence
+    if (!presence || this.moving || !this.ready) return
+    this.moving = true
+    try {
+      const king = this.king()
+      if (king && this.bots.some((b) => b.isOnline(king.player))) presence.noteKing()
+      if (presence.returnIfForgotten())
+        this.log.info(
+          `the King has not been in ${worldWords(presence.here)} for a day: the court goes back to ${worldWords(presence.home)}`
+        )
+      for (const bot of this.bots) {
+        if (bot.cfg.everywhere) continue
+        const here = presence.courtHere()
+        if (here && this.away.has(bot)) {
+          this.away.delete(bot)
+          this.log.info(`${bot.cfg.name} comes to ${worldWords(presence.here)}`)
+          await bot
+            .connect()
+            .catch((err) => this.log.warn(`${bot.cfg.name} failed to connect: ${errMsg(err)}`))
+          await sleep(2_000)
+        } else if (!here && !this.away.has(bot)) {
+          this.away.add(bot)
+          this.log.info(`${bot.cfg.name} goes to ${worldWords(presence.world)}`)
+          await bot.disconnect(`Called to ${worldWords(presence.world)}`)
+        }
+      }
+      await this.gatherSummoned()
+    } finally {
+      this.moving = false
+    }
+  }
+
+  /** The King asked Merlin, here, to bring everyone: the court comes over from the other world. */
+  private summonCourt(merlin: Bot, by: string): void {
+    const presence = this.presence
+    if (!presence || rankOf(this.court.find(by)?.role) < rankOf(this.king()?.role)) return
+    this.log.info(`${by} calls the court to ${worldWords(presence.here)}`)
+    presence.callHere(by)
+    this.summoned = { by, at: Date.now(), merlin }
+    void this.followCourt()
+  }
+
+  /** Once the court has come, Merlin brings them all to the King. */
+  private async gatherSummoned(): Promise<void> {
+    const summoned = this.summoned
+    if (!summoned) return
+    const travellers = this.bots.filter((b) => !b.cfg.everywhere)
+    const arrived = travellers.every((b) => b.position() !== undefined)
+    if (!arrived && Date.now() - summoned.at < SUMMON_WAIT_MS) return
+    this.summoned = undefined
+    if (!summoned.merlin.isOnline(summoned.by)) return
+    await summoned.merlin.castCommand('gather', {
+      target: summoned.by,
+      requestedBy: summoned.by,
+      args: {},
+    })
+  }
+
   async stopAll(): Promise<void> {
     clearInterval(this.worksTimer)
     await Promise.all(this.bots.map((bot) => bot.disconnect('Shutting down')))
@@ -1825,6 +1928,8 @@ const REST_MS = 10 * 60_000
 /** How often the Castellan takes stock of what the court needs, and asks Merlin for magic. */
 const HOUSEKEEPING_MS = 60_000
 const MAGIC_REQUEST_MS = 3 * 60_000
+/** Merlin gathers the court to the King when all have come, or after this long anyway. */
+const SUMMON_WAIT_MS = 3 * 60_000
 /** The Castellan asks the King for Merlin's help at most this often. */
 const ASK_MS = 20 * 60_000
 /** The King's yes or no counts this long after the question. */

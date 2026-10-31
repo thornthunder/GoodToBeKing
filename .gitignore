@@ -15,6 +15,8 @@ config/court.json
 .stop
 # Runtime state kept across restarts (hail times)
 .state/
+# State shared by the courts of both worlds (see compose.yaml)
+.shared/
 # Developer commands for a running app (see CLAUDE.md)
 .command
 
