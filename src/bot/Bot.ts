@@ -1720,28 +1720,42 @@ export class Bot extends EventEmitter {
     this.movement?.stop()
     const gatherer = this.gatherer
     try {
-      // A pickaxe, sticks, some wood (for a pickaxe and a crafting table) and torches.
+      // A pickaxe, sticks, some wood (for a pickaxe and a crafting table) and torches. Without a
+      // pickaxe (the other mind's miner may have the storehouse's): wood enough to make one, and
+      // the storehouse's crafting table if it has one (a pickaxe wants the big grid).
       await gatherer?.withChest(chest, async (window) => {
-        for (const item of window.containerItems()) {
+        const items = window.containerItems()
+        const pickInStore = items.some((i) => /_pickaxe$/.test(i.name))
+        const noPick = () => this.carries(/_pickaxe$/) === 0 && !pickInStore
+        for (const item of items) {
           // Cobblestone for a stone pickaxe, which lasts far longer than a wooden one.
           const stonePick = this.carries(/^stone_pickaxe$/) > 0
+          const wood = this.carries(/_log$/) * 4 + this.carries(/_planks$/)
           const n = /_pickaxe$|^torch$|^stick$/.test(item.name)
             ? item.count
-            : /_log$/.test(item.name) && this.carries(/_log$|_planks$/) < 4
+            : /_log$/.test(item.name) && wood < (noPick() ? 12 : 4)
               ? Math.min(3, item.count)
-              : item.name === 'cobblestone' && !stonePick && this.carries(/^cobblestone$/) < 3
-                ? Math.min(3, item.count)
-                : 0
+              : /_planks$/.test(item.name) && noPick() && wood < 12
+                ? Math.min(12 - wood, item.count)
+                : item.name === 'crafting_table' && noPick() && this.carries(/^crafting_table$/) === 0
+                  ? 1
+                  : item.name === 'cobblestone' && !stonePick && this.carries(/^cobblestone$/) < 3
+                    ? Math.min(3, item.count)
+                    : 0
           if (n > 0) await withTimeout(window.withdraw(item.type, item.metadata, n), 5_000)
         }
         return 0
       })
+      if (this.carries(/_pickaxe$/) === 0 && this.carries(/_log$|_planks$/) === 0) {
+        this.log.info('no pickaxe, and no wood in the storehouse to make one: no mining')
+        return 0
+      }
       const result = await miner.dig(mine, want)
       record.setMine(mine)
       await gatherer?.withChest(chest, async (window) => {
         for (const item of this.body?.inventory.items() ?? [])
           if (
-            /^(cobblestone|cobbled_deepslate|coal|raw_iron|raw_copper|dirt|andesite|diorite|granite|tuff|torch)$|_pickaxe$/.test(
+            /^(cobblestone|cobbled_deepslate|coal|raw_iron|raw_copper|dirt|andesite|diorite|granite|tuff|torch|crafting_table)$|_pickaxe$/.test(
               item.name
             )
           )

@@ -223,6 +223,13 @@ export class Miner {
       mine.branch = 0
       mine.branchSteps = 0
     }
+    // A new mine: to its entrance first (its first step is dug from there, within reach).
+    if (mine.steps === 0 && !(await this.walkTo(new Vec3(mine.x, mine.y, mine.z), 'the entrance'))) {
+      mine.lost = (mine.lost ?? 0) + 1
+      if (mine.lost >= LOST_ROUNDS) mine.ended = 'unreachable'
+      result.ended = mine.ended
+      return result
+    }
     // Down the stairs dug before, to where it stopped: the next is dug from there, within reach.
     if (mine.steps > 0) {
       if (!(await this.walkTo(lastSpot(mine), `the mine's end (step ${mine.steps})`))) {
