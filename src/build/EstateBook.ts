@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { Estate, EstateBuilding } from './estate'
+import { roomOfHome, type Estate, type EstateBuilding } from './estate'
 
 /** A block seen for the first time joins the estate once it has stood this long. */
 export const SETTLE_MS = 10 * 60_000
@@ -24,6 +24,8 @@ export interface EstateRecord {
   made: Record<string, string>
   /** New blocks not yet part of it: "x,y,z" -> [name, first seen]. */
   pending: Record<string, [string, number]>
+  /** The home stood in a room under a roof when the court came (see `finished`). */
+  finished?: boolean
 }
 
 /**
@@ -66,9 +68,34 @@ export class EstateBook {
       buildings: strip(estate.buildings),
       made: { ...estate.made },
       pending: {},
+      finished: roomOfHome(estate) !== undefined,
     }
     this.save()
     return this.data
+  }
+
+  /**
+   * Was the home finished when the court came: in a room under a roof that players built (the
+   * King's palace)? Then its walls, roof, doors and floor are the estate's, kept as they were,
+   * not the hall's to close up: on 2026-10-31 the court roofed over a palace's stair to its roof
+   * terrace and walled up two windows. A shell of walls a royal calls home is the court's to
+   * finish (roof, floor, door), as before.
+   */
+  finished(home: { x: number; y: number; z: number }): boolean {
+    const d = this.of(home)
+    if (!d) return false
+    if (d.finished !== undefined) return d.finished
+    // Older records: a room round the home spot in the last survey.
+    return d.buildings.some((b) =>
+      b.rooms.some(
+        (r) =>
+          Math.abs(r.y - home.y) <= 1 &&
+          home.x >= r.x &&
+          home.x < r.x + r.width &&
+          home.z >= r.z &&
+          home.z < r.z + r.depth
+      )
+    )
   }
 
   /**

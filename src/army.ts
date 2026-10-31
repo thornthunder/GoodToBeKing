@@ -134,6 +134,12 @@ export interface Blessing {
 }
 
 /** The two files between the minds of one world (in its .state). */
+/** A soldier's ask for Merlin's portal: when, and to which of the court's places. */
+export interface PortalAsk {
+  at: number
+  place: string
+}
+
 export class ArmyBoard implements MineRecord {
   constructor(private readonly dir: string) {}
 
@@ -154,15 +160,22 @@ export class ArmyBoard implements MineRecord {
   }
 
   /**
-   * Soldiers far from home (woken at the world spawn) asking the household's Merlin to bring
-   * them home by portal: name -> when asked. The army has no Merlin of its own.
+   * Soldiers asking the household's Merlin for a portal: home (woken at the world spawn), or the
+   * storehouse when there is no way there on foot. name -> when asked, and where to. The army
+   * has no Merlin of its own.
    */
-  portals(): Record<string, number> {
-    return this.read<Record<string, number>>('army-portals.json') ?? {}
+  portals(): Record<string, PortalAsk> {
+    const asked = this.read<Record<string, number | PortalAsk>>('army-portals.json') ?? {}
+    return Object.fromEntries(
+      Object.entries(asked).map(([name, ask]) => [
+        name,
+        typeof ask === 'number' ? { at: ask, place: 'home' } : ask,
+      ])
+    )
   }
 
-  askPortal(name: string, now = Date.now()): void {
-    this.write('army-portals.json', { ...this.portals(), [name]: now })
+  askPortal(name: string, now = Date.now(), place = 'home'): void {
+    this.write('army-portals.json', { ...this.portals(), [name]: { at: now, place } })
   }
 
   /**

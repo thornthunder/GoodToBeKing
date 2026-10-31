@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { untouched, type BlockNames } from './gathering'
+import { storeCap, surplus, untouched, type BlockNames } from './gathering'
 
 /** A small world: grass at y 64 over dirt, air above, plus whatever `extra` puts in. */
 function world(extra: Record<string, string> = {}): BlockNames {
@@ -53,5 +53,24 @@ describe('untouched land', () => {
     expect(untouched('wood', tree, 5, 65, 5)).toBe(true)
     const cabin = world({ '5,65,5': 'oak_log', '5,66,5': 'oak_log', '6,65,5': 'oak_planks' })
     expect(untouched('wood', cabin, 5, 65, 5)).toBe(false)
+  })
+})
+
+describe('what the storehouse keeps', () => {
+  it("throws away the mine's stone and what it has enough of", () => {
+    expect(storeCap('diorite')).toBe(0)
+    expect(storeCap('oak_log')).toBeUndefined()
+    const out = surplus(
+      [
+        { name: 'diorite', count: 12 },
+        { name: 'cobblestone', count: 64 },
+        { name: 'cobblestone', count: 30 },
+        { name: 'oak_sapling', count: 5 },
+        { name: 'birch_sapling', count: 9 },
+        { name: 'raw_iron', count: 3 },
+      ],
+      { cobblestone: 200, oak_sapling: 14, birch_sapling: 2 }
+    )
+    expect(Object.fromEntries(out)).toEqual({ diorite: 12, cobblestone: 38, oak_sapling: 3 })
   })
 })

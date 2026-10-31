@@ -296,6 +296,18 @@ export class BotManager {
       // To a named place (the storehouse left behind), by Merlin's portal.
       bot.portalTo = async (place: string) => {
         const merlin = this.bots.find((b) => b.magicAwake())
+        // The army asks the household's Merlin, and waits a while for him.
+        if (!merlin && !HOUSEHOLD && place === 'the storehouse' && !bot.buildsByMagic()) {
+          const from = bot.position()
+          this.log.info(`${bot.cfg.name} asks the household's Merlin for a portal to ${place}`)
+          this.board.askPortal(bot.cfg.name, Date.now(), place)
+          for (let i = 0; i < 20; i++) {
+            await sleep(1_000)
+            const p = bot.position()
+            if (from && p && Math.hypot(p.x - from.x, p.y - from.y, p.z - from.z) > 4) return true
+          }
+          return false
+        }
         if (!merlin || bot.buildsByMagic()) return false
         this.placesCache = undefined
         this.log.info(`${merlin.cfg.name} sends ${bot.cfg.name} to ${place} by portal`)
@@ -436,7 +448,7 @@ export class BotManager {
           this.estate.of(home)?.made ?? {},
           names,
           (b) => (stock[b] ?? 0) > 0
-        ).filter((c) => !this.household.hallColumn(c.x, c.z)).length,
+        ).filter((c) => this.estate.finished(home) || !this.household.hallColumn(c.x, c.z)).length,
         doors: estateDoorCells(estate, names, 4, this.estate.of(home)?.made).length,
         light: estateLightCells(estate, names, 16).length,
       }
@@ -566,15 +578,16 @@ export class BotManager {
     const merlin = this.bots.find((b) => b.magicAwake())
     if (!merlin || !this.household.home) return
     const now = Date.now()
-    for (const [name, at] of Object.entries(this.board.portals())) {
+    for (const [name, { at, place }] of Object.entries(this.board.portals())) {
       if (now - at > PORTAL_ASK_MS || at <= (this.portalsDone.get(name) ?? 0)) continue
       this.portalsDone.set(name, at)
-      if (!merlin.isOnline(name) || this.homeOverrun(merlin)) continue
-      this.log.info(`${merlin.cfg.name} sends ${name} of the army home by portal`)
+      if (!merlin.isOnline(name) || (place === 'home' && this.homeOverrun(merlin))) continue
+      this.log.info(`${merlin.cfg.name} sends ${name} of the army to ${place} by portal`)
+      this.placesCache = undefined
       void merlin.castCommand('portal', {
         target: name,
         requestedBy: merlin.cfg.name,
-        args: { place: 'home' },
+        args: { place },
       })
     }
   }
@@ -704,6 +717,8 @@ export class BotManager {
     // walls, roof, doors and light are the estate's work; its furniture the hall's.
     const room = typeof surveyed === 'string' && !this.household.hall ? this.estateRoom : undefined
     const hall = typeof surveyed === 'string' ? (this.household.hall ?? room) : surveyed
+    // A home found finished (the King's palace): the same, though its walls close a hall.
+    const finished = this.estate.finished(home)
     if (!hall) return void this.log.info(`housekeeping: cannot see the hall (${surveyed})`)
     /** Furniture of the estate this near home (the King's own furnace, a crafting table). */
     const nearHome = (kind: string, reach: number) =>
@@ -775,23 +790,24 @@ export class BotManager {
       guards: staff.filter((b) => b.isGuard()).map((b) => b.cfg.name),
       builderWithBeds: carrying(/^bed$/),
       builderWithCoal: carrying(/^(coal|charcoal)$/),
-      hall: room
-        ? {
-            roof: 0,
-            door: 0,
-            light: 0,
-            repair: 0,
-            earth: 0,
-            table: tableCells(hall, names).length === 0 || nearHome('crafting_table', 24),
-          }
-        : {
-            roof: roofCells(hall, names).length,
-            door: doorCells(hall, names).length,
-            light: lightCells(hall, names).length,
-            repair: this.household.hall ? repairCells(this.household.hall, names).length : 0,
-            earth: reinforceCells(hall, names).length,
-            table: tableCells(hall, names).length === 0,
-          },
+      hall:
+        room || finished
+          ? {
+              roof: 0,
+              door: 0,
+              light: 0,
+              repair: 0,
+              earth: 0,
+              table: tableCells(hall, names).length === 0 || nearHome('crafting_table', 24),
+            }
+          : {
+              roof: roofCells(hall, names).length,
+              door: doorCells(hall, names).length,
+              light: lightCells(hall, names).length,
+              repair: this.household.hall ? repairCells(this.household.hall, names).length : 0,
+              earth: reinforceCells(hall, names).length,
+              table: tableCells(hall, names).length === 0,
+            },
       storeHasCoal: sum(/^(coal|charcoal)$/) > 0,
       withoutFood: this.bots
         .filter((b) => b.position() && b.carries(FOOD_ITEM) === 0)

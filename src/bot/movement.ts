@@ -94,10 +94,12 @@ export class Movement {
     movements.canDig = false
     movements.allow1by1towers = false
     movements.scafoldingBlocks = []
-    movements.allowParkour = true
     movements.allowSprinting = true
     movements.canOpenDoors = doors
-    // Survival (doors): no drop that hurts; a fall of more than three blocks costs health.
+    // Survival (doors): no drop that hurts; a fall of more than three blocks costs health. And no
+    // jumps across gaps: on 2026-10-31 five soldiers died in a row at one spot, jumping a pit
+    // three wide by the hall (a Bedrock server often cuts a running jump short).
+    movements.allowParkour = !doors
     if (doors) movements.maxDropDown = 3
     this.bot.pathfinder.setMovements(movements)
     // Paths through a door (the hall's) take a while to work out.

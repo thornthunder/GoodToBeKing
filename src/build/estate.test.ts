@@ -173,6 +173,24 @@ describe('the estate book', { timeout: 30_000 }, () => {
     expect(b.record?.made['7,64,8']).toBe('oak_planks')
   })
 
+  it("knows a home found under a roof (the King's palace) from a shell the court finishes", () => {
+    const b = book()
+    b.found(surveyEstate(house(), HOME, OPTS), 'a house', 'BigDad')
+    expect(b.finished(HOME)).toBe(true)
+    // Another home: not this estate's.
+    expect(b.finished({ x: 50, y: 64, z: 50 })).toBe(false)
+    const roofless: Record<string, string> = {}
+    for (let x = 0; x <= 10; x++) for (let z = 0; z <= 6; z++) roofless[`${x},68,${z}`] = 'air'
+    const shell = book()
+    shell.found(surveyEstate(house(roofless), HOME, OPTS), 'four walls', 'BigDad')
+    expect(shell.finished(HOME)).toBe(false)
+    // A record from before the flag: the last survey's rooms say.
+    const old = book()
+    old.found(surveyEstate(house(), HOME, OPTS), 'a house', 'BigDad')
+    delete old.record!.finished
+    expect(old.finished(HOME)).toBe(true)
+  })
+
   it('lets a block go that went while a royal was about, and keeps the rest to mend', () => {
     const b = book()
     b.found(surveyEstate(house(), HOME, OPTS), 'a house', 'BigDad')

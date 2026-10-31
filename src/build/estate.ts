@@ -625,15 +625,20 @@ export function estateRepairCells(
   return cells.slice(0, max)
 }
 
+/** The room under a roof the home spot is in (on its floor), if any. */
+export function roomOfHome(estate: Estate): EstateRoom | undefined {
+  const { x, y, z } = estate.home
+  return estate.buildings
+    .flatMap((b) => b.rooms)
+    .find((r) => Math.abs(r.y - y) <= 1 && r.cells.some(([cx, cz]) => cx === x && cz === z))
+}
+
 /**
  * The room the home spot is in, as a hall the court's hall work understands (beds, the chest,
  * the furnace, the crafting table go there): its floor, the wall ring round it, its ways in.
  */
 export function homeRoom(estate: Estate, names: BlockNames): Hall | undefined {
-  const { x, y, z } = estate.home
-  const room = estate.buildings
-    .flatMap((b) => b.rooms)
-    .find((r) => Math.abs(r.y - y) <= 1 && r.cells.some(([cx, cz]) => cx === x && cz === z))
+  const room = roomOfHome(estate)
   if (!room) return undefined
   const inside = new Set(room.cells.map(([cx, cz]) => `${cx},${cz}`))
   const ring = new Set<string>()

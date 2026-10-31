@@ -71,6 +71,42 @@ const TOSS_RANGE = 4
 const REACH = 4.5
 /** Further than this from the storehouse, a courtier is brought home by Merlin's portal. */
 const PORTAL_FROM = 64
+/**
+ * What the storehouse keeps of what the court brings in more of than it uses; the rest is
+ * thrown away on the way there (and taken out of a full chest). On 2026-10-31 its 27 slots
+ * were full of the mine's diorite, granite and cobblestone and the grove's saplings, and the
+ * wood, food and ore the court gathered no longer went in.
+ */
+const STORE_CAPS: Array<[RegExp, number]> = [
+  [/^(andesite|diorite|granite|tuff|calcite|cobbled_deepslate)$/, 0],
+  [/_sapling$/, 16],
+  [/^cobblestone$/, 256],
+]
+
+/** How many of a thing the storehouse keeps, when it keeps only so many. */
+export function storeCap(name: string): number | undefined {
+  return STORE_CAPS.find(([re]) => re.test(name))?.[1]
+}
+
+/** Thrown away so the storehouse keeps no more than its caps: name -> how many. */
+export function surplus(
+  carried: Array<{ name: string; count: number }>,
+  stored: Record<string, number>
+): Map<string, number> {
+  const kept = new Map<string, number>()
+  const out = new Map<string, number>()
+  for (const { name, count } of carried) {
+    const cap = storeCap(name)
+    if (cap === undefined) continue
+    const room = Math.max(0, cap - (stored[name] ?? 0) - (kept.get(name) ?? 0))
+    const keep = Math.min(room, count)
+    kept.set(name, (kept.get(name) ?? 0) + keep)
+    if (count > keep) out.set(name, (out.get(name) ?? 0) + count - keep)
+  }
+  return out
+}
+/** A bot with no way to the storehouse on foot is portalled there at most this often. */
+const STORE_PORTAL_MS = 60_000
 /** The longest a whole errand may take. */
 const ERRAND_MS = 4 * 60_000
 
@@ -160,6 +196,12 @@ export class Gatherer {
   allNight = false
   /** Merlin's portal home (travel is free), for a courtier far out with the storehouse to reach. */
   portalHome?: () => Promise<boolean>
+  /** Merlin's portal to the storehouse, when there is no way there on foot. */
+  portalStore?: () => Promise<boolean>
+  /** What the court last saw in the storehouse (shared), for what it keeps (STORE_CAPS). */
+  storeHolds?: () => Record<string, number>
+  /** When this bot was last portalled to the storehouse for want of a way. */
+  private storePortalAt = 0
 
   constructor(
     bot: MineflayerBot,
@@ -481,12 +523,18 @@ export class Gatherer {
     work: (window: Chest) => Promise<number>
   ): Promise<number> {
     const pos = new Vec3(chest.x, chest.y, chest.z)
+    // What the storehouse has enough of stays out here, not in the hall.
+    if (this.bot.entity.position.distanceTo(pos) > 8)
+      await this.toss(
+        surplus(this.bot.inventory.items(), this.storeHolds?.() ?? this.lastStock ?? {})
+      )
     // Far out (a tree or a herd 200 blocks off): nobody walks home through the wilds.
     if (this.portalHome && this.bot.entity.position.distanceTo(pos) > PORTAL_FROM) {
       this.log.info('far from home: Merlin is asked for a portal')
       if (await this.portalHome().catch(() => false)) await sleep(2_000)
     }
     // A chest opens from four blocks: the hall is crowded (beds, bots), so do not insist on two.
+    let noWay = false
     for (const range of [3, 4]) {
       const eyes = this.bot.entity.position.offset(0, 1.62, 0)
       if (eyes.distanceTo(pos.offset(0.5, 0.5, 0.5)) <= 4.5) break
@@ -495,11 +543,28 @@ export class Gatherer {
           this.bot.pathfinder.goto(new goals.GoalNear(pos.x, pos.y, pos.z, range)),
           60_000
         )
+        noWay = false
         break
       } catch (err) {
-        this.log.info(`could not walk to the storehouse (within ${range}): ${errMsg(err)}`)
+        const at = this.bot.entity.position.floored()
+        this.log.info(
+          `could not walk to the storehouse (within ${range}) from ${at}: ${errMsg(err)}`
+        )
         this.bot.pathfinder.setGoal(null)
+        noWay = /no path/i.test(errMsg(err))
       }
+    }
+    // No way there on foot (a hall up in the air, a pit): Merlin's portal, travel being free.
+    const eyes = this.bot.entity.position.offset(0, 1.62, 0)
+    if (
+      noWay &&
+      this.portalStore &&
+      eyes.distanceTo(pos.offset(0.5, 0.5, 0.5)) > 4.5 &&
+      Date.now() - this.storePortalAt > STORE_PORTAL_MS
+    ) {
+      this.storePortalAt = Date.now()
+      this.log.info('no way to the storehouse on foot: Merlin is asked for a portal')
+      if (await this.portalStore().catch(() => false)) await sleep(2_500)
     }
     const block = this.bot.blockAt(pos)
     if (!block || !CONTAINER.test(block.name)) {
@@ -513,7 +578,9 @@ export class Gatherer {
       this.log.info(`could not open the storehouse: ${errMsg(err)}`)
       return 0
     }
+    let tidied = new Map<string, number>()
     try {
+      tidied = await this.tidy(window)
       return await work(window)
     } catch (err) {
       this.log.info(`storehouse work failed: ${errMsg(err)}`)
@@ -524,6 +591,56 @@ export class Gatherer {
         stock[item.name] = (stock[item.name] ?? 0) + item.count
       this.lastStock = stock
       await Promise.resolve(window.close()).catch(() => {})
+      await this.toss(tidied)
+    }
+  }
+
+  /**
+   * A full chest (two slots free at most): what it holds beyond its caps is taken out, to be
+   * thrown away once it is closed. Returns name -> how many were taken.
+   */
+  private async tidy(window: Chest): Promise<Map<string, number>> {
+    const slots = (window as unknown as { inventoryStart?: number }).inventoryStart ?? 27
+    const items = window.containerItems()
+    if (slots - items.length > 2) return new Map()
+    const out = surplus(items, {})
+    const taken = new Map<string, number>()
+    for (const [name, n] of out) {
+      let left = n
+      for (const item of window.containerItems().filter((i) => i.name === name)) {
+        if (left <= 0) break
+        const k = Math.min(left, item.count)
+        try {
+          await withTimeout(window.withdraw(item.type, item.metadata, k), 5_000)
+        } catch {
+          break
+        }
+        taken.set(name, (taken.get(name) ?? 0) + k)
+        left -= k
+      }
+    }
+    if (taken.size)
+      this.log.info(
+        `the storehouse is full: taking out ${[...taken].map(([n, k]) => `${k} ${n}`).join(', ')}`
+      )
+    return taken
+  }
+
+  /** Throws these things away (name -> how many). */
+  private async toss(what: Map<string, number>): Promise<void> {
+    for (const [name, n] of what) {
+      let left = n
+      for (const item of this.bot.inventory.items().filter((i) => i.name === name)) {
+        if (left <= 0) break
+        const k = Math.min(left, item.count)
+        try {
+          await withTimeout(this.bot.toss(item.type, item.metadata, k), 5_000)
+        } catch (err) {
+          this.log.info(`could not throw away ${name}: ${errMsg(err)}`)
+          break
+        }
+        left -= k
+      }
     }
   }
 

@@ -184,6 +184,8 @@ const HALL_WORK_TITLES: Record<HallWork, string> = {
   reinforce: 'stone walls',
   table: 'a crafting table',
 }
+/** Hall work on what a home found finished already has: the estate's to keep, not the hall's. */
+const ESTATE_KEEPS = new Set<HallWork>(['roof', 'floor', 'light', 'door', 'repair', 'reinforce'])
 const HALL_WORK_CELLS: Record<
   HallWork,
   (hall: Hall, names: (x: number, y: number, z: number) => string | undefined) => HandCell[]
@@ -964,6 +966,8 @@ export class Bot extends EventEmitter {
       () => this.household?.grounds() ?? []
     )
     this.gatherer.portalHome = () => this.portalHome?.() ?? Promise.resolve(false)
+    this.gatherer.portalStore = () => this.portalTo?.('the storehouse') ?? Promise.resolve(false)
+    this.gatherer.storeHolds = () => this.household?.stock.items ?? {}
     this.hunter = new Hunter(body, this.log.child('hunt'), (name) => this.isBot(name))
     this.cook = new Cook(body, this.log.child('cook'), this.gatherer)
     this.farmer = new Farmer(body, this.log.child('farm'), this.gatherer)
@@ -1278,6 +1282,9 @@ export class Bot extends EventEmitter {
     const hall: Hall | string =
       typeof surveyed === 'string' ? (saved ?? room ?? surveyed) : surveyed
     if (room && (work === 'repair' || work === 'roof' || work === 'reinforce')) return false
+    // A home found finished (the King's palace): its walls, roof, doors, floor and light are the
+    // estate's, kept as they were; only a royal's own asking changes them.
+    if (!royal && this.estate?.finished(home) && ESTATE_KEEPS.has(work)) return false
     if (typeof surveyed === 'string' && saved)
       this.log.info(`the hall is damaged (${surveyed}); working from its shape as last seen`)
     if (typeof hall === 'string') {
@@ -1372,9 +1379,10 @@ export class Bot extends EventEmitter {
             estateLightCells(estate, names, ESTATE_TORCHES, this.isNight())
           : work === 'doors'
             ? estateDoorCells(estate, names, 4, made)
-            : // The hall's own walls and roof are the hall's repairs.
+            : // The hall's own walls and roof are the hall's repairs (in a home found finished,
+              // the estate's: see EstateBook.finished).
               estateRepairCells(made, names, (b) => (stock[b] ?? 0) > 0).filter(
-                (c) => !this.household?.hallColumn(c.x, c.z)
+                (c) => this.estate?.finished(home) || !this.household?.hallColumn(c.x, c.z)
               )
       if (!cells.length) return false
       const title = ESTATE_WORK_TITLES[work]
