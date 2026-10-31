@@ -495,12 +495,20 @@ export class Bot extends EventEmitter {
       .map((p) => body.blockAt(p))[0]
     if (!bed) return undefined
     const walker = body as unknown as { pathfinder: Pathfinder }
+    // What the bed says (json text): "tile.bed.respawnSet", "tile.bed.notSafe", "tile.bed.tooFar".
+    const said: string[] = []
+    const hear = (t: TextPacket) => {
+      for (const key of t.message?.match(/tile\.bed\.[A-Za-z]+/g) ?? []) said.push(key)
+    }
+    this.client?.on('text', hear)
     try {
       const p = bed.position
-      await withTimeout(walker.pathfinder.goto(new goals.GoalNear(p.x, p.y, p.z, 2)), 30_000)
+      await withTimeout(walker.pathfinder.goto(new goals.GoalNear(p.x, p.y, p.z, 1)), 30_000)
+      await body.lookAt(p.offset(0.5, 0.5, 0.5), true)
       // By day too: the server answers with "Respawn point set" and the new spawn point.
       await body.activateBlock(bed)
     } catch (err) {
+      this.client?.off('text', hear)
       walker.pathfinder.setGoal(null)
       this.log.info(`could not get to a bed to set my spawn: ${errMsg(err)}`)
       return undefined
@@ -512,8 +520,10 @@ export class Bot extends EventEmitter {
       return s && Math.abs(s.x - p.x) <= 2 && Math.abs(s.z - p.z) <= 2 && Math.abs(s.y - p.y) <= 2
     }
     for (let i = 0; i < 10 && !took(); i++) await sleep(300)
+    this.client?.off('text', hear)
     if (!took() && this.state.spawnPoint !== undefined) {
-      this.log.info(`tapped the bed at ${p}, but the respawn point did not move there`)
+      const why = said.length ? ` (${[...new Set(said)].join(', ')})` : ''
+      this.log.info(`tapped the bed at ${p}, but the respawn point did not move there${why}`)
       return undefined
     }
     this.log.info(`respawn point set at the bed at ${p}`)
