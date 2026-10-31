@@ -210,7 +210,9 @@ Windows, killing a background `npx` shell does not kill its node children at all
   Merlin grants the most urgent want this hour's magic still allows; bread first when nothing
   at all is left to eat (a starving courtier dies of the next bite or fall). Fishing
   (`build/fishing.ts` + `bot/fishing.ts`, bedboo's `bot.fish()`): open water near home, a rod
-  of three sticks and two string (Merlin's only when no game is found), the catch cooked;
+  of three sticks and two string (Merlin's when food runs short and water is known: string comes
+  only from spiders), the catch cooked; water is looked for once an hour by the Castellan, out to
+  96 blocks;
   no water near home is remembered for an hour. The iron age: the mine's ore smelted
   (`Cook.ingots`), guards make iron (else copper) swords and armour (put on at once), piece by
   piece, the old pieces back into the storehouse.

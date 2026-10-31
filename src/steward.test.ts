@@ -299,7 +299,7 @@ describe("the Castellan's account", () => {
     expect(plan(growing).some((a) => a.kind === 'magic' && a.item === 'birch_sapling')).toBe(false)
   })
 
-  it('fishes by day when food runs short, and has Merlin conjure a rod when no game is found', () => {
+  it('fishes by day when food runs short, and has Merlin conjure a rod once there is water', () => {
     const short = { ...base, foodInStore: 2, fishing: { rod: true, string: 0 } }
     expect(kinds(short)).toEqual(['fish:Henry', 'hunt:Bruce'])
     expect(plan({ ...short, night: true }).some((a) => a.kind === 'fish')).toBe(false)
@@ -307,8 +307,8 @@ describe("the Castellan's account", () => {
       ...base,
       foodInStore: 2,
       fishing: { rod: false, string: 0, water: true },
-      resting: ['hunt'],
     }
+    // (The hunt need not have failed: game near home runs out, string comes only from spiders.)
     expect(plan(rodless)).toContainEqual({
       kind: 'magic',
       item: 'fishing_rod',

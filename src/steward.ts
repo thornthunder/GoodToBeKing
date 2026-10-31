@@ -405,8 +405,9 @@ export function plan(s: CourtState): StewardAction[] {
       then: s.hall.light > 0 ? 'light' : 'estate-light',
       why: 'coal for torches',
     })
-  // A fishing rod when no game is to be found and no string to make one of: food for good.
-  if (hungry && water === true && !canFish && failed('hunt') && someone && s.storehouse)
+  // A fishing rod when food runs short, water is known and no string to make one of: food for
+  // good (string comes only from spiders, which nobody hunts; game near home runs out).
+  if (hungry && water === true && !canFish && someone && s.storehouse)
     wants.push({ item: 'fishing_rod', count: 1, to: someone, why: 'a fishing rod for the court' })
   // The most urgent want; from Merlin, the most urgent he can still grant this hour.
   const first = wants[0]
