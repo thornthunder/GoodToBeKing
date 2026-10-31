@@ -5,6 +5,11 @@ import type { Logger } from '../logger'
 import { errMsg, sleep, withTimeout } from '../util'
 
 /** What a courtier eats, best first. */
+
+/** When someone of the court (this mind) last said they were hungry with nothing to eat. */
+let hungerSaid = 0
+const HUNGER_WORDS_MS = 30 * 60_000
+
 export const FOODS = [
   'cooked_beef',
   'cooked_porkchop',
@@ -255,6 +260,9 @@ export class Survival {
       if (Date.now() - this.lastHungryWords > 15 * 60_000) {
         this.lastHungryWords = Date.now()
         this.log.info(`hungry (food ${food}) and nothing to eat`)
+        // One of the court says it now and then, not every courtier every quarter of an hour.
+        if (Date.now() - hungerSaid < HUNGER_WORDS_MS) return
+        hungerSaid = Date.now()
         await this.opts.speak(
           'You are hungry and have nothing to eat, and there is no food in the storehouse. Say ' +
             'so in one short, light-hearted sentence, in character.',

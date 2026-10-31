@@ -278,11 +278,14 @@ export class Magic {
   async takeBack(gift: Gift, run: RunCommand, now = Date.now()): Promise<boolean> {
     this.lastTry.set(gift.id + gift.what, now)
     let gone = true
+    // Nothing left to take (eaten, used up, lost at a death): the gift is over, quietly.
+    let spent = true
     for (const command of gift.undo) {
       const result = await run(command)
       if (!result.ok) gone = false
+      if (result.ok || !result.output.some((o) => o.includes('failure.no.items'))) spent = false
     }
-    if (gone || now - gift.at > GIVE_UP_MS) {
+    if (gone || spent || now - gift.at > GIVE_UP_MS) {
       this.gifts = this.gifts.filter((g) => g !== gift)
       this.save()
     }

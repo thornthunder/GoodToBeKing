@@ -60,7 +60,7 @@ import { plan, type CourtState, type MagicWant, type StewardAction } from '../st
 import { Presence, worldWords } from '../presence'
 import { ArmyBoard, blessingSteps, wantsBlessing, type Gear } from '../army'
 import { RAW } from './cooking'
-import { farmNeed } from '../build/farm'
+import { MAX_FIELD, PLOT_SEEDS, farmNeed } from '../build/farm'
 import { groveNeed } from '../build/grove'
 import { FOODS } from './survival'
 import type { HallWork } from '../ai/Brain'
@@ -265,6 +265,7 @@ export class BotManager {
         )
       })
       // Far out with the storehouse to reach: Merlin brings the courtier home (travel is free).
+      bot.on('blast', (at: Point) => this.noteBlast(at))
       bot.on('died', (at?: Point) => {
         const home = this.household.home
         if (at && home && Math.hypot(at.x - home.x, at.z - home.z) < OVERRUN_NEAR)
@@ -281,6 +282,16 @@ export class BotManager {
           args: { place: 'home' },
         })
         return true
+      }
+      // Each mind digs its own mine, clear of the other's; the army's sightings of the
+      // storehouse reach the household's account of it.
+      if (!HOUSEHOLD) {
+        bot.mines = this.board
+        bot.onStock = (items) => this.board.writeStock(items)
+      }
+      bot.otherMines = () => {
+        const other = HOUSEHOLD ? this.board.mine : this.household.mine
+        return other ? [[other.x, other.z]] : []
       }
       // To a named place (the storehouse left behind), by Merlin's portal.
       bot.portalTo = async (place: string) => {
@@ -413,7 +424,9 @@ export class BotManager {
           estate,
           words,
           // The first look after a start: whatever changed meanwhile is taken as it is.
-          (x, z) => !this.estateSeen || this.royalWasNear(x, z),
+          (x, z, y) =>
+            !this.estateSeen ||
+            (this.royalWasNear(x, z) && !this.blownAway(x, y, z)),
           (x, y, z) => names(x, y, z) !== undefined
         )
       this.estateSeen = true
@@ -535,11 +548,92 @@ export class BotManager {
           requestedBy: merlin.cfg.name,
           args: { place: 'home' },
         })
+      } else if (!merlin && !HOUSEHOLD && (far > HOME_WALK || trip.walks >= 2 || dark || busy)) {
+        // The army has no Merlin: the household's brings the soldier home (woken far away).
+        this.homeTrips.set(bot.cfg.name, { at: now, walks: 0 })
+        this.log.info(`${bot.cfg.name} asks the household's Merlin for a portal home`)
+        this.board.askPortal(bot.cfg.name, now)
       } else if (far <= HOME_WALK && !busy) {
         this.homeTrips.set(bot.cfg.name, { at: now, walks: trip.walks + 1 })
         bot.goTo(home, 'home')
       }
     }
+  }
+
+  /** Portals the army asked for that Merlin has seen to: soldier -> when asked. */
+  private readonly portalsDone = new Map<string, number>()
+
+  /** The household's Merlin brings home the soldiers who asked (the army has no Merlin). */
+  private watchPortals(): void {
+    const merlin = this.bots.find((b) => b.magicAwake())
+    if (!merlin || !this.household.home) return
+    const now = Date.now()
+    for (const [name, at] of Object.entries(this.board.portals())) {
+      if (now - at > PORTAL_ASK_MS || at <= (this.portalsDone.get(name) ?? 0)) continue
+      this.portalsDone.set(name, at)
+      if (!merlin.isOnline(name) || this.homeOverrun(merlin)) continue
+      this.log.info(`${merlin.cfg.name} sends ${name} of the army home by portal`)
+      void merlin.castCommand('portal', {
+        target: name,
+        requestedBy: merlin.cfg.name,
+        args: { place: 'home' },
+      })
+    }
+  }
+
+  private lastBedRound = 0
+  private tappingBed = false
+  /** When each courtier may try a bed again (a tap that did not take waits a while). */
+  private readonly bedTried = new Map<string, number>()
+
+  /**
+   * Every courtier respawns at a bed at home: the server says where each one respawns, and one
+   * whose respawn point is gone (a bed broken, moved, or never tapped) taps a bed, one a round.
+   * Without it the dead wake at the world spawn, far off in the dark, and die there again.
+   */
+  private keepBeds(): void {
+    const home = this.household.home
+    const now = Date.now()
+    if (!home || this.tappingBed || now - this.lastBedRound < BED_ROUND_MS) return
+    this.lastBedRound = now
+    const homeless = this.bots.find((b) => {
+      if (!b.position() || !b.isFree() || (this.bedTried.get(b.cfg.name) ?? 0) > now) return false
+      // By day only: a bed tapped at night is lain in, and one sleeper skips the night here.
+      if (b.isNight()) return false
+      const atHome = b.spawnsAtHome(home)
+      // The server has not said: the court's own record (one tap after a start).
+      return atHome === undefined ? !this.household.spawnOf(b.cfg.name) : !atHome
+    })
+    if (!homeless || this.homeOverrun(homeless)) return
+    this.tappingBed = true
+    this.bedTried.set(homeless.cfg.name, now + BED_RETRY_MS)
+    void homeless
+      .setSpawnAtBed()
+      .then((bed) => {
+        if (bed) this.household.setSpawn(homeless.cfg.name, bed)
+      })
+      .finally(() => (this.tappingBed = false))
+  }
+
+  /** Creepers (and TNT) gone off near home lately: what they blew away is damage. */
+  private blasts: Array<{ at: number; p: Point }> = []
+
+  private noteBlast(p: Point): void {
+    const home = this.household.home
+    if (!home || Math.hypot(p.x - home.x, p.z - home.z) > ESTATE_BLAST_REACH) return
+    const now = Date.now()
+    // Every bot near hears the same blast: once.
+    if (this.blasts.some((b) => now - b.at < 2_000 && Math.hypot(b.p.x - p.x, b.p.z - p.z) < 2))
+      return
+    this.blasts = [...this.blasts.filter((b) => now - b.at < BLAST_MEMORY_MS), { at: now, p }]
+    this.log.info(`a blast at ${Math.round(p.x)},${Math.round(p.y)},${Math.round(p.z)}`)
+  }
+
+  /** A block here was blown away by a blast lately (damage, even where a royal was). */
+  private blownAway(x: number, y: number, z: number): boolean {
+    return this.blasts.some(
+      (b) => Math.hypot(b.p.x - x - 0.5, b.p.y - y - 0.5, b.p.z - z - 0.5) <= BLAST_RADIUS
+    )
   }
 
   private lastHousekeeping = 0
@@ -634,6 +728,10 @@ export class BotManager {
       /^(chest|trapped_chest|barrel)$/.test(names(chest.x, chest.y, chest.z) ?? '')
     if (chest && !storehouseThere && names(chest.x, chest.y, chest.z) !== undefined)
       this.household.noteStock({})
+    // A soldier opened the storehouse since (a hunt's meat, a mine's ore put in): his account.
+    const seen = this.board.stock()
+    if (storehouseThere && seen && seen.at > (this.household.stock.at ?? 0))
+      this.household.noteStock(seen.items, seen.at)
     const stock = this.household.stock.items
     const sum = (re: RegExp) =>
       Object.entries(stock)
@@ -704,12 +802,9 @@ export class BotManager {
       },
       cobblestone: sum(/^(cobblestone|cobbled_deepslate)$/),
       stone: sum(/^(cobblestone|cobbled_deepslate|andesite|diorite|granite|tuff|stone)$/),
-      // (An old mine stopped at its depth limit goes on as a tunnel: not ended.)
-      // (Nor one the miners could not get down: a new one is begun.)
-      mineEnded: Boolean(
-        this.household.mine?.ended &&
-        !['deep enough', 'unreachable'].includes(this.household.mine.ended)
-      ),
+      // A mine worked out (or flooded, or lost) is followed by a new one: the court can always
+      // mine, unless there is no mine and no place for one was found.
+      mineEnded: !this.household.mine && (this.resting.get('mine') ?? 0) > Date.now(),
       seeds: seedsHad,
       grove: this.groveWork(names),
       woolInStore: sum(/_wool$/),
@@ -719,7 +814,7 @@ export class BotManager {
       guardsToOutfit: staff
         .filter((b) => b.isGuard() && b.position())
         .filter((b) => {
-          const want = b.outfitWanted(sum(/^iron_ingot$/))
+          const want = b.outfitWanted(stock)
           return want.sword || want.armour.length > 0
         })
         .map((b) => b.cfg.name),
@@ -752,17 +847,7 @@ export class BotManager {
       night: !castellan.outdoorTime(),
       resting: [...this.resting].filter(([, until]) => until > Date.now()).map(([kind]) => kind),
       underway: [...this.underway],
-    }
-    // Beds in the hall: each courtier taps one, so it respawns at home (one a round).
-    if (beds > 0) {
-      const homeless = this.bots.find(
-        (b) => b.position() && b.isFree() && !this.household.spawnOf(b.cfg.name)
-      )
-      if (homeless) {
-        void homeless.setSpawnAtBed().then((bed) => {
-          if (bed) this.household.setSpawn(homeless.cfg.name, bed)
-        })
-      }
+      basics: true,
     }
     const actions = plan(state)
     this.log.debug(`housekeeping: ${JSON.stringify(state)} -> ${JSON.stringify(actions)}`)
@@ -796,7 +881,9 @@ export class BotManager {
       if (need === 'harvest' || need === 'fill') work++
       else if ((need === 'till' || need === 'plant') && seeds > 0) work++
     }
-    return work + (wheat >= 3 ? 1 : 0)
+    // Seeds to find in the grass for the next plot, while the field may still grow.
+    const growing = farm.cells.length < MAX_FIELD && seeds < farm.cells.length + PLOT_SEEDS
+    return work + (wheat >= 3 ? 1 : 0) + (growing ? 1 : 0)
   }
 
   /** The grove: trees grown to fell, bare spots to plant (where the court can see them). */
@@ -878,7 +965,10 @@ export class BotManager {
         const maker = by(action.by)
         if (!maker) return
         this.log.info(`housekeeping: ${maker.cfg.name} makes charcoal for torches`)
-        void maker.startCharcoal()
+        this.doing(
+          'charcoal',
+          maker.startCharcoal().then((n) => n > 0)
+        )
         return
       }
       case 'farm': {
@@ -929,7 +1019,10 @@ export class BotManager {
         const cook = by(action.by)
         if (!cook) return
         this.log.info(`housekeeping: ${cook.cfg.name} cooks the meat in the storehouse`)
-        void cook.startCooking()
+        this.doing(
+          'cook',
+          cook.startCooking().then((n) => n > 0)
+        )
         return
       }
       case 'errand': {
@@ -938,9 +1031,13 @@ export class BotManager {
           `housekeeping: ${hand ? `${hand.cfg.name} fetches ` : ''}${action.count} ${action.material} for the storehouse`
         )
         if (hand) {
-          void hand
-            .startGather(action.material, action.count, castellan.cfg.name, true)
-            .then((got) => this.rest(action.material, got > 0))
+          // One out for it at a time (a second would go through the same woods).
+          this.doing(
+            action.material,
+            hand
+              .startGather(action.material, action.count, castellan.cfg.name, true)
+              .then((got) => got > 0)
+          )
           return
         }
         void this.sendOnErrand(castellan, {
@@ -1004,16 +1101,19 @@ export class BotManager {
     const unarmed = this.bots.find(
       (b) => soldiers[b.cfg.name] && !soldiers[b.cfg.name].sword && b.isFree()
     )
-    if (
-      canArm &&
-      unarmed &&
-      !this.underway.has('arm') &&
-      (this.resting.get('arm') ?? 0) < Date.now()
-    ) {
-      this.log.info(`the army: ${unarmed.cfg.name} makes a sword from the storehouse`)
-      this.doing('arm', unarmed.startArming())
+    // Iron or copper in the storehouse (the mines' ore, smelted): armour, piece by piece.
+    const toOutfit = this.bots.find((b) => {
+      if (!soldiers[b.cfg.name] || !b.isFree()) return false
+      const want = b.outfitWanted(stock)
+      return want.armour.length > 0 || want.swordMetal !== undefined
+    })
+    const armer = (canArm ? unarmed : undefined) ?? toOutfit
+    if (armer && !this.underway.has('arm') && (this.resting.get('arm') ?? 0) < Date.now()) {
+      this.log.info(`the army: ${armer.cfg.name} arms himself from the storehouse`)
+      this.doing('arm', armer.startArming())
     }
     this.patrolShift(sarge, soldiers)
+    this.armyDuties(sarge, soldiers)
     // Sarge asks the King for the blessing: the army lacks arms, the King is near, not blessed today.
     const king = this.king()
     const blessed = this.board.blessing()
@@ -1066,6 +1166,52 @@ export class BotManager {
       this.walked.set(b.cfg.name, now)
       void b.startPatrol(route, Math.floor((k * route.length) / fit.length), until)
     })
+  }
+
+  /**
+   * Off the round, by day, a soldier is not idle (the King's wish, 2026-10-31): food first, a
+   * hunt when the storehouse is short of meals (soldiers carry swords), else the army's own mine
+   * for iron and copper (its armour) and coal (torches). One at each at a time; Sarge commands.
+   */
+  private armyDuties(sarge: Bot | undefined, soldiers: Record<string, Gear>): void {
+    if (!this.household.home || !this.household.storehouse) return
+    if (!(sarge ?? this.bots[0])?.outdoorTime()) return
+    const onRound = new Set(this.shift?.soldiers ?? [])
+    const free = this.bots.filter(
+      (b) =>
+        b !== sarge &&
+        b.isFree() &&
+        !b.weak() &&
+        !onRound.has(b.cfg.name) &&
+        Boolean(soldiers[b.cfg.name]?.sword)
+    )
+    const now = Date.now()
+    const rests = (kind: string) => this.underway.has(kind) || (this.resting.get(kind) ?? 0) > now
+    const stock = this.household.stock.items
+    const count = (re: RegExp) =>
+      Object.entries(stock)
+        .filter(([n]) => re.test(n))
+        .reduce((total, [, n]) => total + n, 0)
+    if (count(FOOD_ITEM) < ARMY_FOOD && !rests('hunt')) {
+      const hunter = free.shift()
+      if (hunter) {
+        this.log.info(`the army: ${hunter.cfg.name} goes hunting for the court's food`)
+        this.doing(
+          'hunt',
+          hunter.startHunt(3).then((meat) => meat > 0)
+        )
+      }
+    }
+    if (!rests('mine')) {
+      const miner = free.shift()
+      if (miner) {
+        this.log.info(`the army: ${miner.cfg.name} goes down the army's mine`)
+        this.doing(
+          'mine',
+          miner.startMining(32).then((got) => got > 0)
+        )
+      }
+    }
   }
 
   /**
@@ -1670,7 +1816,9 @@ export class BotManager {
         }
         // Whoever is still free afterwards goes home.
         this.sendHome()
+        this.keepBeds()
         if (HOUSEHOLD) this.noteRoyals()
+        if (HOUSEHOLD) this.watchPortals()
       } catch (err) {
         this.log.warn(`the court's round failed: ${errMsg(err)}`)
       }
@@ -2221,12 +2369,23 @@ const MAGIC_REQUEST_MS = 3 * 60_000
 const SUMMON_WAIT_MS = 3 * 60_000
 /** The other mind's bots join in their own time: at least this long before the gathering. */
 const OTHER_MIND_MS = 2 * 60_000
+/** Below this many meals and raw meat in the storehouse, a soldier off the round hunts. */
+const ARMY_FOOD = 16
 /** Soldiers on patrol at once, and how long a shift walks before the next takes over. */
 const PATROL_SIZE = 4
 const SHIFT_MS = 15 * 60_000
 /** The round runs this far outside the estate's buildings (or this far round home without). */
 const PATROL_MARGIN = 6
 const PATROL_RADIUS = 16
+/** Courtiers' respawn points are looked over this often; a tap that did not take waits. */
+const BED_ROUND_MS = 30_000
+const BED_RETRY_MS = 10 * 60_000
+/** A soldier's ask for a portal home stands this long. */
+const PORTAL_ASK_MS = 2 * 60_000
+/** Blasts this near home are remembered this long; what lay this near one was blown away. */
+const ESTATE_BLAST_REACH = 64
+const BLAST_MEMORY_MS = 30 * 60_000
+const BLAST_RADIUS = 5
 /** The army's round: its report to the household, a sword made, the blessing asked for. */
 const ARMY_ROUND_MS = 60_000
 /** Sarge asks the King for the blessing at most this often. */

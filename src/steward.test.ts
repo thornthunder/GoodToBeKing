@@ -323,14 +323,15 @@ describe("the Castellan's account", () => {
     expect(plan(dryRodless).some((a) => a.kind === 'magic')).toBe(false)
   })
 
-  it('smelts the ore from the mine, and outfits the guards in iron once there is iron', () => {
+  it('smelts the ore from the mine, and outfits the guards once there is iron or copper', () => {
     expect(plan({ ...base, oreInStore: 5 })).toContainEqual({ kind: 'smelt', by: 'Henry' })
     expect(plan({ ...base, oreInStore: 5, furnace: false }).some((a) => a.kind === 'smelt')).toBe(
       false
     )
     const iron = { ...base, ironInStore: 10, guardsToOutfit: ['Dyke'] }
     expect(plan(iron)).toContainEqual({ kind: 'arm', by: 'Dyke' })
-    expect(plan({ ...iron, ironInStore: 1 }).some((a) => a.kind === 'arm')).toBe(false)
+    // (Guards to outfit are only those the storehouse's metal would arm better: none here.)
+    expect(plan({ ...iron, guardsToOutfit: [] }).some((a) => a.kind === 'arm')).toBe(false)
     expect(plan({ ...iron, resting: ['arm'] }).some((a) => a.kind === 'arm')).toBe(false)
   })
 
@@ -404,6 +405,28 @@ describe("the Castellan's account", () => {
       then: 'estate-light',
       why: 'coal for torches',
     })
+  })
+
+  it('has Merlin conjure coal when the charcoal came to nothing (no furnace to be got at)', () => {
+    const dark = { ...base, estate: { repair: 0, doors: 0, light: 6 } }
+    expect(kinds(dark)).toContain('charcoal:Henry')
+    const stuck = { ...dark, resting: ['charcoal'] }
+    expect(kinds(stuck)).not.toContain('charcoal:Henry')
+    expect(plan(stuck)).toContainEqual(
+      expect.objectContaining({ kind: 'magic', item: 'coal', why: 'coal for torches' })
+    )
+  })
+
+  it('has free hands gather the basics by day when nothing else wants them', () => {
+    const idle = { ...base, basics: true }
+    // One down the mine, one for wood (the store has some, not plenty); the rest stay free.
+    expect(kinds(idle)).toEqual(['mine:Henry', 'errand:George'])
+    expect(plan(idle)).toContainEqual({ kind: 'mine', by: 'Henry', want: 32 })
+    // Plenty of wood: only the mine. Someone already down it: not a second.
+    expect(kinds({ ...idle, woodInStore: 40 })).toEqual(['mine:Henry'])
+    expect(kinds({ ...idle, woodInStore: 40, underway: ['mine'] })).toEqual([])
+    // Not by night.
+    expect(kinds({ ...idle, night: true })).toEqual([])
   })
 
   it('carries the storehouse left behind over to the new one, once there is a new one', () => {

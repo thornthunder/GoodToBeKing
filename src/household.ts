@@ -32,6 +32,8 @@ interface Saved {
   farm?: Farm
   /** The court's mine (see bot/mining.ts). */
   mine?: Mine
+  /** Entrances of the court's mines worked out or given up. */
+  oldMines?: Array<[number, number]>
   /** The court's grove (see build/grove.ts). */
   grove?: Grove
   /** Where the court fishes (see build/fishing.ts). */
@@ -143,6 +145,17 @@ export class Household {
     this.save()
   }
 
+  get oldMines(): Array<[number, number]> {
+    return this.data.oldMines ?? []
+  }
+
+  /** A mine worked out (or flooded, or lost): its entrance is remembered, a new one is begun. */
+  retireMine(mine: Mine): void {
+    this.data.oldMines = [...this.oldMines, [mine.x, mine.z] as [number, number]].slice(-12)
+    this.data.mine = undefined
+    this.save()
+  }
+
   get farm(): Farm | undefined {
     return this.data.farm
   }
@@ -237,6 +250,7 @@ export class Household {
     const home = this.setHome(p, setBy, now)
     this.data.farm = undefined
     this.data.mine = undefined
+    this.data.oldMines = undefined
     this.data.grove = undefined
     this.data.fishing = undefined
     this.data.noWaterAt = undefined

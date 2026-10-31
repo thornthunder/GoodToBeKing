@@ -87,6 +87,39 @@ export interface CommandOutputPacket {
   output: Array<{ message_id: string; success: boolean; parameters: string[] }>
 }
 
+/**
+ * Where the server will respawn a player (`player`), or the world's spawn (`world`). Sent at
+ * login and whenever it changes (a bed tapped, a bed gone); no spawn point of its own is the
+ * lowest 32-bit number in every field.
+ */
+export interface SetSpawnPositionPacket {
+  spawn_type: 'player' | 'world'
+  player_position: Vec3
+  dimension: number
+  world_position: Vec3
+}
+
+/** A sound the world makes somewhere (`Explode`: a creeper or TNT going off there). */
+export interface LevelSoundEventPacket {
+  sound_id: string
+  position: Vec3
+  entity_type?: string
+}
+
+/** No spawn point of the player's own: every field of the position is this. */
+const NO_SPAWN = -2147483648
+
+/**
+ * The player's own spawn point (a bed) from a set_spawn_position packet: null when it has
+ * none (it wakes at the world spawn), undefined when the packet is about the world's spawn.
+ */
+export function playerSpawn(p: SetSpawnPositionPacket): Vec3 | null | undefined {
+  if (p.spawn_type !== 'player') return undefined
+  const at = p.player_position
+  if (!at || at.x === NO_SPAWN || at.y === NO_SPAWN || at.z === NO_SPAWN) return null
+  return { x: at.x, y: at.y, z: at.z }
+}
+
 export interface DisconnectPacket {
   reason: string
   hide_disconnect_reason: boolean

@@ -73,13 +73,14 @@ export class EstateBook {
 
   /**
    * A later survey of the same estate: changed blocks are taken as they are, new ones join once
-   * they have stood SETTLE_MS, and blocks gone where a royal was about lately are let go.
-   * `seen`: whether a spot was in sight (an unloaded spot says nothing).
+   * they have stood SETTLE_MS, and blocks gone where a royal was about lately are let go
+   * (`royalChange`: a royal was near and no blast went off there). `seen`: whether a spot was
+   * in sight (an unloaded spot says nothing).
    */
   update(
     estate: Estate,
     words: string,
-    royalWasNear: (x: number, z: number) => boolean,
+    royalChange: (x: number, z: number, y: number) => boolean,
     seen: (x: number, y: number, z: number) => boolean,
     now = Date.now()
   ): void {
@@ -102,7 +103,7 @@ export class EstateBook {
     for (const k of Object.keys(d.made)) {
       if (estate.made[k] !== undefined) continue
       const [x, y, z] = k.split(',').map(Number)
-      if (seen(x, y, z) && royalWasNear(x, z)) delete d.made[k]
+      if (seen(x, y, z) && royalChange(x, z, y)) delete d.made[k]
     }
     d.at = now
     d.words = words

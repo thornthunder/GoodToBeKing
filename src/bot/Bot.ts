@@ -37,7 +37,7 @@ import { SEE_THROUGH } from '../build/sites'
 import { Vec3 as WorldVec } from 'vec3'
 import type { ChatFloor } from './ChatFloor'
 import { goals, type Pathfinder } from 'mineflayer-pathfinder'
-import { chooseFarm, extendFarm, type Farm } from '../build/farm'
+import { MAX_FIELD, PLOT_SEEDS, chooseFarm, extendFarm, type Farm } from '../build/farm'
 import { chooseFishingSpot } from '../build/fishing'
 import { chooseGrove } from '../build/grove'
 import { Handbuilder } from '../build/Handbuilder'
@@ -66,13 +66,13 @@ import {
   surveyEstate,
 } from '../build/estate'
 import type { BlockNames } from '../build/hall'
-import { Cook } from './cooking'
+import { Cook, type FurnaceSpot } from './cooking'
 import { craft, makePlanks } from './crafting'
 import { Farmer } from './farming'
-import { bestSword, materialOf, type Gear } from '../army'
+import { armourTier, bestSword, materialOf, swordTier, type Gear } from '../army'
 import { Fisher } from './fishing'
 import { Forester } from './forestry'
-import { Miner, chooseMine } from './mining'
+import { Miner, chooseMine, mineGoesOn, type MineRecord } from './mining'
 import { Gatherer, type Material } from './gathering'
 import { GAME, Hunter, SPOILS } from './hunting'
 import { FOODS, Survival, duskFallen, isNight, outdoorHours } from './survival'
@@ -86,14 +86,17 @@ import {
   metadataTarget,
   normalisePlayerList,
   parseTextPacket,
+  playerSpawn,
   type AddPlayerPacket,
   type CommandOutputPacket,
   type DisconnectPacket,
+  type LevelSoundEventPacket,
   type MovePlayerPacket,
   type PlayerListPacket,
   type RemoveEntityPacket,
   type RespawnPacket,
   type SetHealthPacket,
+  type SetSpawnPositionPacket,
   type StartGamePacket,
   type TextPacket,
   type Vec3,
@@ -223,6 +226,11 @@ export interface BotState {
   position?: Vec3
   health?: number
   worldName?: string
+  /**
+   * Where the server will respawn this bot (a bed it tapped), as the server last said: null
+   * when it has none (it wakes at the world spawn), undefined until the server has said.
+   */
+  spawnPoint?: Vec3 | null
   /** Other players by UUID, as reported by player_list / add_player. */
   players: Map<string, PlayerInfo>
 }
@@ -459,8 +467,19 @@ export class Bot extends EventEmitter {
   }
 
   /**
+   * Does it respawn at home (a bed within `reach` of it)? Undefined while the server has not
+   * said where it respawns.
+   */
+  spawnsAtHome(home: Point, reach = 16): boolean | undefined {
+    const spawn = this.state.spawnPoint
+    if (spawn === undefined) return undefined
+    return spawn !== null && Math.hypot(spawn.x - home.x, spawn.z - home.z) <= reach
+  }
+
+  /**
    * Tap a bed near home so this courtier respawns there instead of at the world spawn (in
-   * Bedrock a bed sets the respawn point by day too). Returns the bed it tapped.
+   * Bedrock a bed sets the respawn point by day too). Returns the bed, once the server says the
+   * respawn point moved there.
    */
   async setSpawnAtBed(): Promise<{ x: number; y: number; z: number } | undefined> {
     const body = this.body
@@ -479,16 +498,26 @@ export class Bot extends EventEmitter {
     try {
       const p = bed.position
       await withTimeout(walker.pathfinder.goto(new goals.GoalNear(p.x, p.y, p.z, 2)), 30_000)
-      // The server's "Respawn point set" comes as a pop-up the court does not read; a tap that
-      // went through sets it (tried: a bot killed after tapping by day woke by the bed).
+      // By day too: the server answers with "Respawn point set" and the new spawn point.
       await body.activateBlock(bed)
     } catch (err) {
       walker.pathfinder.setGoal(null)
       this.log.info(`could not get to a bed to set my spawn: ${errMsg(err)}`)
       return undefined
     }
-    this.log.info(`respawn point set at the bed at ${bed.position}`)
-    return { x: bed.position.x, y: bed.position.y, z: bed.position.z }
+    // The server's word that it took (a bed tapped with monsters about, or one in use, does not).
+    const p = bed.position
+    const took = () => {
+      const s = this.state.spawnPoint
+      return s && Math.abs(s.x - p.x) <= 2 && Math.abs(s.z - p.z) <= 2 && Math.abs(s.y - p.y) <= 2
+    }
+    for (let i = 0; i < 10 && !took(); i++) await sleep(300)
+    if (!took() && this.state.spawnPoint !== undefined) {
+      this.log.info(`tapped the bed at ${p}, but the respawn point did not move there`)
+      return undefined
+    }
+    this.log.info(`respawn point set at the bed at ${p}`)
+    return { x: p.x, y: p.y, z: p.z }
   }
 
   /** Where the royals in sight stand. */
@@ -523,7 +552,7 @@ export class Bot extends EventEmitter {
       }
       return 0
     })
-    if (gatherer.lastStock) this.household?.noteStock(gatherer.lastStock)
+    this.noteStock()
     return Math.max(0, count() - before)
   }
 
@@ -1133,7 +1162,7 @@ export class Bot extends EventEmitter {
         count,
         chest ? { chest } : { player: requestedBy }
       )
-      if (gatherer.lastStock) this.household?.noteStock(gatherer.lastStock)
+      this.noteStock()
       if (result.reason === 'cancelled') return result.gathered
       // The court's own errands (housekeeping) say nothing of a failure: it would be every minute.
       if (!member && result.gathered === 0) return 0
@@ -1259,7 +1288,7 @@ export class Bot extends EventEmitter {
       this.materials(),
       !royal && this.isNight()
     )
-    if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
+    this.noteStock()
     if (work === 'chest' && result.missing === 0 && cells[0]) {
       this.household?.setStorehouse(cells[0], this.cfg.name)
       this.log.info(`the new chest at ${cells[0].x},${cells[0].y},${cells[0].z} is the storehouse`)
@@ -1336,7 +1365,7 @@ export class Bot extends EventEmitter {
         this.materials(),
         this.isNight()
       )
-      if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
+      this.noteStock()
       if (result.placed > 0 && this.court?.find(requestedBy))
         await this.speak(
           `You have put ${result.placed} in place for ${title} round the court's home${result.missing ? `, ${result.missing} still to do` : ''}. Say so in one short sentence.`,
@@ -1411,7 +1440,7 @@ export class Bot extends EventEmitter {
               await window.deposit(item.type, item.metadata, item.count).catch(() => {})
           return 0
         })
-        if (gatherer.lastStock) this.household?.noteStock(gatherer.lastStock)
+        this.noteStock()
       }
       const kept = goods()
       this.log.info(
@@ -1469,7 +1498,7 @@ export class Bot extends EventEmitter {
           if (SPOILS.test(item.name)) await window.deposit(item.type, item.metadata, item.count)
         return 0
       })
-      if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
+      this.noteStock()
       return result.meat
     } catch (err) {
       this.log.warn(`hunting failed: ${errMsg(err)}`)
@@ -1508,10 +1537,13 @@ export class Bot extends EventEmitter {
     this.dutyFollowing = false
     this.movement?.stop()
     try {
-      const done = await farmer.tend(farm, this.household?.storehouse)
-      if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
+      // Seeds for every square, and a plot's worth more while the field may still grow.
+      const growing = farm.cells.length < MAX_FIELD
+      const seeds = farm.cells.length + (growing ? PLOT_SEEDS : 0)
+      const done = await farmer.tend(farm, this.household?.storehouse, seeds)
+      this.noteStock()
       this.growField(farm)
-      return done.filled + done.harvested + done.tilled + done.planted + done.bread > 0
+      return done.filled + done.harvested + done.tilled + done.planted + done.bread + done.seeds > 0
     } catch (err) {
       this.log.warn(`farming failed: ${errMsg(err)}`)
       return false
@@ -1530,7 +1562,7 @@ export class Bot extends EventEmitter {
     const names = (x: number, y: number, z: number) => body.blockAt(new WorldVec(x, y, z))?.name
     if (!farm.cells.every(([x, z]) => names(x, farm.y + 1, z) === 'wheat')) return
     const seeds = (this.household?.stock.items.wheat_seeds ?? 0) + this.carries(/^wheat_seeds$/)
-    if (seeds < 16) return
+    if (seeds < PLOT_SEEDS) return
     const bigger = extendFarm(names, farm, { keepClear: this.household?.keepClear(false) ?? [] })
     if (!bigger) return
     this.household?.setFarm(bigger)
@@ -1564,7 +1596,7 @@ export class Bot extends EventEmitter {
     this.movement?.stop()
     try {
       const done = await fisher.fish(spot, minutes * 60_000, this.household?.storehouse)
-      if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
+      this.noteStock()
       return done.fish
     } catch (err) {
       this.log.warn(`fishing failed: ${errMsg(err)}`)
@@ -1602,7 +1634,7 @@ export class Bot extends EventEmitter {
     this.movement?.stop()
     try {
       const done = await forester.tend(grove, this.household?.storehouse)
-      if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
+      this.noteStock()
       return done.felled + done.planted > 0
     } catch (err) {
       this.log.warn(`tending the grove failed: ${errMsg(err)}`)
@@ -1616,31 +1648,54 @@ export class Bot extends EventEmitter {
    * Dig the court's mine on (a staircase near home, chosen once) for cobblestone and ore: a
    * pickaxe and wood from the storehouse, the stone and ore back into it, and the pickaxe too.
    */
+  /**
+   * What this bot last saw in the storehouse goes into the court's account (the household's
+   * mind keeps it; the army's sightings reach it through `onStock`).
+   */
+  onStock?: (items: Record<string, number>) => void
+
+  private noteStock(): void {
+    const items = this.gatherer?.lastStock
+    if (!items) return
+    this.household?.noteStock(items)
+    this.onStock?.(items)
+  }
+
+  /** Where this bot's mind keeps its mine (the army digs its own); the household's by default. */
+  mines?: MineRecord
+  /** The other mind's mine entrance, kept clear of. */
+  otherMines?: () => Array<[number, number]>
+
   async startMining(want: number): Promise<number> {
     const miner = this.miner
     const body = this.body
     const home = this.household?.home
     const chest = this.household?.storehouse
-    if (!miner || !body || !home || !chest || this.gathering || !byHand(this.gameMode())) return 0
-    let mine = this.household?.mine
-    // An older mine that stopped at its depth limit goes on as a tunnel now.
-    if (mine?.ended === 'deep enough') mine.ended = undefined
-    // One the miners could no longer get down (blocked, or overrun in the dark): a new one.
-    const old = mine?.ended === 'unreachable' ? mine : undefined
-    if (old) mine = undefined
+    const record = this.mines ?? this.household
+    if (!miner || !body || !home || !chest || !record) return 0
+    if (this.gathering || !byHand(this.gameMode())) return 0
+    let mine = record.mine
+    // Worked out, flooded, a cave, or no longer to be got down: its entrance is remembered and a
+    // new one begun. (An old one stopped at its length or depth branches off its tunnel now.)
+    if (mine && !mineGoesOn(mine)) {
+      this.log.info(`the mine at ${mine.x},${mine.y},${mine.z} is done (${mine.ended}): a new one`)
+      record.retireMine(mine)
+      mine = undefined
+    }
     if (!mine) {
       const names = (x: number, y: number, z: number) => body.blockAt(new WorldVec(x, y, z))?.name
       const clear: Array<[number, number]> = [
         ...(this.household?.keepClear() ?? [[home.x, home.z]]),
-        ...(old ? [[old.x, old.z] as [number, number]] : []),
+        ...record.oldMines,
+        ...(this.otherMines?.() ?? []),
       ]
       mine = chooseMine(names, home, clear)
       if (!mine) {
         this.log.info('found no place near home to start a mine')
         return 0
       }
-      this.household?.setMine(mine)
-      this.log.info(`started the court's mine at ${mine.x},${mine.y},${mine.z}`)
+      record.setMine(mine)
+      this.log.info(`started a mine at ${mine.x},${mine.y},${mine.z}`)
     }
     this.gathering = true
     this.pauseWorks()
@@ -1665,19 +1720,19 @@ export class Bot extends EventEmitter {
         return 0
       })
       const result = await miner.dig(mine, want)
-      this.household?.setMine(mine)
+      record.setMine(mine)
       await gatherer?.withChest(chest, async (window) => {
         for (const item of this.body?.inventory.items() ?? [])
           if (
-            /^(cobblestone|cobbled_deepslate|coal|raw_iron|raw_copper|dirt|andesite|diorite|granite)$|_pickaxe$/.test(
+            /^(cobblestone|cobbled_deepslate|coal|raw_iron|raw_copper|dirt|andesite|diorite|granite|tuff|torch)$|_pickaxe$/.test(
               item.name
             )
           )
             await withTimeout(window.deposit(item.type, item.metadata, item.count), 5_000)
         return 0
       })
-      if (gatherer?.lastStock) this.household?.noteStock(gatherer.lastStock)
-      if (result.ended) this.log.info(`the court's mine is done: ${result.ended}`)
+      this.noteStock()
+      if (result.ended) this.log.info(`the mine is done: ${result.ended}`)
       return result.cobblestone + result.ores
     } catch (err) {
       this.log.warn(`mining failed: ${errMsg(err)}`)
@@ -1703,7 +1758,9 @@ export class Bot extends EventEmitter {
     const log = this.log.child('arms')
     let made = 0
     try {
-      const iron = wanted.armour.reduce((n, piece) => n + ARMOUR[piece], wanted.sword ? 2 : 0)
+      const metal = (m: string) =>
+        wanted.armour.filter((a) => a.metal === m).reduce((n, a) => n + ARMOUR[a.piece], 0) +
+        (wanted.swordMetal === m ? 2 : 0)
       await this.gatherer?.withChest(chest, async (window) => {
         const take = async (items: RegExp, n: number) => {
           for (const item of window.containerItems().filter((i) => items.test(i.name))) {
@@ -1713,7 +1770,8 @@ export class Bot extends EventEmitter {
             n -= k
           }
         }
-        await take(/^iron_ingot$/, iron)
+        await take(/^iron_ingot$/, metal('iron'))
+        await take(/^copper_ingot$/, metal('copper'))
         if (wanted.sword) {
           await take(/^cobblestone$/, 2)
           await take(/^stick$/, 1)
@@ -1731,37 +1789,46 @@ export class Bot extends EventEmitter {
           await craft(body, log, 'stick', 1)
         }
         const sword =
-          this.carries(/^iron_ingot$/) >= 2
+          wanted.swordMetal === 'iron' && this.carries(/^iron_ingot$/) >= 2
             ? 'iron_sword'
-            : this.carries(/^cobblestone$/) >= 2
-              ? 'stone_sword'
-              : 'wooden_sword'
-        const better = sword === 'iron_sword' || this.carries(/_(sword|axe)$/) === 0
+            : wanted.swordMetal === 'copper' && this.carries(/^copper_ingot$/) >= 2
+              ? 'copper_sword'
+              : this.carries(/^cobblestone$/) >= 2
+                ? 'stone_sword'
+                : 'wooden_sword'
+        const carried = bestSword(body.inventory.items().map((i) => i.name))
+        const better = swordTier(materialOf(sword)) > swordTier(carried)
         if (better && sword === 'wooden_sword') await makePlanks(body, log, 2)
         if (better && (await craft(body, log, sword, 1))) {
           made++
           this.log.info(`made myself a ${sword.replace('_', ' ')}`)
         }
       }
-      for (const piece of wanted.armour) {
-        if (this.carries(/^iron_ingot$/) < ARMOUR[piece]) break
-        const name = `iron_${piece}`
-        if (!(await craft(body, log, name, 1))) break
+      for (const { piece, metal: m } of wanted.armour) {
+        if (this.carries(new RegExp(`^${m}_ingot$`)) < ARMOUR[piece]) continue
+        const name = `${m}_${piece}`
+        if (!(await craft(body, log, name, 1))) continue
         const item = body.inventory.items().find((i) => i.name === name)
         if (item)
           await body
             .equip(item, ARMOUR_SLOT[piece])
             .catch((err) => log.info(`could not put on the ${piece}: ${errMsg(err)}`))
         made++
-        this.log.info(`made myself an iron ${piece}`)
+        this.log.info(`made myself a ${m} ${piece}`)
       }
-      // The old blade and what is left over go back.
+      // The old blade, the armour taken off, and what is left over go back.
       await this.gatherer?.withChest(chest, async (window) => {
-        const best = body.inventory.items().find((i) => i.name === 'iron_sword')
+        const best = bestSword(body.inventory.items().map((i) => i.name))
+        const worn = new Set(
+          Object.values(ARMOUR_INDEX).map((slot) => body.inventory.slots[slot]?.name)
+        )
         for (const item of body.inventory.items()) {
           const spare =
-            /^(iron_ingot|cobblestone|stick|crafting_table)$|_log$|_planks$/.test(item.name) ||
-            (best !== undefined && /^(stone|wooden)_sword$/.test(item.name))
+            /^(iron_ingot|copper_ingot|cobblestone|stick|crafting_table)$|_log$|_planks$/.test(
+              item.name
+            ) ||
+            (/_sword$/.test(item.name) && materialOf(item.name) !== best) ||
+            (/_(helmet|chestplate|leggings|boots)$/.test(item.name) && !worn.has(item.name))
           if (spare) await withTimeout(window.deposit(item.type, item.metadata, item.count), 5_000)
         }
         return 0
@@ -1774,27 +1841,49 @@ export class Bot extends EventEmitter {
     return made > 0
   }
 
-  /** What it still lacks: a sword (any, or iron when iron is to be had), and a guard's armour. */
-  outfitWanted(ironInStore = this.household?.stock.items.iron_ingot ?? 0): {
+  /**
+   * What it still lacks: a sword (any, or a better one of the metal to be had), and a guard's
+   * armour, iron where the storehouse has iron, else copper, each piece only over a worse one.
+   */
+  outfitWanted(stock: Record<string, number> = this.household?.stock.items ?? {}): {
     sword: boolean
-    armour: Array<keyof typeof ARMOUR>
+    swordMetal?: 'iron' | 'copper'
+    armour: Array<{ piece: keyof typeof ARMOUR; metal: 'iron' | 'copper' }>
   } {
     const body = this.body
-    const armed = this.carries(/_(sword|axe)$/) > 0
-    const ironSword = this.carries(/^iron_sword$/) > 0
-    const sword = !armed || (!ironSword && ironInStore >= 2)
-    const worn = (piece: keyof typeof ARMOUR) =>
-      body?.inventory.slots[ARMOUR_INDEX[piece]]?.name === `iron_${piece}` ||
-      this.carries(new RegExp(`^iron_${piece}$`)) > 0
-    let iron = ironInStore - (sword && !ironSword ? 2 : 0)
-    const armour: Array<keyof typeof ARMOUR> = []
+    let iron = stock.iron_ingot ?? 0
+    let copper = stock.copper_ingot ?? 0
+    const has = swordTier(bestSword(body?.inventory.items().map((i) => i.name) ?? []))
+    const swordMetal =
+      iron >= 2 && has < swordTier('iron')
+        ? 'iron'
+        : copper >= 2 && has < swordTier('copper')
+          ? 'copper'
+          : undefined
+    const sword = has === 0 || swordMetal !== undefined
+    if (swordMetal === 'iron') iron -= 2
+    if (swordMetal === 'copper') copper -= 2
+    const worn = (piece: keyof typeof ARMOUR) => {
+      const on = body?.inventory.slots[ARMOUR_INDEX[piece]]?.name
+      const carried = body?.inventory
+        .items()
+        .filter((i) => i.name.endsWith(`_${piece}`))
+        .map((i) => armourTier(materialOf(i.name)))
+      return Math.max(armourTier(materialOf(on)), ...(carried ?? []))
+    }
+    const armour: Array<{ piece: keyof typeof ARMOUR; metal: 'iron' | 'copper' }> = []
     if (this.isGuard())
-      for (const piece of Object.keys(ARMOUR) as Array<keyof typeof ARMOUR>)
-        if (!worn(piece) && iron >= ARMOUR[piece]) {
-          armour.push(piece)
-          iron -= ARMOUR[piece]
+      for (const piece of Object.keys(ARMOUR) as Array<keyof typeof ARMOUR>) {
+        const cost = ARMOUR[piece]
+        if (iron >= cost && worn(piece) < armourTier('iron')) {
+          armour.push({ piece, metal: 'iron' })
+          iron -= cost
+        } else if (copper >= cost && worn(piece) < armourTier('copper')) {
+          armour.push({ piece, metal: 'copper' })
+          copper -= cost
         }
-    return { sword, armour }
+      }
+    return { sword, ...(swordMetal ? { swordMetal } : {}), armour }
   }
 
   /** Make charcoal in the hall's furnace from the storehouse's logs (for torches). */
@@ -1812,11 +1901,14 @@ export class Bot extends EventEmitter {
     return this.atFurnace((cook, furnace, chest) => cook.cook(furnace, chest))
   }
 
-  /** Furnace work: find the hall's furnace, and do it there (busy meanwhile). */
+  /**
+   * Furnace work: the furnaces near home, the court's own in the hall first, then the nearest
+   * to this bot (the King's own are used only when empty); busy meanwhile.
+   */
   private async atFurnace(
     work: (
       cook: Cook,
-      furnace: WorldVec,
+      furnaces: FurnaceSpot[],
       chest: { x: number; y: number; z: number }
     ) => Promise<number>
   ): Promise<number> {
@@ -1825,20 +1917,24 @@ export class Bot extends EventEmitter {
     const chest = this.household?.storehouse
     const home = this.household?.home
     if (!cook || !body || !chest || !home || this.gathering) return 0
-    const furnace = body.findBlocks({
-      matching: (b: { name: string }) => /^(furnace|lit_furnace)$/.test(b.name),
-      point: new WorldVec(home.x, home.y, home.z),
-      maxDistance: 16,
-      count: 1,
-    })[0]
-    if (!furnace) return 0
+    const me = body.entity.position
+    const furnaces = body
+      .findBlocks({
+        matching: (b: { name: string }) => /^(furnace|lit_furnace)$/.test(b.name),
+        point: new WorldVec(home.x, home.y, home.z),
+        maxDistance: 16,
+        count: 8,
+      })
+      .map((at) => ({ at, own: this.household?.inHall(at) ?? false }))
+      .sort((a, b) => Number(b.own) - Number(a.own) || a.at.distanceTo(me) - b.at.distanceTo(me))
+    if (!furnaces.length) return 0
     this.gathering = true
     this.pauseWorks()
     this.dutyFollowing = false
     this.movement?.stop()
     try {
-      const made = await work(cook, furnace, chest)
-      if (this.gatherer?.lastStock) this.household?.noteStock(this.gatherer.lastStock)
+      const made = await work(cook, furnaces, chest)
+      this.noteStock()
       return made
     } catch (err) {
       this.log.warn(`furnace work failed: ${errMsg(err)}`)
@@ -2397,6 +2493,21 @@ export class Bot extends EventEmitter {
     // The settled spawn point; start_game only carries a placeholder height (y ~ 32769).
     client.on('respawn', (p: RespawnPacket) => {
       if (p.state === 1) this.state.position = p.position
+    })
+
+    // Where it respawns: at login, and whenever a bed is tapped or found gone.
+    client.on('set_spawn_position', (p: SetSpawnPositionPacket) => {
+      const spawn = playerSpawn(p)
+      if (spawn === undefined) return
+      const was = this.state.spawnPoint
+      this.state.spawnPoint = spawn
+      if (was !== undefined && (was === null) !== (spawn === null))
+        this.log.info(spawn ? `respawn point now at ${fmtVec(spawn)}` : 'respawn point lost')
+    })
+
+    // A creeper (or TNT) going off: the court tells blown-away blocks from the royals' changes.
+    client.on('level_sound_event', (p: LevelSoundEventPacket) => {
+      if (p.sound_id === 'Explode' && p.position) this.emit('blast', p.position)
     })
 
     client.on('move_player', (p: MovePlayerPacket) => {

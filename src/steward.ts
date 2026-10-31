@@ -66,7 +66,7 @@ export interface CourtState {
   /** Ore in the storehouse to smelt (raw iron, copper, gold), and iron ingots. */
   oreInStore?: number
   ironInStore?: number
-  /** Guards an iron sword or a piece of iron armour would make better (iron to be had). */
+  /** Guards a sword or a piece of armour of the storehouse's iron or copper would make better. */
   guardsToOutfit?: string[]
   /** Courtiers hurt or hungry: none of them is sent a long way out. */
   weak?: string[]
@@ -102,6 +102,11 @@ export interface CourtState {
   estate?: { repair: number; doors: number; light: number }
   /** A storehouse left behind when the court moved, with things still in it. */
   formerStore?: boolean
+  /**
+   * Free hands with nothing else to do gather the basics by day (the King's wish, 2026-10-31):
+   * the mine for coal, iron, copper and stone, then wood for the store.
+   */
+  basics?: boolean
 }
 
 /** Something Merlin may conjure for the court. */
@@ -157,6 +162,8 @@ export const WOOD_LOW = 4
 export const FOOD_RESERVE = 8
 /** Below this much cobblestone in the storehouse, someone mines. */
 export const STONE_RESERVE = 32
+/** With nothing else to do, wood is fetched until the storehouse has this many logs' worth. */
+export const WOOD_PLENTY = 32
 
 /**
  * What to do now: at most one piece of hall work, one piece of magic (or a request to the royal
@@ -258,7 +265,7 @@ export function plan(s: CourtState): StewardAction[] {
   // Light without coal: charcoal from the court's own logs, in the furnace (indoor work).
   const coal = coalToHand
   const dark = s.hall.light > 0 || (s.estate?.light ?? 0) > 0
-  if (dark && !coal && s.furnace && s.woodInStore >= 2 && s.storehouse) {
+  if (dark && !coal && s.furnace && s.woodInStore >= 2 && s.storehouse && !rests('charcoal')) {
     const by = anyone()
     if (by) out.push({ kind: 'charcoal', by })
   }
@@ -289,7 +296,7 @@ export function plan(s: CourtState): StewardAction[] {
   }
   // Food by hand: cook what was hunted, or hunt (guards first: they carry swords).
   if (s.foodInStore < FOOD_RESERVE && s.storehouse) {
-    if (s.rawInStore > 0 && s.furnace) {
+    if (s.rawInStore > 0 && s.furnace && !rests('cook')) {
       const by = anyone(s.guards ?? (s.freeHunter ? [s.freeHunter] : []))
       if (by) out.push({ kind: 'cook', by })
     } else if (s.rawInStore < FOOD_RESERVE && !s.night && !rests('hunt')) {
@@ -311,7 +318,8 @@ export function plan(s: CourtState): StewardAction[] {
   // Guards arm themselves: a stone sword (or a wooden one) from the storehouse's materials, and
   // with iron to be had an iron sword and iron armour.
   const canArm = s.storehouse && (s.cobblestone >= 2 || s.woodInStore >= 1)
-  const outfit = s.storehouse && (s.ironInStore ?? 0) >= 2 ? (s.guardsToOutfit ?? []) : []
+  // (Guards to outfit are those the storehouse's iron or copper would arm better.)
+  const outfit = s.storehouse ? (s.guardsToOutfit ?? []) : []
   const armer = rests('arm')
     ? undefined
     : ((canArm
@@ -384,10 +392,12 @@ export function plan(s: CourtState): StewardAction[] {
       then: 'furnace',
       why: 'a furnace for the hall',
     })
-  // Coal by magic only when there is no furnace to make charcoal in, or no wood to burn in it
-  // (just moved into a dark house: the old storehouse's logs are still to come).
+  // Coal by magic only when there is no furnace to make charcoal in, no wood to burn in it (just
+  // moved into a dark house: the old storehouse's logs are still to come), or the charcoal came
+  // to nothing (no furnace to be got at): monsters spawn in the dark, by day too indoors.
   const estateDark = (s.estate?.light ?? 0) > 0
-  if ((s.hall.light > 0 || estateDark) && !coal && (!s.furnace || s.woodInStore < 2) && someBuilder)
+  const noCharcoal = !s.furnace || s.woodInStore < 2 || failed('charcoal')
+  if ((s.hall.light > 0 || estateDark) && !coal && noCharcoal && someBuilder)
     wants.push({
       item: 'coal',
       count: estateDark ? 2 : 1,
@@ -408,6 +418,7 @@ export function plan(s: CourtState): StewardAction[] {
   } else if (affordable && s.merlinAwake) out.push({ kind: 'magic', ...affordable })
 
   // Stone: the mine, by day.
+  let mining = stoneFirst
   if (
     !stoneFirst &&
     s.storehouse &&
@@ -418,11 +429,26 @@ export function plan(s: CourtState): StewardAction[] {
   ) {
     const by = anyone()
     if (by) out.push({ kind: 'mine', by, want: 24 })
+    mining ||= Boolean(by)
   }
   // Wood for the next repairs and planks.
+  let chopping = woodFirst
   if (!woodFirst && !rests('wood') && s.storehouse && s.woodInStore < WOOD_RESERVE && !s.night) {
     const by = fitOne()
     if (by) out.push({ kind: 'errand', material: 'wood', count: 16, by })
+    chopping ||= Boolean(by)
+  }
+  // Nothing else to do, by day: the basics. The mine (coal for torches, iron and copper for
+  // tools and armour, stone for walls), then wood for the store (charcoal, planks, fuel).
+  if (s.basics && s.storehouse && !s.night) {
+    if (!mining && !s.mineEnded && !rests('mine')) {
+      const by = anyone()
+      if (by) out.push({ kind: 'mine', by, want: 32 })
+    }
+    if (!chopping && !rests('wood') && s.woodInStore < WOOD_PLENTY) {
+      const by = fitOne()
+      if (by) out.push({ kind: 'errand', material: 'wood', count: 16, by })
+    }
   }
   return out
 }

@@ -7,7 +7,9 @@ import { craft, makePlanks } from './crafting'
 
 /**
  * The court's mine: a staircase going down one step for every step forward from its entrance,
- * two blocks high, so it can always be walked back up. It goes on from where it stopped.
+ * two blocks high, so it can always be walked back up; at its depth a level tunnel, and off the
+ * tunnel side branches, right and left in turn, every few steps (a branch mine: the most walls
+ * seen for the least digging, and ore shows in walls). It goes on from where it stopped.
  */
 export interface Mine {
   /** The entrance: feet on the first step. */
@@ -17,12 +19,31 @@ export interface Mine {
   /** Which way it goes down. */
   dx: number
   dz: number
-  /** Steps dug so far. */
+  /** Steps dug so far along the stairs and the level tunnel. */
   steps: number
-  /** Why it stopped for good (water, lava, a cave), if it did. */
+  /** Why it stopped for good (worked out, water, lava, a cave), if it did: a new one is begun. */
   ended?: string
   /** Rounds in a row the miner could not get down to the last step. */
   lost?: number
+  /** How deep the stairs go (older mines: MAX_STEPS). */
+  depth?: number
+  /** The level tunnel ends here (stairs counted); then the branches. Older mines: as far as dug. */
+  length?: number
+  /** The branch being dug (0, 1, 2...), and how far along it is. */
+  branch?: number
+  branchSteps?: number
+}
+
+/**
+ * Where a mind keeps its mine: the household's in household.json, the army's in its own file
+ * (each mind digs its own, so two miners never share one tunnel).
+ */
+export interface MineRecord {
+  readonly mine: Mine | undefined
+  setMine(mine: Mine): void
+  /** The entrances of mines worked out or given up: a new one keeps clear of them. */
+  readonly oldMines: Array<[number, number]>
+  retireMine(mine: Mine): void
 }
 
 /** Stone that gives cobblestone, and the ores worth taking on the way. */
@@ -32,15 +53,37 @@ export const ORE = /^(deepslate_)?(coal|iron|copper)_ore$/
 /** Iron and copper need a stone pickaxe at least. */
 const NEEDS_STONE_PICK = /(iron|copper)_ore$/
 const DANGER = /^(flowing_)?(water|lava)$/
-/** No deeper than this (caves and lava lie further down); then a level tunnel, this long in all. */
+/** Older mines' stairs go this deep. */
 export const MAX_STEPS = 18
-export const MAX_LENGTH = 80
+/** A new mine's stairs go this deep (from about 70 to near 38: copper, iron and coal all show). */
+export const NEW_DEPTH = 32
+/** The level tunnel runs this far past the stairs; branches go off it. */
+export const LEVEL_LENGTH = 40
+/** The first branch this far along the level tunnel, then one every BRANCH_EVERY, both sides. */
+const BRANCH_FIRST = 4
+const BRANCH_EVERY = 4
+export const BRANCH_LENGTH = 20
+/** A level tunnel cut short (water, a cave) still branches if it got this far. */
+const SHORT_LEVEL = 8
+/** An ore vein is followed this far (blocks in all). */
+const VEIN = 16
+/** Reach for digging, from the eyes. */
+const REACH = 4.5
 const PICKS = [/^iron_pickaxe$/, /^stone_pickaxe$/, /^wooden_pickaxe$/]
 
-/** Where the staircase's n-th step puts the feet. */
+export function depthOf(mine: Mine): number {
+  return mine.depth ?? MAX_STEPS
+}
+
+/** Where the level tunnel ends (the stairs counted). */
+export function lengthOf(mine: Mine): number {
+  return mine.length ?? depthOf(mine) + LEVEL_LENGTH
+}
+
+/** Where the staircase's (or the level tunnel's) n-th step puts the feet. */
 export function stepAt(mine: Mine, n: number): Vec3 {
-  // Down to the depth limit, then on as a level tunnel.
-  const down = Math.min(n, MAX_STEPS)
+  // Down to the depth, then on as a level tunnel.
+  const down = Math.min(n, depthOf(mine))
   return new Vec3(mine.x + mine.dx * n, mine.y - down, mine.z + mine.dz * n)
 }
 
@@ -48,7 +91,35 @@ export function stepAt(mine: Mine, n: number): Vec3 {
 export function stepCells(mine: Mine, n: number): Vec3[] {
   const f = stepAt(mine, n)
   // Stepping down needs a third block of headroom; the level tunnel only two.
-  return n <= MAX_STEPS ? [f.offset(0, 2, 0), f.offset(0, 1, 0), f] : [f.offset(0, 1, 0), f]
+  return n <= depthOf(mine) ? [f.offset(0, 2, 0), f.offset(0, 1, 0), f] : [f.offset(0, 1, 0), f]
+}
+
+/** The level tunnel's step a branch goes off from; undefined past the tunnel's end. */
+export function branchStart(mine: Mine, k: number): number | undefined {
+  const at = depthOf(mine) + BRANCH_FIRST + BRANCH_EVERY * Math.floor(k / 2)
+  return at <= lengthOf(mine) ? at : undefined
+}
+
+/** Where the i-th step of branch k puts the feet (i = 0: on the level tunnel). */
+export function branchAt(mine: Mine, k: number, i: number): Vec3 | undefined {
+  const start = branchStart(mine, k)
+  if (start === undefined) return undefined
+  // Right of the way down for even branches, left for odd ones.
+  const side = k % 2 === 0 ? 1 : -1
+  return stepAt(mine, start).offset(-mine.dz * side * i, 0, mine.dx * side * i)
+}
+
+/** How many branches a mine has in all. */
+export function branchCount(mine: Mine): number {
+  let k = 0
+  while (branchStart(mine, k) !== undefined) k++
+  return k
+}
+
+/** Where the miner stands to go on: the last step dug (stairs, tunnel or branch). */
+export function lastSpot(mine: Mine): Vec3 {
+  if (mine.branch === undefined) return stepAt(mine, mine.steps)
+  return branchAt(mine, mine.branch, mine.branchSteps ?? 0) ?? stepAt(mine, mine.steps)
 }
 
 type MineBot = MineflayerBot & { pathfinder: Pathfinder }
@@ -64,8 +135,9 @@ export interface MineResult {
 }
 
 /**
- * Digs the court's mine on for cobblestone (and whatever coal, iron or copper ore shows in its
- * walls), with a pickaxe it makes itself: wooden first, stone as soon as it has cobblestone.
+ * Digs the court's mine on for cobblestone and whatever coal, iron or copper ore shows in its
+ * walls (following each vein), with a pickaxe it makes itself: wooden first, stone as soon as it
+ * has cobblestone. Torches every few steps, made of the coal it finds when it has none.
  */
 export class Miner {
   private readonly bot: MineBot
@@ -115,7 +187,26 @@ export class Miner {
     await craft(this.bot, this.log, 'stick', 1)
   }
 
-  /** Dig on until `want` cobblestone (or the mine ends); then walk back up to the entrance. */
+  /** Walk to a spot in the mine: exactly, then once more, then near enough. */
+  private async walkTo(p: Vec3, what: string): Promise<boolean> {
+    for (const goal of [
+      new goals.GoalBlock(p.x, p.y, p.z),
+      new goals.GoalBlock(p.x, p.y, p.z),
+      new goals.GoalNear(p.x, p.y, p.z, 1),
+    ]) {
+      try {
+        await withTimeout(this.bot.pathfinder.goto(goal), 40_000)
+        return true
+      } catch (err) {
+        this.log.info(`could not walk to ${what}: ${errMsg(err)}`)
+        this.bot.pathfinder.setGoal(null)
+        await sleep(2_000)
+      }
+    }
+    return false
+  }
+
+  /** Dig on until `want` cobblestone and ore (or the mine ends); then walk back up. */
   async dig(mine: Mine, want: number): Promise<MineResult> {
     this.cancelled = false
     const result: MineResult = { steps: 0, cobblestone: 0, ores: 0 }
@@ -125,28 +216,16 @@ export class Miner {
       return result
     }
     const before = this.count('cobblestone')
-    const until = Date.now() + 5 * 60_000
-    // Down the stairs dug before, to the last step: the next is dug from there, within reach.
+    this.oresTaken = 0
+    const until = Date.now() + 6 * 60_000
+    // The level tunnel done: on to the branches (walked to straight, not to the tunnel's end).
+    if (mine.branch === undefined && mine.steps >= lengthOf(mine)) {
+      mine.branch = 0
+      mine.branchSteps = 0
+    }
+    // Down the stairs dug before, to where it stopped: the next is dug from there, within reach.
     if (mine.steps > 0) {
-      const last = stepAt(mine, mine.steps)
-      let down = false
-      // A fight on the way (a guard mines too) or a slow plan: try again, then near enough.
-      for (const goal of [
-        new goals.GoalBlock(last.x, last.y, last.z),
-        new goals.GoalBlock(last.x, last.y, last.z),
-        new goals.GoalNear(last.x, last.y, last.z, 1),
-      ]) {
-        try {
-          await withTimeout(this.bot.pathfinder.goto(goal), 40_000)
-          down = true
-          break
-        } catch (err) {
-          this.log.info(`could not walk down the mine to step ${mine.steps}: ${errMsg(err)}`)
-          this.bot.pathfinder.setGoal(null)
-          await sleep(2_000)
-        }
-      }
-      if (!down) {
+      if (!(await this.walkTo(lastSpot(mine), `the mine's end (step ${mine.steps})`))) {
         mine.lost = (mine.lost ?? 0) + 1
         // Three rounds in a row: the stairs are blocked or overrun; a new mine is begun.
         if (mine.lost >= LOST_ROUNDS) mine.ended = 'unreachable'
@@ -155,55 +234,118 @@ export class Miner {
       }
       mine.lost = 0
     }
-    while (!this.cancelled && Date.now() < until && this.count('cobblestone') - before < want) {
+    const got = () => this.count('cobblestone') - before + this.oresTaken
+    while (!this.cancelled && Date.now() < until && got() < want) {
       if (mine.ended) break
-      if (mine.steps >= MAX_LENGTH) {
-        mine.ended = 'long enough'
-        break
+      if (mine.branch === undefined && mine.steps >= lengthOf(mine)) {
+        // The level tunnel is done: on to the branches.
+        mine.branch = 0
+        mine.branchSteps = 0
       }
-      const n = mine.steps + 1
-      const danger = this.danger(mine, n)
-      if (danger) {
-        mine.ended = danger
-        this.log.info(`the mine stops at step ${n}: ${danger}`)
-        break
-      }
-      for (const cell of stepCells(mine, n)) await this.digAt(cell)
-      try {
-        const f = stepAt(mine, n)
-        await withTimeout(this.bot.pathfinder.goto(new goals.GoalBlock(f.x, f.y, f.z)), 15_000)
-      } catch (err) {
-        this.log.info(`could not step down to step ${n}: ${errMsg(err)}`)
-        this.bot.pathfinder.setGoal(null)
-        break
-      }
-      mine.steps = n
+      const ok = mine.branch === undefined ? await this.stepOn(mine) : await this.branchOn(mine)
+      if (!ok) break
       result.steps++
-      result.ores += await this.oresAround(stepAt(mine, n))
-      // A torch every fourth step: no monsters spawning in the dark of the stairs.
-      if (n % 4 === 0) await this.torch(stepAt(mine, n - 1))
-      // Upgrade the pickaxe as soon as the cobblestone allows.
     }
     result.cobblestone = Math.max(0, this.count('cobblestone') - before)
+    result.ores = this.oresTaken
     result.ended = mine.ended
     // Back up the stairs.
     try {
       await withTimeout(
         this.bot.pathfinder.goto(new goals.GoalNear(mine.x, mine.y, mine.z, 1)),
-        40_000
+        60_000
       )
     } catch {
       this.bot.pathfinder.setGoal(null)
     }
+    const where =
+      mine.branch === undefined
+        ? `${mine.steps} steps`
+        : `branch ${mine.branch + 1} of ${branchCount(mine)}`
     this.log.info(
-      `mined ${result.steps} steps (${mine.steps} in all): ${result.cobblestone} cobblestone, ${result.ores} ores`
+      `mined ${result.steps} steps (${where}): ${result.cobblestone} cobblestone, ${result.ores} ores`
     )
     return result
   }
 
-  /** Water or lava next to the step, or a hollow under it (a cave): the mine ends there. */
-  private danger(mine: Mine, n: number): string | undefined {
-    const cells = stepCells(mine, n)
+  private oresTaken = 0
+
+  /** One more step of the stairs or the level tunnel. False when it cannot go on now. */
+  private async stepOn(mine: Mine): Promise<boolean> {
+    const n = mine.steps + 1
+    const danger = this.danger(stepCells(mine, n), stepAt(mine, n))
+    if (danger) {
+      this.log.info(`the mine's tunnel stops at step ${n}: ${danger}`)
+      // Far enough along the level to branch off what there is; else it is no mine at all.
+      if (mine.steps >= depthOf(mine) + SHORT_LEVEL) mine.length = mine.steps
+      else mine.ended = danger
+      return true
+    }
+    for (const cell of stepCells(mine, n)) await this.digAt(cell)
+    const f = stepAt(mine, n)
+    try {
+      await withTimeout(this.bot.pathfinder.goto(new goals.GoalBlock(f.x, f.y, f.z)), 15_000)
+    } catch (err) {
+      this.log.info(`could not step down to step ${n}: ${errMsg(err)}`)
+      this.bot.pathfinder.setGoal(null)
+      return false
+    }
+    mine.steps = n
+    this.oresTaken += await this.oresAround(f)
+    // A torch every fourth step: no monsters spawning in the dark of the stairs.
+    if (n % 4 === 0) await this.torch(stepAt(mine, n - 1))
+    return true
+  }
+
+  /** One more step along the branch being dug, or on to the next branch. */
+  private async branchOn(mine: Mine): Promise<boolean> {
+    const k = mine.branch ?? 0
+    if (branchStart(mine, k) === undefined) {
+      mine.ended = 'worked out'
+      this.log.info('the mine is worked out: every branch dug')
+      return true
+    }
+    const i = (mine.branchSteps ?? 0) + 1
+    const next = () => {
+      mine.branch = k + 1
+      mine.branchSteps = 0
+    }
+    if (i > BRANCH_LENGTH) {
+      next()
+      // Back to the level tunnel, where the next branch begins.
+      const start = branchAt(mine, k + 1, 0)
+      return start ? this.walkTo(start, `branch ${k + 2}`) : true
+    }
+    const f = branchAt(mine, k, i)
+    const start = branchAt(mine, k, 0)
+    if (!f || !start) return false
+    // A new branch: from where it leaves the level tunnel (the miner may be at the tunnel's end).
+    if (i === 1 && this.bot.entity.position.distanceTo(start.offset(0.5, 0, 0.5)) > 1.5)
+      if (!(await this.walkTo(start, `branch ${k + 1}`))) return false
+    const cells = [f.offset(0, 1, 0), f]
+    const danger = this.danger(cells, f)
+    if (danger) {
+      this.log.info(`branch ${k + 1} stops at ${i}: ${danger}`)
+      next()
+      const start = branchAt(mine, k + 1, 0)
+      return start ? this.walkTo(start, `branch ${k + 2}`) : true
+    }
+    for (const cell of cells) await this.digAt(cell)
+    try {
+      await withTimeout(this.bot.pathfinder.goto(new goals.GoalBlock(f.x, f.y, f.z)), 15_000)
+    } catch (err) {
+      this.log.info(`could not step into branch ${k + 1} at ${i}: ${errMsg(err)}`)
+      this.bot.pathfinder.setGoal(null)
+      return false
+    }
+    mine.branchSteps = i
+    this.oresTaken += await this.oresAround(f)
+    if (i % 6 === 0) await this.torch(branchAt(mine, k, i - 1) ?? f)
+    return true
+  }
+
+  /** Water or lava next to the cells, or a hollow under the feet (a cave). */
+  private danger(cells: Vec3[], feet: Vec3): string | undefined {
     for (const c of cells)
       for (const [dx, dy, dz] of [
         [1, 0, 0],
@@ -217,7 +359,7 @@ export class Miner {
         if (name === undefined) return 'the ground there is not to be seen'
         if (DANGER.test(name)) return /lava/.test(name) ? 'lava' : 'water'
       }
-    const below = this.names(stepAt(mine, n).offset(0, -1, 0))
+    const below = this.names(feet.offset(0, -1, 0))
     if (below === 'air' || below === 'cave_air') return 'a cave below'
     return undefined
   }
@@ -253,26 +395,54 @@ export class Miner {
       await this.bot.equip(tool, 'hand').catch(() => {})
   }
 
-  /** Ores in the walls around the step, within reach: dig them (if the pickaxe can). */
+  /**
+   * Ores in the walls around the step, within reach: dug, and each vein followed through the
+   * ore it opens up (as far as the pickaxe can, and the arm reaches).
+   */
   private async oresAround(f: Vec3): Promise<number> {
     let taken = 0
-    const stonePick = this.count(/^(stone|iron)_pickaxe$/) > 0
+    const eyes = () => this.bot.entity.position.offset(0, 1.62, 0)
+    const queue: Vec3[] = []
     for (let dx = -1; dx <= 1; dx++)
-      for (let dy = -1; dy <= 2; dy++)
-        for (let dz = -1; dz <= 1; dz++) {
-          const p = f.offset(dx, dy, dz)
-          const name = this.names(p)
-          if (!name || !ORE.test(name)) continue
-          if (NEEDS_STONE_PICK.test(name) && !stonePick) continue
-          await this.digAt(p)
-          taken++
-        }
-    if (taken) await sleep(500)
+      for (let dy = -1; dy <= 2; dy++) for (let dz = -1; dz <= 1; dz++) queue.push(f.offset(dx, dy, dz))
+    const seen = new Set<string>()
+    while (queue.length && taken < VEIN && !this.cancelled) {
+      const p = queue.shift() as Vec3
+      const key = `${p.x},${p.y},${p.z}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      const name = this.names(p)
+      if (!name || !ORE.test(name)) continue
+      if (NEEDS_STONE_PICK.test(name) && this.count(/^(stone|iron)_pickaxe$/) === 0) continue
+      if (eyes().distanceTo(p.offset(0.5, 0.5, 0.5)) > REACH) continue
+      await this.digAt(p)
+      if (this.names(p) === name) continue
+      taken++
+      // The vein goes on through the ore next to this one.
+      for (const [dx, dy, dz] of [
+        [1, 0, 0],
+        [-1, 0, 0],
+        [0, 1, 0],
+        [0, -1, 0],
+        [0, 0, 1],
+        [0, 0, -1],
+      ])
+        queue.push(p.offset(dx, dy, dz))
+    }
+    if (taken) {
+      await sleep(500)
+      this.log.info(`took ${taken} ore from the walls`)
+    }
     return taken
   }
 
   /** A torch standing on a step (the one behind: the bot stands on this one). */
   private async torch(step: Vec3): Promise<void> {
+    // None left: four from a lump of coal the mine gave (and a stick).
+    if (this.count('torch') === 0 && this.count(/^(coal|charcoal)$/) > 0) {
+      if (this.count('stick') === 0) await this.sticks().catch(() => {})
+      if (this.count('stick') > 0) await craft(this.bot, this.log, 'torch', 1).catch(() => false)
+    }
     const torch = this.bot.inventory.items().find((i) => i.name === 'torch')
     const floor = this.bot.blockAt(step.offset(0, -1, 0))
     if (!torch || !floor || floor.boundingBox !== 'block') return
@@ -286,9 +456,9 @@ export class Miner {
 }
 
 /**
- * Where the court's mine starts: flat soil 10 to 24 blocks from home, away from the hall and the
- * field, with the ground running on the same way for a few steps (so the stairs start in the
- * open, not under a wall).
+ * Where the court's mine starts: flat soil 10 to 24 blocks from home, away from the hall, the
+ * field and the mines before it, with the ground running on the same way for a few steps (so
+ * the stairs start in the open, not under a wall). Its stairs go NEW_DEPTH deep.
  */
 export function chooseMine(
   names: (x: number, y: number, z: number) => string | undefined,
@@ -311,8 +481,20 @@ export function chooseMine(
         if (!SOIL.test(names(x, y - 1, z) ?? '') || !OPEN.test(names(x, y, z) ?? '')) continue
         if (!OPEN.test(names(x, y + 1, z) ?? '')) break
         // Going on outward, away from home.
-        return { x, y, z, dx, dz, steps: 0 }
+        return { x, y, z, dx, dz, steps: 0, depth: NEW_DEPTH }
       }
     }
   return undefined
+}
+
+/**
+ * An old mine record as it goes on now: one stopped "long enough" (before branches) or "deep
+ * enough" branches off the tunnel it has; any other end means a new mine.
+ */
+export function mineGoesOn(mine: Mine): boolean {
+  if (mine.ended === 'long enough' || mine.ended === 'deep enough') {
+    mine.length = Math.max(mine.steps, depthOf(mine) + SHORT_LEVEL)
+    mine.ended = undefined
+  }
+  return !mine.ended
 }

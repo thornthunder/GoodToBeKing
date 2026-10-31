@@ -2,7 +2,7 @@ import type { Bot as MineflayerBot } from 'mineflayer-bedrock'
 import { goals, type Pathfinder } from 'mineflayer-pathfinder'
 import type { Vec3 } from 'vec3'
 import type { Logger } from '../logger'
-import { errMsg, withTimeout } from '../util'
+import { errMsg, sleep, withTimeout } from '../util'
 
 /** Walking out to look further: this far a leg, at most this many legs, this long each. */
 export const SCOUT_STEP = 64
@@ -43,13 +43,24 @@ export async function scout(
   }
   if (leg === SCOUT_LEGS - 1) turns.set(what, (turns.get(what) ?? 0) + 1)
   log.info(`no ${what} in sight: looking further, towards ${to.floored()}`)
-  try {
-    await withTimeout(
-      walker.pathfinder.goto(new goals.GoalNearXZ(Math.floor(to.x), Math.floor(to.z), 8)),
-      SCOUT_MS
-    )
-  } catch (err) {
-    walker.pathfinder.setGoal(null)
-    log.debug(`scouting stopped: ${errMsg(err)}`)
+  // A walk refused at once (the goal changed under it: a walk home stopping as this one began)
+  // is tried again after a moment, or the whole search ends before a step is taken.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const start = Date.now()
+    try {
+      await withTimeout(
+        walker.pathfinder.goto(new goals.GoalNearXZ(Math.floor(to.x), Math.floor(to.z), 8)),
+        SCOUT_MS
+      )
+      return
+    } catch (err) {
+      walker.pathfinder.setGoal(null)
+      log.debug(`scouting stopped: ${errMsg(err)}`)
+      if (Date.now() - start > QUICK_FAIL_MS) return
+      await sleep(1_500)
+    }
   }
 }
+
+/** A walk that fails sooner than this never started. */
+const QUICK_FAIL_MS = 2_000

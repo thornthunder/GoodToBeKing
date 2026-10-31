@@ -64,8 +64,13 @@ export function chooseFarm(
   return options.sort((a, b) => a.score - b.score)[0]?.farm
 }
 
-/** The largest the field grows to, plot by plot. */
-export const MAX_FIELD = 64
+/**
+ * The largest the field grows to, plot by plot: sixteen courtiers eat more than a small field
+ * gives (a loaf is three ears of wheat, and dry soil grows them slowly).
+ */
+export const MAX_FIELD = 160
+/** Seeds kept back for the next plot (four by four). */
+export const PLOT_SEEDS = SIDE * SIDE
 
 /**
  * Another plot of four by four beside the field, at its height, on flat untouched soil clear of

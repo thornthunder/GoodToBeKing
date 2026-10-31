@@ -5,8 +5,35 @@ import {
   metadataTarget,
   normalisePlayerList,
   parseTextPacket,
+  playerSpawn,
   stripFormatting,
 } from './packets'
+
+describe('playerSpawn', () => {
+  const none = { x: -2147483648, y: -2147483648, z: -2147483648 }
+  it('reads the bed a player respawns at, none, or nothing about the player', () => {
+    // As the Dev world sent it (2026-10-31): at login with no bed, then after a tap.
+    expect(
+      playerSpawn({ spawn_type: 'player', player_position: none, dimension: 3, world_position: none })
+    ).toBeNull()
+    expect(
+      playerSpawn({
+        spawn_type: 'player',
+        player_position: { x: 101, y: 69, z: 22 },
+        dimension: 0,
+        world_position: { x: 99, y: 69, z: 22 },
+      })
+    ).toEqual({ x: 101, y: 69, z: 22 })
+    expect(
+      playerSpawn({
+        spawn_type: 'world',
+        player_position: { x: 0, y: 64, z: 0 },
+        dimension: 0,
+        world_position: { x: 0, y: 64, z: 0 },
+      })
+    ).toBeUndefined()
+  })
+})
 
 describe('stripFormatting', () => {
   it('removes section-sign colour codes', () => {

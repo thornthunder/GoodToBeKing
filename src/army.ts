@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import type { Mine, MineRecord } from './bot/mining'
 
 /** What a soldier wears and carries: the material of each piece (undefined: none). */
 export interface Gear {
@@ -39,6 +40,16 @@ const SWORD_TIER: Record<string, number> = {
   iron: 4,
   diamond: 5,
   netherite: 6,
+}
+
+/** How good armour of this material is (0: none). */
+export function armourTier(material: string | undefined): number {
+  return ARMOUR_TIER[material ?? ''] ?? 0
+}
+
+/** How good a sword of this material is (0: none). */
+export function swordTier(material: string | undefined): number {
+  return SWORD_TIER[material ?? ''] ?? 0
 }
 
 /** "iron" from "iron_chestplate", undefined for nothing worn. */
@@ -123,7 +134,7 @@ export interface Blessing {
 }
 
 /** The two files between the minds of one world (in its .state). */
-export class ArmyBoard {
+export class ArmyBoard implements MineRecord {
   constructor(private readonly dir: string) {}
 
   report(): ArmyReport | undefined {
@@ -140,6 +151,48 @@ export class ArmyBoard {
 
   writeBlessing(blessing: Blessing): void {
     this.write('blessing.json', blessing)
+  }
+
+  /**
+   * Soldiers far from home (woken at the world spawn) asking the household's Merlin to bring
+   * them home by portal: name -> when asked. The army has no Merlin of its own.
+   */
+  portals(): Record<string, number> {
+    return this.read<Record<string, number>>('army-portals.json') ?? {}
+  }
+
+  askPortal(name: string, now = Date.now()): void {
+    this.write('army-portals.json', { ...this.portals(), [name]: now })
+  }
+
+  /**
+   * What a soldier last saw in the storehouse (the household's mind keeps the court's account
+   * of it; the army's hunters and miners put things in too).
+   */
+  stock(): { items: Record<string, number>; at: number } | undefined {
+    return this.read<{ items: Record<string, number>; at: number }>('army-stock.json')
+  }
+
+  writeStock(items: Record<string, number>, at = Date.now()): void {
+    this.write('army-stock.json', { items, at })
+  }
+
+  /** The army's own mine (the household digs its own): see bot/mining.ts. */
+  get mine(): Mine | undefined {
+    return this.read<{ mine?: Mine }>('army-mine.json')?.mine
+  }
+
+  setMine(mine: Mine): void {
+    this.write('army-mine.json', { mine: { ...mine }, old: this.oldMines })
+  }
+
+  get oldMines(): Array<[number, number]> {
+    return this.read<{ old?: Array<[number, number]> }>('army-mine.json')?.old ?? []
+  }
+
+  retireMine(mine: Mine): void {
+    const old = [...this.oldMines, [mine.x, mine.z] as [number, number]].slice(-12)
+    this.write('army-mine.json', { old })
   }
 
   private read<T>(name: string): T | undefined {

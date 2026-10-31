@@ -157,6 +157,22 @@ describe('the magic keeper', () => {
     expect(magic.pendingGifts).toHaveLength(0)
   })
 
+  it('lets a gift go quietly when there is nothing left of it to take back', async () => {
+    const magic = new Magic({ court: ['Merlin', 'Bruce'] })
+    const who = { requester: 'LittleOne42', target: 'Bruce', merlin: 'Merlin' }
+    const t0 = 2_000_000
+    await magic.cast(spell('gift'), { item: 'bread', count: 2 }, who, ok, t0)
+    const [gift] = magic.due(() => true, t0 + 24 * 3_600_000)
+    // Eaten (or lost at a death): the server finds none.
+    const none = async (): Promise<CommandResult> => ({
+      ok: false,
+      count: 0,
+      output: ['commands.clear.failure.no.items Bruce'],
+    })
+    expect(await magic.takeBack(gift, none, t0 + 24 * 3_600_000)).toBe(false)
+    expect(magic.pendingGifts).toHaveLength(0)
+  })
+
   it('does at most ten things an hour, all spells together, even after a restart', async () => {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'magic-')), 'magic.json')
     const magic = new Magic({ file })

@@ -15,14 +15,16 @@ const GROUPS: Record<string, RegExp> = {
   stone: /^(cobblestone|andesite|diorite|granite|tuff|cobbled_deepslate|stone)$/,
   // Whatever closes a hole, sturdiest first (see FILLER_ORDER).
   filler: /(_planks|^(cobblestone|andesite|diorite|granite|tuff|cobbled_deepslate|stone|dirt))$/,
-  // Ground under the floor: dirt or any stone.
-  earth: /^(dirt|cobblestone|andesite|diorite|granite|tuff|cobbled_deepslate|stone)$/,
+  // Ground under the floor: dirt or any stone, planks when there is neither (a hole tonight).
+  earth: /(_planks|^(dirt|cobblestone|andesite|diorite|granite|tuff|cobbled_deepslate|stone))$/,
 }
 /**
  * Filler by preference: stone stands up to a creeper's blast (dirt is blown away in a crater,
  * planks halfway), and keeps the court's wood for planks and torches.
  */
 const FILLER_ORDER = [GROUPS.stone, /_planks$/, /^dirt$/]
+/** Ground under the floor by preference: dirt and stone, the court's planks last. */
+const EARTH_ORDER = [/^dirt$/, GROUPS.stone, /_planks$/]
 export const itemsFor = (block: string): RegExp => GROUPS[block] ?? new RegExp(`^${block}$`)
 
 /** Blocks a builder towers up on when a spot is out of reach, and takes away afterwards. */
@@ -235,7 +237,7 @@ export class Handbuilder {
           // Filler and ground by preference: the court's stone before its wood or dirt.
           if (block === 'filler' || block === 'earth') {
             let left = n
-            for (const kind of block === 'filler' ? FILLER_ORDER : [/^dirt$/, GROUPS.stone])
+            for (const kind of block === 'filler' ? FILLER_ORDER : EARTH_ORDER)
               if (left > 0) left = await this.withdraw(chest, kind, left)
             continue
           }
@@ -452,12 +454,10 @@ export class Handbuilder {
       }
       const ref = this.reference(c)
       if (!ref) return false
-      const item =
-        c.block === 'filler'
-          ? FILLER_ORDER.map((kind) =>
-              this.bot.inventory.items().find((i) => kind.test(i.name))
-            ).find(Boolean)
-          : this.bot.inventory.items().find((i) => itemsFor(c.block).test(i.name))
+      const order = c.block === 'filler' ? FILLER_ORDER : c.block === 'earth' ? EARTH_ORDER : undefined
+      const item = order
+        ? order.map((kind) => this.bot.inventory.items().find((i) => kind.test(i.name))).find(Boolean)
+        : this.bot.inventory.items().find((i) => itemsFor(c.block).test(i.name))
       if (!item) return false
       try {
         await this.bot.equip(item, 'hand')

@@ -24,6 +24,8 @@ export interface FarmResult {
   harvested: number
   /** Loaves baked from the wheat. */
   bread: number
+  /** Seeds found in the grass. */
+  seeds: number
 }
 
 /**
@@ -50,8 +52,23 @@ export class Farmer {
       .reduce((n, i) => n + i.count, 0)
   }
 
-  async tend(farm: Farm, storehouse?: { x: number; y: number; z: number }): Promise<FarmResult> {
-    const result: FarmResult = { filled: 0, tilled: 0, planted: 0, harvested: 0, bread: 0 }
+  /**
+   * `seedsWanted`: seeds to have once the field is sown (one a square, and a plot's worth more
+   * while the field may still grow): grass is broken for them.
+   */
+  async tend(
+    farm: Farm,
+    storehouse?: { x: number; y: number; z: number },
+    seedsWanted = farm.cells.length
+  ): Promise<FarmResult> {
+    const result: FarmResult = {
+      filled: 0,
+      tilled: 0,
+      planted: 0,
+      harvested: 0,
+      bread: 0,
+      seeds: 0,
+    }
     const names = (x: number, y: number, z: number) => this.bot.blockAt(new Vec3(x, y, z))?.name
     const holes = farm.cells.filter(
       ([x, z]) => farmNeed(names(x, farm.y, z), names(x, farm.y + 1, z)) === 'fill'
@@ -93,7 +110,7 @@ export class Farmer {
     }
     const hoe = this.bot.inventory.items().find((i) => HOE.test(i.name))
     if (!hoe) this.log.info('no hoe: cannot till the field')
-    if (this.count(SEEDS) < farm.cells.length) await this.seedsFromGrass(farm, 24)
+    if (this.count(SEEDS) < seedsWanted) result.seeds = await this.seedsFromGrass(farm, seedsWanted)
     // The field, square by square, nearest first.
     const me = this.bot.entity.position
     const cells = [...farm.cells].sort(
@@ -139,9 +156,9 @@ export class Farmer {
     if (wheat >= 3 && this.count(/_planks$/) < 4) await makePlanks(this.bot, this.log, 4)
     if (wheat >= 3 && (await craft(this.bot, this.log, 'bread', Math.floor(wheat / 3))))
       result.bread = Math.floor(wheat / 3)
-    if (storehouse) await this.store(storehouse, farm.cells.length)
+    if (storehouse) await this.store(storehouse, seedsWanted)
     this.log.info(
-      `the field: ${result.filled} filled, ${result.harvested} harvested, ${result.tilled} tilled, ${result.planted} planted, ${result.bread} bread`
+      `the field: ${result.filled} filled, ${result.harvested} harvested, ${result.tilled} tilled, ${result.planted} planted, ${result.bread} bread, ${result.seeds} seeds found`
     )
     return result
   }
@@ -170,7 +187,7 @@ export class Farmer {
   }
 
   /** Break grass near the field until there are `want` seeds (or it has tried enough). */
-  private async seedsFromGrass(farm: Farm, want: number): Promise<void> {
+  private async seedsFromGrass(farm: Farm, want: number): Promise<number> {
     const [cx, cz] = farm.cells[0]
     const until = Date.now() + 90_000
     const before = this.count(SEEDS)
@@ -178,18 +195,18 @@ export class Farmer {
       const grass = this.bot.findBlocks({
         matching: (b: { name: string }) => GRASS.test(b.name),
         point: new Vec3(cx, farm.y + 1, cz),
-        maxDistance: 24,
+        maxDistance: 32,
         count: 1,
       })[0]
       const block = grass && this.bot.blockAt(grass)
-      if (!block) return
+      if (!block) break
       if (!(await this.near(block.position.x, block.position.y, block.position.z))) continue
       await withTimeout(this.bot.dig(block, true), 5_000).catch(() => {})
       await this.pickUp(block.position)
     }
-    this.log.info(
-      `broke grass for seeds: ${this.count(SEEDS) - before} found, ${this.count(SEEDS)} in all`
-    )
+    const found = Math.max(0, this.count(SEEDS) - before)
+    this.log.info(`broke grass for seeds: ${found} found, ${this.count(SEEDS)} in all`)
+    return found
   }
 
   /** Use an item on the top of a block (a hoe on soil, seeds on farmland). */

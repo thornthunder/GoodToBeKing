@@ -114,7 +114,14 @@ shifts of up to four soldiers, 15 minutes each, those who walked least first, wa
 blocks outside the estate's buildings and the hall (16 round home without them), a look round at
 each point; only soldiers free of orders, escort and errands, armed, not weak, and by night only
 those in armour; Sarge stays home. Any royal action stops a soldier's round (`Bot.act`), and a
-patrolling soldier fights what comes near (Survival, out of doors). The new courtiers' skins are
+patrolling soldier fights what comes near (Survival, out of doors). Off the round, by day, the
+army is not idle (`armyDuties`, the King's wish, 2026-10-31): a soldier hunts when the storehouse
+holds under 16 meals and raw meat, another digs the army's own mine (`.state/army-mine.json`,
+kept clear of the household's), and a soldier arms himself whenever the storehouse's iron or
+copper makes him better (iron where there is iron, else copper, piece by piece). What a soldier
+sees in the storehouse reaches the household's account through `.state/army-stock.json`. The
+army has no Merlin: a soldier far from home (woken at the world spawn) asks the household's for
+a portal (`.state/army-portals.json`, `watchPortals`). The new courtiers' skins are
 painted by `scripts/make-court-skins.ts` (soldiers in open kettle hats so hair and faces show,
 Sarge's gold sleeve stripes, Joan's dress and kerchief, Wat's tunic and straw hat).
 
@@ -155,9 +162,14 @@ Windows, killing a background `npx` shell does not kill its node children at all
   within reach; a monster they get no closer to is let go), everyone backing away from a
   creeper (inside the hall only from one that got in or stands by the doorway), doors closed
   behind; dying is said lightly and the bot comes home. In survival the mason (creative) is never used and builds by blueprint are declined.
-  Beds: when a royal lies down at night every courtier sleeps in a free bed near home; each taps
-  a bed once so it respawns there (the "Respawn point set" pop-up is not read: a tap that went
-  through counts). `steward.ts` + `BotManager.keepHouse`: every minute the Castellan takes stock
+  Beds: when a royal lies down at night every courtier sleeps in a free bed near home. Where
+  each respawns the server says (`set_spawn_position`, `Bot.state.spawnPoint`): whoever's is
+  not at home taps a bed near home, by day only (a bed tapped at night is lain in, and one
+  sleeper skips the night on the Dev world), one courtier every 30 s, in both minds
+  (`keepBeds`). On 2026-10-31 nearly every death woke at the world spawn, 100 blocks off in the
+  dark, and died again there within seconds: some 330 deaths in four hours. Hunger is said by
+  one courtier of a mind at most every 30 minutes. `steward.ts` + `BotManager.keepHouse`: every
+  minute the Castellan takes stock
   (roof, door, beds, torches, a sword per guard, food per courtier, wood in the storehouse) and
   sees to it: builders and errands by hand, and Merlin's magic (within his ten an hour, two kept
   for the royals); with the King near he asks the King instead, and nobody else (the King's wish,
@@ -168,22 +180,28 @@ Windows, killing a background `npx` shell does not kill its node children at all
   doorway only if it has a door or was one before (worn walls under a standing top course are
   holes). Nobody goes out at night (no field, hunt, grove or wood errands, and the court's own
   hall work makes do with the storehouse). Food: `build/farm.ts` + `bot/farming.ts` (a 4x4
-  wheat field near home, by water if any, growing by another 4x4 beside it, up to 64 squares,
+  wheat field near home, by water if any, growing by another 4x4 beside it, up to 160 squares,
   once sown with 16 seeds spare; hoe via `bot/crafting.ts`, which crafts at a table within 24
-  blocks or puts one down and takes it back; seeds from grass, Merlin's eight only to start;
+  blocks or puts one down and takes it back; seeds from grass (the farmer breaks grass for a
+  plot's worth more while the field may grow; seeds found count as work), Merlin's eight only to start;
   harvest, replant, bread to the storehouse), `bot/hunting.ts` (the King's rule: never a named, tame, owned or leashed
   animal nor a baby; only cows, pigs, sheep, chickens, rabbits; 16 blocks from players, not by
   fences, two of a kind always left; game animals' entity data is read for this), `bot/cooking.ts`
-  (raw meat cooked in the hall's furnace with wood). Bots eat up to 18 when hurt (health only
+  (raw meat cooked with wood: the furnaces near home are tried in turn, the court's own in the
+  hall first, one out of reach left alone half an hour; anyone else's, the King's, only when
+  nothing at all is in it, and nothing in it is ever taken). Bots eat up to 18 when hurt (health only
   comes back above it); in survival nobody drops more than three blocks.
 - The court's technology ladder (the King's wish: halls monster-free, technology advancing):
   `steward.ts` plans from one pool of free courtiers, every job naming who does it (hall jobs
   to builders: repair (walls, roof, floor craters, any filler), a lost storehouse chest remade,
   roof, door, crafting table, beds, light, furnace, stone facing for dirt walls; then wood first
   when nearly none, stone first while there is no furnace, charcoal, the field, cooking or
-  hunting (guards first), arming, the grove, the mine, wood). Work that came to nothing rests
-  10 minutes (`resting`), work someone is at is not given out twice (`underway`); the court's
-  own errands say nothing of a failure. Wood: `build/grove.ts` + `bot/forestry.ts`, six trees
+  hunting (guards first), arming, the grove, the mine, wood; and with nothing else to do, by
+  day, the basics (`basics`, the King's wish, 2026-10-31: the bots stood about while the
+  storehouse was empty): the mine, then wood up to 32 logs). Work that came to nothing rests
+  10 minutes (`resting`), work someone is at is not given out twice (`underway`: charcoal,
+  cooking and wood errands too, once a stuck charcoal job held a courtier every minute for
+  hours); the court's own errands say nothing of a failure. Wood: `build/grove.ts` + `bot/forestry.ts`, six trees
   near home (saplings from the leaves of felled trees, Merlin's four only when none can be
   found), felled when grown and planted again; a builder back from a far tree walks to the hall
   first and brings eight logs at least. With no tree (or game) in sight, gatherers and hunters
@@ -194,16 +212,22 @@ Windows, killing a background `npx` shell does not kill its node children at all
   (`build/fishing.ts` + `bot/fishing.ts`, bedboo's `bot.fish()`): open water near home, a rod
   of three sticks and two string (Merlin's only when no game is found), the catch cooked;
   no water near home is remembered for an hour. The iron age: the mine's ore smelted
-  (`Cook.ingots`), guards make iron swords and iron armour (put on at once), piece by piece.
+  (`Cook.ingots`), guards make iron (else copper) swords and armour (put on at once), piece by
+  piece, the old pieces back into the storehouse.
   Hours: outdoor work begins only between 500 and 9000 (an errand runs up to 6000 ticks), ends
   at dusk (11500; a royal's errand goes on), and Merlin portals home whoever is out more than 48
   blocks at dusk, and anyone more than 64 blocks from the storehouse it must reach; idle
   courtiers wait inside the hall outside those hours. The hurt or hungry (health under 12,
-  food under 8) are not sent far. `bot/mining.ts`: a staircase
-  mine near home (walked back down before digging on, stops at water, lava or a cave), a level
-  tunnel past 18 deep; pickaxes made as needed, stone as soon as there is cobblestone. Gatherers
+  food under 8) are not sent far. `bot/mining.ts`: a branch mine near home: a staircase (32 deep
+  for new mines, 18 for the first), a level tunnel of 40, then branches of 20 off it right and
+  left every four steps; ore in the walls is dug and its vein followed (coal, iron, copper), a
+  torch every few steps (made of the mine's coal when there is none). Water, lava or a cave ends
+  a branch (or the tunnel, which then branches off what there is); a mine worked out, flooded or
+  lost is followed by a new one clear of the old (`oldMines`). Pickaxes made as needed, stone
+  as soon as there is cobblestone. Gatherers
   climb a dirt pillar to high logs and take it down. Light: torches inside and a ring outside,
-  from charcoal (`Cook.smelt`: logs with planks for fuel). Guards make stone or wooden swords.
+  from coal or charcoal (`Cook.smelt`: logs with planks for fuel; Merlin's coal when the
+  charcoal comes to nothing). Guards make stone or wooden swords.
   A courtier is free again right after a job (the 10-minute pause holds back the castle works
   only). Merlin's magic (beds, food, seeds, saplings, logs, a furnace, a lost storehouse's chest)
   only for what cannot be had by hand.
@@ -225,7 +249,8 @@ Windows, killing a background `npx` shell does not kill its node children at all
   too indoors; Merlin's coal when there is no wood for charcoal), hang doors and mend damage.
   `build/EstateBook.ts` (`.state/estate.json`) keeps the placed blocks as last seen whole: a new
   block joins after standing 10 minutes (scaffolding comes and goes), a block gone where a royal
-  was lately (`royalTrail`, 12 blocks) is the royals' change and let go, anything else is
+  was lately (`royalTrail`, 12 blocks) is the royals' change and let go, unless a blast went off
+  near it (a creeper or TNT: `level_sound_event` "Explode", `noteBlast`), anything else is
   damage, put back as it was when the storehouse has the block, else with stone, planks or dirt
   (glass, furniture and decorations are left to the royals); changes while the court was down
   are taken as they are. The court never pulls down anything there, and its field, grove, mine
@@ -443,6 +468,9 @@ Windows, killing a background `npx` shell does not kill its node children at all
   1.26. Outgoing chat uses `category: 'authored'`; older serializers ignore unknown fields.
   Required outgoing fields: `type, needs_translation, category, source_name, message, xuid,
 platform_chat_id, has_filtered_message, filtered_message`.
+- `set_spawn_position` (`spawn_type: player`) is sent at login and whenever a player's respawn
+  point changes; no bed is every field -2147483648 (`playerSpawn`). Tapping a bed by day sets
+  it ("tile.bed.respawnSet", then "tile.bed.noSleep"); tried on the Dev world, 2026-10-31.
 - `player_list.records` is a flat array of `{ type: 'add'|'remove', uuid, username, ... }`
   in 1.26; before that it was `{ type, records: [...] }`. `normalisePlayerList` handles both.
 - `command_request` on 1.21.130+ needs `origin.player_entity_id` (bigint) and
