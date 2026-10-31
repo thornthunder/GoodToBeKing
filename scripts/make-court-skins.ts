@@ -1,8 +1,11 @@
 /**
  * Paints classic 64x64 skins (the standard player shape, no custom geometry) for the court:
- * the royal guards Bruce and Dyke in steel and red livery with the golden crown, Festaris the
- * Castellan in a green robe with his chain of office, and the apprentices Henry and George in
- * work tunics and leather aprons. Pixel art in code so it can be tweaked and rebuilt.
+ * the royal guards Bruce and Dyke in steel and red livery with the golden crown, the soldiers of
+ * the army in the same livery under open kettle hats (each his own hair and face), Sarge with
+ * gold stripes on his sleeves, Festaris the Castellan in a green robe with his chain of office,
+ * the apprentices Henry and George in work tunics and leather aprons, and the peasants Joan (a
+ * blue dress, apron and kerchief) and Wat (a homespun tunic and a straw hat). Pixel art in code
+ * so it can be tweaked and rebuilt.
  *
  *   tsx scripts/make-court-skins.ts [preview-dir]
  */
@@ -94,6 +97,12 @@ interface Look {
   chin: 'beard' | 'moustache' | 'bare'
   beard?: RGBA
   freckles?: boolean
+  /** Eyebrows in the hair's shade (row 2). */
+  brows?: boolean
+  /** Hair down the cheeks (rows 2 and 3 at the edges). */
+  sideburns?: boolean
+  /** Below a hat: short (neck bare), long (to the shoulders), or thin (an old man's). */
+  style?: 'short' | 'long' | 'thin'
 }
 
 function face(cv: Canvas, look: Look): void {
@@ -131,7 +140,25 @@ function face(cv: Canvas, look: Look): void {
     rows[4][1] = D
     rows[4][6] = D
   }
+  if (look.brows) {
+    rows[2][1] = look.hairShade
+    rows[2][2] = look.hairShade
+    rows[2][5] = look.hairShade
+    rows[2][6] = look.hairShade
+  }
+  if (look.sideburns) for (const j of [2, 3]) rows[j][0] = rows[j][7] = H
+  // Under a hat the hair shows at the temples.
+  if (look.style && look.style !== 'thin') rows[2][0] = rows[2][7] = H
   rows.forEach((row, j) => row.forEach((c, i) => cv.px(x + i, y + j, c)))
+  // What shows of the hair below a hat, at the back and the sides.
+  const back = h.back
+  if (look.style === 'short') cv.fill(back.x, back.y + 5, back.w, 3, look.skin)
+  if (look.style === 'long')
+    for (const side of [h.right, h.left]) cv.fill(side.x, side.y + 3, side.w - 3, 5, H)
+  if (look.style === 'thin') {
+    paint(cv, [h.top], look.skinShade)
+    cv.fill(back.x, back.y + 5, back.w, 3, look.skin)
+  }
 }
 
 /** Boots and trousers on both legs. */
@@ -198,6 +225,87 @@ function guard(look: Look, plume: RGBA | null): Canvas {
     band(cv, sides(arm), 2, 1, steelShade)
   }
   legs(cv, steelDark, hex('#2a2a2a'), steelShade)
+  return cv
+}
+
+/**
+ * A soldier of the army: the guards' mail and red tabard with the crown, under an open steel
+ * kettle hat with a brim, so his hair and face show. Sarge wears gold stripes on both sleeves
+ * and a gold plume.
+ */
+function soldier(look: Look, sarge = false): Canvas {
+  const cv = guard(look, sarge ? hex('#e3b341') : null)
+  const steel = hex('#9aa3ad')
+  const steelShade = hex('#6f7882')
+  const clear: RGBA = [0, 0, 0, 0]
+  // The full helmet the guard is drawn with comes off: a kettle hat instead (crown and brim).
+  const o = PARTS.head.over
+  paint(cv, all(o), clear)
+  paint(cv, [o.top], steel)
+  band(cv, sides(o), 0, 1, steel)
+  band(cv, sides(o), 1, 1, steelShade)
+  if (sarge) {
+    cv.fill(o.top.x + 3, o.top.y, 2, 8, hex('#e3b341'))
+    // Three gold stripes on the upper arm, outside and in front.
+    const gold = hex('#e3b341')
+    for (const r of [
+      PARTS.rightArm.over.right,
+      PARTS.rightArm.over.front,
+      PARTS.leftArm.over.left,
+      PARTS.leftArm.over.front,
+    ])
+      for (const k of [3, 5, 7]) cv.fill(r.x, r.y + k, r.w, 1, gold)
+  }
+  return cv
+}
+
+/**
+ * A peasant of the household: a homespun tunic or a dress with an apron, sleeves rolled up, and
+ * a straw hat or a kerchief.
+ */
+function peasant(
+  look: Look,
+  cloth: RGBA,
+  clothShade: RGBA,
+  opts: { apron?: RGBA; skirt?: boolean; hat: 'straw' | 'kerchief'; belt: RGBA }
+): Canvas {
+  const cv = new Canvas(64, 64)
+  face(cv, look)
+  const b = PARTS.body.base
+  paint(cv, all(b), cloth)
+  band(cv, sides(b), 0, 1, clothShade)
+  cv.fill(b.front.x + 3, b.front.y + 1, 2, 2, look.skin) // the neck opening
+  if (opts.apron) {
+    cv.fill(b.front.x + 1, b.front.y + 4, 6, 8, opts.apron)
+    cv.fill(b.back.x, b.back.y + 6, b.back.w, 1, opts.apron)
+  }
+  band(cv, sides(b), 6, 1, opts.belt)
+  arms(cv, cloth, look.skin)
+  for (const arm of [PARTS.rightArm.base, PARTS.leftArm.base]) {
+    band(cv, sides(arm), 5, 5, look.skin)
+    band(cv, sides(arm), 4, 1, clothShade)
+  }
+  legs(cv, opts.skirt ? cloth : hex('#6b5238'), hex('#4a3420'), clothShade)
+  if (opts.skirt)
+    for (const leg of [PARTS.rightLeg.over, PARTS.leftLeg.over]) {
+      band(cv, sides(leg), 0, 10, cloth)
+      band(cv, sides(leg), 9, 1, clothShade)
+    }
+  const o = PARTS.head.over
+  if (opts.hat === 'straw') {
+    const straw = hex('#e0c46c')
+    const strawShade = hex('#b89a48')
+    paint(cv, [o.top], straw)
+    band(cv, sides(o), 0, 1, straw)
+    band(cv, sides(o), 1, 1, strawShade)
+  } else {
+    const linen = hex('#efe8da')
+    const linenShade = hex('#d6cdbb')
+    paint(cv, [o.top], linen)
+    band(cv, sides(o), 0, 1, linen)
+    band(cv, [o.right, o.left], 1, 2, linenShade)
+    band(cv, [o.back], 1, 3, linenShade)
+  }
   return cv
 }
 
@@ -282,6 +390,94 @@ const crew: Record<string, Canvas> = {
     },
     hex('#d22a2a')
   ),
+  sarge: soldier(
+    {
+      skin: hex('#c98f6b'),
+      skinShade: hex('#ad7553'),
+      hair: hex('#2b2b2b'),
+      hairShade: hex('#1c1c1c'),
+      eyes: hex('#3a2a20'),
+      chin: 'moustache',
+      beard: hex('#3b3b3b'),
+      brows: true,
+      sideburns: true,
+      style: 'short',
+    },
+    true
+  ),
+  aldric: soldier({
+    skin: hex('#e0b096'),
+    skinShade: hex('#c4937a'),
+    hair: hex('#c8c8c8'),
+    hairShade: hex('#9a9a9a'),
+    eyes: hex('#5a6e8a'),
+    chin: 'beard',
+    beard: hex('#d8d8d8'),
+    brows: true,
+    style: 'thin',
+  }),
+  cedric: soldier({
+    skin: hex('#f4cdb0'),
+    skinShade: hex('#dcae90'),
+    hair: hex('#f0d878'),
+    hairShade: hex('#d0b450'),
+    eyes: hex('#4a8ad8'),
+    chin: 'bare',
+    freckles: true,
+    style: 'short',
+  }),
+  edwin: soldier({
+    skin: hex('#e6b594'),
+    skinShade: hex('#c99877'),
+    hair: hex('#1e1a16'),
+    hairShade: hex('#120f0c'),
+    eyes: hex('#6a8a4a'),
+    chin: 'bare',
+    brows: true,
+    style: 'long',
+  }),
+  osric: soldier({
+    skin: hex('#8d5a3c'),
+    skinShade: hex('#74472d'),
+    hair: hex('#141414'),
+    hairShade: hex('#0a0a0a'),
+    eyes: hex('#2a1a10'),
+    chin: 'beard',
+    beard: hex('#1a1a1a'),
+    brows: true,
+    style: 'short',
+  }),
+  percy: soldier({
+    skin: hex('#f6d2b8'),
+    skinShade: hex('#e0b496'),
+    hair: hex('#c4501e'),
+    hairShade: hex('#9a3c14'),
+    eyes: hex('#3d7a3a'),
+    chin: 'bare',
+    freckles: true,
+    sideburns: true,
+    style: 'short',
+  }),
+  rowan: soldier({
+    skin: hex('#d8a07c'),
+    skinShade: hex('#bb8562'),
+    hair: hex('#6e4a2a'),
+    hairShade: hex('#53361e'),
+    eyes: hex('#4a7a3a'),
+    chin: 'beard',
+    beard: hex('#6e4a2a'),
+    style: 'long',
+  }),
+  tobias: soldier({
+    skin: hex('#6b432b'),
+    skinShade: hex('#55341f'),
+    hair: hex('#1a1410'),
+    hairShade: hex('#0e0a08'),
+    eyes: hex('#2a1a10'),
+    chin: 'bare',
+    brows: true,
+    style: 'short',
+  }),
   festaris: castellan(),
   henry: apprentice(
     {
@@ -309,6 +505,37 @@ const crew: Record<string, Canvas> = {
     hex('#a8542a'),
     hex('#874221'),
     hex('#d8c8a0')
+  ),
+  joan: peasant(
+    {
+      skin: hex('#f0c4a4'),
+      skinShade: hex('#d8a686'),
+      hair: hex('#7a4a26'),
+      hairShade: hex('#5c361a'),
+      eyes: hex('#5a7d4a'),
+      chin: 'bare',
+      freckles: true,
+      style: 'long',
+    },
+    hex('#4f6d8f'),
+    hex('#3e5772'),
+    { apron: hex('#e8dcc0'), skirt: true, hat: 'kerchief', belt: hex('#e8dcc0') }
+  ),
+  wat: peasant(
+    {
+      skin: hex('#d49a74'),
+      skinShade: hex('#b88060'),
+      hair: hex('#2e2014'),
+      hairShade: hex('#20160e'),
+      eyes: hex('#4a3020'),
+      chin: 'moustache',
+      beard: hex('#3a2a1a'),
+      brows: true,
+      style: 'short',
+    },
+    hex('#8a6a46'),
+    hex('#6e5436'),
+    { hat: 'straw', belt: hex('#c8b07a') }
   ),
 }
 

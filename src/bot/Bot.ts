@@ -381,7 +381,7 @@ export class Bot extends EventEmitter {
   isFree(): boolean {
     if (this.state.status !== 'spawned' || !this.body || !this.mason) return false
     if (this.building || this.mason.busy || this.gathering || this.handbuilder?.busy) return false
-    if (this.onHallWork) return false
+    if (this.onHallWork || this.patrol) return false
     if (this.survival?.busy) return false
     const walking = this.movement?.current()
     if (walking && !this.dutyFollowing && walking.kind !== 'going') return false
@@ -1014,6 +1014,8 @@ export class Bot extends EventEmitter {
   act(action: BotAction): void {
     const movement = this.movement
     if (!movement || this.state.status !== 'spawned') return
+    // A royal's word comes before the round.
+    this.stopPatrol()
     switch (action.type) {
       case 'build':
       case 'commission': {
@@ -1438,6 +1440,7 @@ export class Bot extends EventEmitter {
    * down (a royal's errand goes on), so everyone comes to the new one.
    */
   dropCourtWork(): void {
+    this.stopPatrol()
     if (this.royalErrand || this.brain.post?.()) return
     this.gatherer?.cancel()
     this.handbuilder?.cancel()
@@ -1872,6 +1875,60 @@ export class Bot extends EventEmitter {
   /** Walk to a spot (home) if nothing else is going on. */
   goTo(spot: Point, label: string): void {
     this.movement?.goTo(spot, label)
+  }
+
+  /** On the army's round (see BotManager.patrolShift): busy; any order ends it. */
+  private patrol?: { stop: boolean }
+
+  get patrolling(): boolean {
+    return this.patrol !== undefined
+  }
+
+  /**
+   * Walk the round from point `from` on, a look round at each, till the shift ends or the walk
+   * is stopped (an order, the court moving). Monsters met on the way are fought (Survival: a
+   * guard out of doors fights what comes near); the round waits while it fights or eats.
+   * Returns how many points it reached.
+   */
+  async startPatrol(route: Point[], from: number, until: number): Promise<number> {
+    const body = this.body
+    if (!body || this.patrol || !this.isFree() || route.length < 2) return 0
+    const patrol = { stop: false }
+    this.patrol = patrol
+    this.movement?.stop()
+    const walker = body as unknown as { pathfinder: Pathfinder }
+    let reached = 0
+    this.log.info(`on patrol round home (${route.length} points)`)
+    try {
+      for (let i = from; !patrol.stop && Date.now() < until; i++) {
+        if (this.state.status !== 'spawned') break
+        if (this.survival?.busy || body.isSleeping) {
+          await sleep(2_000)
+          i--
+          continue
+        }
+        const p = route[i % route.length]
+        try {
+          await withTimeout(walker.pathfinder.goto(new goals.GoalNear(p.x, p.y, p.z, 2)), 45_000)
+          reached++
+        } catch {
+          // Out of reach, or a fight took the legs: on to the next point.
+        }
+        if (!patrol.stop) await sleep(3_000)
+      }
+    } finally {
+      if (this.patrol === patrol) this.patrol = undefined
+      // Stopped by an order: its own walk has the legs now.
+      if (!patrol.stop && this.body === body) walker.pathfinder.setGoal(null)
+    }
+    this.log.info(`patrol over: ${reached} points reached`)
+    return reached
+  }
+
+  stopPatrol(): void {
+    if (!this.patrol) return
+    this.patrol.stop = true
+    this.patrol = undefined
   }
 
   /** A guard of the royal family (duty: escort). */

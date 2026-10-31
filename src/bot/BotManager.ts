@@ -549,6 +549,9 @@ export class BotManager {
   /** The army's report and Merlin's blessing, between the two minds of this world. */
   private readonly board = new ArmyBoard(path.resolve(STATE_DIR))
   private lastArmyRound = 0
+  /** The patrol on the round now, and when each soldier last walked it. */
+  private shift?: { until: number; soldiers: string[] }
+  private readonly walked = new Map<string, number>()
   /** When Sarge last asked the King for the blessing (once in BLESS_ASK_MS). */
   private blessAsked = 0
   private blessing = false
@@ -1010,6 +1013,7 @@ export class BotManager {
       this.log.info(`the army: ${unarmed.cfg.name} makes a sword from the storehouse`)
       this.doing('arm', unarmed.startArming())
     }
+    this.patrolShift(sarge, soldiers)
     // Sarge asks the King for the blessing: the army lacks arms, the King is near, not blessed today.
     const king = this.king()
     const blessed = this.board.blessing()
@@ -1031,6 +1035,96 @@ export class BotManager {
         'brisk sentence, whether he would have Merlin bless the army.',
       'Your Majesty, would you have Merlin bless the army?'
     )
+  }
+
+  /**
+   * The army's patrols: a shift of up to PATROL_SIZE soldiers walks a round about home (round
+   * the estate's buildings when there are any), spread along it, for SHIFT_MS; then the next
+   * shift, those who walked least first. Only soldiers free of orders, escort and errands, armed,
+   * and not hurt or hungry; by night only those in armour. Sarge commands and stays home.
+   */
+  private patrolShift(sarge: Bot | undefined, soldiers: Record<string, Gear>): void {
+    const home = this.household.home
+    const now = Date.now()
+    if (!home || (this.shift && now < this.shift.until)) return
+    const night = sarge?.isNight() ?? false
+    const fit = this.bots
+      .filter((b) => b !== sarge && b.isGuard() && b.isFree() && !b.weak())
+      .filter((b) => soldiers[b.cfg.name]?.sword && (!night || soldiers[b.cfg.name]?.chest))
+      .sort((a, b) => (this.walked.get(a.cfg.name) ?? 0) - (this.walked.get(b.cfg.name) ?? 0))
+      .slice(0, PATROL_SIZE)
+    this.shift = undefined
+    if (!fit.length) return
+    const route = this.patrolRoute(fit[0], home)
+    if (route.length < 3) return
+    const until = now + SHIFT_MS
+    this.shift = { until, soldiers: fit.map((b) => b.cfg.name) }
+    this.log.info(
+      `the army: ${fit.map((b) => b.cfg.name).join(', ')} patrol round home (${route.length} points)`
+    )
+    fit.forEach((b, k) => {
+      this.walked.set(b.cfg.name, now)
+      void b.startPatrol(route, Math.floor((k * route.length) / fit.length), until)
+    })
+  }
+
+  /**
+   * The round: points on a ring PATROL_MARGIN blocks outside the estate's buildings and the
+   * hall (or PATROL_RADIUS round home without them), each on ground one can stand on.
+   */
+  private patrolRoute(eyes: Bot, home: Point): Point[] {
+    const areas = [...this.household.estate]
+    const hall = this.household.hall
+    if (hall) {
+      const xs = [...hall.ring, ...hall.inside].map(([x]) => x)
+      const zs = [...hall.ring, ...hall.inside].map(([, z]) => z)
+      const x0 = Math.min(...xs)
+      const z0 = Math.min(...zs)
+      areas.push({ x: x0, z: z0, width: Math.max(...xs) - x0 + 1, depth: Math.max(...zs) - z0 + 1 })
+    }
+    const [x0, z0, x1, z1] = areas.length
+      ? [
+          Math.min(...areas.map((a) => a.x)) - PATROL_MARGIN,
+          Math.min(...areas.map((a) => a.z)) - PATROL_MARGIN,
+          Math.max(...areas.map((a) => a.x + a.width - 1)) + PATROL_MARGIN,
+          Math.max(...areas.map((a) => a.z + a.depth - 1)) + PATROL_MARGIN,
+        ]
+      : [
+          home.x - PATROL_RADIUS,
+          home.z - PATROL_RADIUS,
+          home.x + PATROL_RADIUS,
+          home.z + PATROL_RADIUS,
+        ]
+    const mx = Math.round((x0 + x1) / 2)
+    const mz = Math.round((z0 + z1) / 2)
+    const corners: Array<[number, number]> = [
+      [x0, z0],
+      [mx, z0],
+      [x1, z0],
+      [x1, mz],
+      [x1, z1],
+      [mx, z1],
+      [x0, z1],
+      [x0, mz],
+    ]
+    const PASSABLE =
+      /^(air|cave_air|short_grass|tall_grass|fern|large_fern|[a-z_]*flower|[a-z_]*tulip|dandelion|poppy|snow_layer|torch)$/
+    const SOLID_NOT = /^(air|cave_air|water|flowing_water|lava|flowing_lava|[a-z_]*leaves|fire)$/
+    const route: Point[] = []
+    for (const [x, z] of corners)
+      for (let y = home.y + 8; y >= home.y - 8; y--) {
+        const below = eyes.nameAt(x, y - 1, z)
+        if (below === undefined) break
+        if (
+          !SOLID_NOT.test(below) &&
+          PASSABLE.test(eyes.nameAt(x, y, z) ?? '') &&
+          PASSABLE.test(eyes.nameAt(x, y + 1, z) ?? '')
+        ) {
+          route.push({ x, y, z })
+          break
+        }
+      }
+    return route
   }
 
   /** The King answers Sarge's question: on his yes the household's Merlin is asked to bless. */
@@ -2127,6 +2221,12 @@ const MAGIC_REQUEST_MS = 3 * 60_000
 const SUMMON_WAIT_MS = 3 * 60_000
 /** The other mind's bots join in their own time: at least this long before the gathering. */
 const OTHER_MIND_MS = 2 * 60_000
+/** Soldiers on patrol at once, and how long a shift walks before the next takes over. */
+const PATROL_SIZE = 4
+const SHIFT_MS = 15 * 60_000
+/** The round runs this far outside the estate's buildings (or this far round home without). */
+const PATROL_MARGIN = 6
+const PATROL_RADIUS = 16
 /** The army's round: its report to the household, a sword made, the blessing asked for. */
 const ARMY_ROUND_MS = 60_000
 /** Sarge asks the King for the blessing at most this often. */

@@ -82,6 +82,9 @@
     "chat": {
       "greeting": "Joan of the household, at your service!",
       "thinking": ["Ooh, now then...", "Let me think a moment...", "Hmm, well..."]
+    },
+    "skin": {
+      "texture": "config/skins/joan.png"
     }
   },
   {
@@ -95,6 +98,9 @@
     "chat": {
       "greeting": "Wat of the household, ready to work!",
       "thinking": ["Er... let me think.", "Right then...", "Hmm..."]
+    },
+    "skin": {
+      "texture": "config/skins/wat.png"
     }
   },
   {
@@ -113,6 +119,9 @@
     "chat": {
       "greeting": "Sarge of the royal army, reporting for duty!",
       "thinking": ["Hmm. Right.", "One moment, sir.", "Let me see now..."]
+    },
+    "skin": {
+      "texture": "config/skins/sarge.png"
     }
   },
   {
@@ -172,7 +181,10 @@
       "royals": ["Princess", "King", "Prince"]
     },
     "persona": "You are Aldric, a soldier of the royal army under Sarge, sworn to protect the royal family. You are an old, steady veteran who has stood a hundred night watches and likes to tell of them. When a royal asks for an escort you stay close by them until they dismiss you; otherwise you keep watch with your fellow soldiers. You call Sarge Sarge and speak plainly and briefly, and you are always kind.",
-    "remembers": "own"
+    "remembers": "own",
+    "skin": {
+      "texture": "config/skins/aldric.png"
+    }
   },
   {
     "name": "Cedric",
@@ -187,7 +199,10 @@
       "royals": ["King", "Prince", "Princess"]
     },
     "persona": "You are Cedric, a soldier of the royal army under Sarge, sworn to protect the royal family. You are a young, eager recruit, very polite and a little clumsy, who tries his very best. When a royal asks for an escort you stay close by them until they dismiss you; otherwise you keep watch with your fellow soldiers. You call Sarge Sarge and speak plainly and briefly, and you are always kind.",
-    "remembers": "own"
+    "remembers": "own",
+    "skin": {
+      "texture": "config/skins/cedric.png"
+    }
   },
   {
     "name": "Edwin",
@@ -202,7 +217,10 @@
       "royals": ["Prince", "Princess", "King"]
     },
     "persona": "You are Edwin, a soldier of the royal army under Sarge, sworn to protect the royal family. You are a quiet, sharp-eyed lookout who notices everything and says little. When a royal asks for an escort you stay close by them until they dismiss you; otherwise you keep watch with your fellow soldiers. You call Sarge Sarge and speak plainly and briefly, and you are always kind.",
-    "remembers": "own"
+    "remembers": "own",
+    "skin": {
+      "texture": "config/skins/edwin.png"
+    }
   },
   {
     "name": "Osric",
@@ -217,7 +235,10 @@
       "royals": ["Princess", "King", "Prince"]
     },
     "persona": "You are Osric, a soldier of the royal army under Sarge, sworn to protect the royal family. You are big, gentle and strong, fond of animals and of a good meal. When a royal asks for an escort you stay close by them until they dismiss you; otherwise you keep watch with your fellow soldiers. You call Sarge Sarge and speak plainly and briefly, and you are always kind.",
-    "remembers": "own"
+    "remembers": "own",
+    "skin": {
+      "texture": "config/skins/osric.png"
+    }
   },
   {
     "name": "Percy",
@@ -232,7 +253,10 @@
       "royals": ["King", "Prince", "Princess"]
     },
     "persona": "You are Percy, a soldier of the royal army under Sarge, sworn to protect the royal family. You are cheerful and chatty, who hums marching songs on duty. When a royal asks for an escort you stay close by them until they dismiss you; otherwise you keep watch with your fellow soldiers. You call Sarge Sarge and speak plainly and briefly, and you are always kind.",
-    "remembers": "own"
+    "remembers": "own",
+    "skin": {
+      "texture": "config/skins/percy.png"
+    }
   },
   {
     "name": "Rowan",
@@ -247,7 +271,10 @@
       "royals": ["Prince", "Princess", "King"]
     },
     "persona": "You are Rowan, a soldier of the royal army under Sarge, sworn to protect the royal family. You are a woodsman turned soldier who knows the forests and the caves. When a royal asks for an escort you stay close by them until they dismiss you; otherwise you keep watch with your fellow soldiers. You call Sarge Sarge and speak plainly and briefly, and you are always kind.",
-    "remembers": "own"
+    "remembers": "own",
+    "skin": {
+      "texture": "config/skins/rowan.png"
+    }
   },
   {
     "name": "Tobias",
@@ -262,6 +289,9 @@
       "royals": ["Princess", "King", "Prince"]
     },
     "persona": "You are Tobias, a soldier of the royal army under Sarge, sworn to protect the royal family. You are careful and dependable, the first to raise his shield and the last to lower it. When a royal asks for an escort you stay close by them until they dismiss you; otherwise you keep watch with your fellow soldiers. You call Sarge Sarge and speak plainly and briefly, and you are always kind.",
-    "remembers": "own"
+    "remembers": "own",
+    "skin": {
+      "texture": "config/skins/tobias.png"
+    }
   }
 ]

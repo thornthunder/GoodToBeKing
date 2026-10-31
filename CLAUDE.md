@@ -109,7 +109,14 @@ copper armour, a copper sword and a shield where a soldier has nothing better, i
 once a day (`.state/blessing.json`), outside the hour's ten, fading after a day like every gift.
 Ordinary soldiers write down only talk they took part in or were named in (`remembers: own`)
 and ask for six chunks around them (`viewDistance`). Commands for the army's bots go to
-`.state/.command-army`; its log to `.state/logs/army`.
+`.state/.command-army`; its log to `.state/logs/army`. Patrols (`patrolShift`, `Bot.startPatrol`):
+shifts of up to four soldiers, 15 minutes each, those who walked least first, walk a ring six
+blocks outside the estate's buildings and the hall (16 round home without them), a look round at
+each point; only soldiers free of orders, escort and errands, armed, not weak, and by night only
+those in armour; Sarge stays home. Any royal action stops a soldier's round (`Bot.act`), and a
+patrolling soldier fights what comes near (Survival, out of doors). The new courtiers' skins are
+painted by `scripts/make-court-skins.ts` (soldiers in open kettle hats so hair and faces show,
+Sarge's gold sleeve stripes, Joan's dress and kerchief, Wat's tunic and straw hat).
 
 ### Stopping a running app
 
