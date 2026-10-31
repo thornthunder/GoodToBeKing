@@ -29,7 +29,8 @@ describe('Presence', () => {
     expect(new Presence(f, 'dev', 'dev').courtHere()).toBe(true)
     // At home it never "returns".
     expect(new Presence(f, 'dev', 'dev').returnIfForgotten(10 * AWAY_MS)).toBe(false)
-  })
+    // (Five writes and renames: slow on Windows under a full test run, never wrong.)
+  }, 30_000)
 
   it('names worlds as the family does', () => {
     expect(worldWords('dev')).toBe('the Dev world')
