@@ -150,6 +150,29 @@ re-read their files when changed elsewhere. Starting and stopping the systemd Be
 through `<server>/.control`, carried out by root's `bds-control` (a systemd path unit;
 `sudo server/install-bds-control.sh bds-test /home/jean/testserver`, once).
 
+### The database
+
+The court is moving its files into Postgres, step by step (the King's go, 2026-11-01): first new
+data (done), then what several processes share (memories, orders, rules, hails, presence), then
+each world's own state. `compose.db.yaml` runs Postgres 18 (`goodtobeking-db`, its own compose
+project so no court or admin deploy stops it) on 127.0.0.1:5432 only, data in `~/court-db`,
+password in `db.env` (git-ignored, `db.env.example`): `docker compose -f compose.db.yaml
+--env-file db.env up -d` in `~/court-test`. Each court process and the admin get `DATABASE_URL`
+(each world's `.env`, `admin.env`); without it nothing changes. `src/db`: `Database.ts` (a pg
+pool; `openDatabase` never fails: `ready` resolves once it answers, retrying every 30 s),
+`schema.ts` (migrations, append only, applied under an advisory lock by whoever connects
+first), `history.ts`, `audit.ts`. The court never waits for the database: history lines wait in
+memory (the newest 5000) and go in every 2 s. The history (`record()`, kinds chat, notice, magic,
+order, work, court): public lines and notices by the household of each world, whispers by the
+courtier whispered to, each courtier's own lines by itself (so every line once), Merlin's spells
+(`Magic.cast`), orders, rules, releases and refusals (`OllamaBrain`), the court's work
+(`BotManager.work`: the "housekeeping:" and "the army:" lines) and its own events. Talk is kept a
+week (`HISTORY_CHAT_DAYS`), the rest a month (`HISTORY_DAYS`); a line `isSecret` flags is never
+written. The admin shows it (Court > History, Services > Database), backs it up (`pg_dump -Fc`
+in the container, `database-*.dump` in the backups folder; restore with `pg_restore`) and keeps
+its audit log there (`audit.log` while the database is away, taken in once it answers). Tests
+run on PGlite (a real Postgres in the process, `src/db/db.test.ts`).
+
 ### Stopping a running app
 
 Create a file named `.stop` in the project root. The app checks for it every second, sends
