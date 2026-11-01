@@ -229,7 +229,7 @@ export async function databasePage(main) {
           ]),
           h(
             'div',
-            { class: 'actions' },
+            { class: 'row' },
             button(
               'Back up now',
               act(async () =>
