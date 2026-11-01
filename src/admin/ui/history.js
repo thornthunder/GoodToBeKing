@@ -149,7 +149,7 @@ export async function historyPage(main, _rest, { worlds }) {
         h(
           'p',
           {},
-          'What the court heard and did: talk where a courtier could hear it (whispers too), the server’s notices, Merlin’s spells, the royals’ orders and rules, and the court’s work. Talk is kept a week, the rest a month (each world’s Database settings). Lines that looked like a password are never written down.'
+          'What the court heard and did: talk where a courtier could hear it (whispers too), the server’s notices, Merlin’s spells, the royals’ orders and rules, and the court’s work. Kept six months (each world’s Database settings). Lines that looked like a password are never written down.'
         )
       )
     ),

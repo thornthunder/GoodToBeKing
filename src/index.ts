@@ -59,8 +59,8 @@ async function main(): Promise<void> {
         {
           world,
           division,
-          chatDays: days(process.env.HISTORY_CHAT_DAYS, 7),
-          keepDays: days(process.env.HISTORY_DAYS, 30),
+          chatDays: days(process.env.HISTORY_CHAT_DAYS, HALF_YEAR),
+          keepDays: days(process.env.HISTORY_DAYS, HALF_YEAR),
         },
         log.child('history')
       )
@@ -113,6 +113,9 @@ async function main(): Promise<void> {
 
   await manager.startAll()
 }
+
+/** The history is kept six months (the King's choice, 2026-11-01). */
+const HALF_YEAR = 183
 
 function days(value: string | undefined, fallback: number): number {
   const n = Number(value)

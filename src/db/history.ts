@@ -8,8 +8,8 @@ import type { Database, Queryable } from './Database'
  * notices (deaths, joins, achievements), Merlin's spells, the royals' orders and rules, and the
  * court's work (the household's and the army's). The admin reads it (Court > History). Recording never waits for the
  * database: lines wait in memory and go in every two seconds; while the database is away they
- * keep waiting (the newest 5000). Talk is kept as long as the logs keep it (HISTORY_CHAT_DAYS,
- * a week), the rest a month (HISTORY_DAYS).
+ * keep waiting (the newest 5000). Everything is kept six months (the King's choice): talk
+ * HISTORY_CHAT_DAYS, the rest HISTORY_DAYS (the longer of the two).
  */
 export type HistoryKind = 'chat' | 'notice' | 'magic' | 'order' | 'work' | 'court'
 

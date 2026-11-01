@@ -166,9 +166,9 @@ memory (the newest 5000) and go in every 2 s. The history (`record()`, kinds cha
 order, work, court): public lines and notices by the household of each world, whispers by the
 courtier whispered to, each courtier's own lines by itself (so every line once), Merlin's spells
 (`Magic.cast`), orders, rules, releases and refusals (`OllamaBrain`), the court's work
-(`BotManager.work`: the "housekeeping:" and "the army:" lines) and its own events. Talk is kept a
-week (`HISTORY_CHAT_DAYS`), the rest a month (`HISTORY_DAYS`); a line `isSecret` flags is never
-written. The admin shows it (Court > History, Services > Database), backs it up (`pg_dump -Fc`
+(`BotManager.work`: the "housekeeping:" and "the army:" lines) and its own events. Everything is
+kept six months (the King's choice, 2026-11-01: talk `HISTORY_CHAT_DAYS`, the rest
+`HISTORY_DAYS`, 183 each); a line `isSecret` flags is never written. The admin shows it (Court > History, Services > Database), backs it up (`pg_dump -Fc`
 in the container, `database-*.dump` in the backups folder; restore with `pg_restore`) and keeps
 its audit log there (`audit.log` while the database is away, taken in once it answers). Tests
 run on PGlite (a real Postgres in the process, `src/db/db.test.ts`).
