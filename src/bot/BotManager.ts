@@ -711,13 +711,18 @@ export class BotManager {
         data: { whisper: true },
       })
     if (!HOUSEHOLD) return
-    if (event.kind === 'system')
+    const courtier = (name: string | undefined) => this.cfg.bots.some((b) => b.name === name)
+    if (event.kind === 'system') {
+      // The courtiers' own coming and going is in their status, not a line each at every restart.
+      if (event.notice?.key.startsWith('multiplayer.player.') && courtier(event.notice.params[0]))
+        return
       return record({
         kind: 'notice',
         text: event.message,
         ...(event.notice ? { data: { key: event.notice.key } } : {}),
       })
-    if (this.cfg.bots.some((b) => b.name === event.from)) return
+    }
+    if (courtier(event.from)) return
     record({ kind: 'chat', actor: event.from, text: event.message })
   }
 

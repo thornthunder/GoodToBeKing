@@ -49,6 +49,9 @@ async function main(): Promise<void> {
     ? openDatabase(url, `court-${world || 'world'}-${division}`, log.child('db'))
     : undefined
   if (db) {
+    const mine = config.bots.filter(
+      (b) => division === 'all' || (b.division ?? 'household') === division
+    )
     startHistory(
       new History(
         db.db,
@@ -64,7 +67,7 @@ async function main(): Promise<void> {
     )
     record({
       kind: 'court',
-      text: `the ${division} started: ${config.bots.map((b) => b.name).join(', ')}`,
+      text: `the ${division} started: ${mine.map((b) => b.name).join(', ')}`,
     })
   }
 
