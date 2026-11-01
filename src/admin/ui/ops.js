@@ -324,7 +324,7 @@ export async function backupsPage(main, _rest, { worlds }) {
         h(
           'p',
           {},
-          'A court’s state (.state without its logs, and the folder both worlds share), or the local server’s world, copied while the server holds its saving. Restoring is done by hand on the host.'
+          'A court’s state (.state without its logs, and the folder both worlds share), the local server’s world, copied while the server holds its saving, or the court’s database (pg_dump; restore with pg_restore). Restoring is done by hand on the host.'
         )
       ),
       h(
@@ -333,6 +333,7 @@ export async function backupsPage(main, _rest, { worlds }) {
         worlds.map((w) =>
           button(`Back up ${w.label}’s state`, start(`/api/worlds/${w.id}/backup`))
         ),
+        button('Back up the database', start('/api/database/backup')),
         button('Back up the local server’s world', start('/api/server/backup'), 'primary')
       )
     ),

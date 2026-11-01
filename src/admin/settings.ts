@@ -3,7 +3,16 @@
  * does. A setting the container sets itself (compose.yaml) is `managed`: shown, not edited.
  * src/admin/settings.test.ts checks that every setting the court reads is here.
  */
-export type SettingType = 'text' | 'number' | 'bool' | 'select' | 'model' | 'point' | 'long'
+export type SettingType =
+  | 'text'
+  | 'number'
+  | 'bool'
+  | 'select'
+  | 'model'
+  | 'point'
+  | 'long'
+  /** Never sent to the page: it shows only whether one is set. */
+  | 'secret'
 
 export interface Setting {
   key: string
@@ -351,6 +360,33 @@ export const SECTIONS: SettingSection[] = [
     ],
   },
   {
+    id: 'database',
+    title: 'Database',
+    help: 'The court’s Postgres (compose.db.yaml): the history of what the court heard and did.',
+    settings: [
+      {
+        key: 'DATABASE_URL',
+        label: 'Database',
+        type: 'secret',
+        help: 'postgres://user:password@127.0.0.1:5432/court. Empty: no database, no history.',
+      },
+      {
+        key: 'HISTORY_CHAT_DAYS',
+        label: 'Keep talk',
+        type: 'number',
+        default: '7',
+        help: 'Days the history keeps what was said and the server’s notices (as long as the logs).',
+      },
+      {
+        key: 'HISTORY_DAYS',
+        label: 'Keep the rest',
+        type: 'number',
+        default: '30',
+        help: 'Days the history keeps spells, orders, work and the court’s own events.',
+      },
+    ],
+  },
+  {
     id: 'process',
     title: 'Process',
     help: 'How the court’s processes run. Most are set by the container.',
@@ -421,6 +457,8 @@ export function invalid(key: string, value: string): string | undefined {
   if (s.type === 'select' && !s.options?.includes(value))
     return `one of ${s.options?.filter(Boolean).join(', ')}`
   if (s.type === 'point' && !/^-?\d+\s*,\s*-?\d+\s*,\s*-?\d+$/.test(value)) return '"x,y,z"'
+  if (key === 'DATABASE_URL' && !/^postgres(ql)?:\/\/\S+$/.test(value))
+    return 'a URL like postgres://court:password@127.0.0.1:5432/court'
   if (key === 'OLLAMA_HOST' && !/^https?:\/\/[^\s/]+(:\d+)?\/?$/.test(value))
     return 'a URL like http://host:11434'
   return undefined

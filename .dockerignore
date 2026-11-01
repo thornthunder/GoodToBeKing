@@ -11,3 +11,4 @@ ServerFiles
 .stop
 *.log
 admin.env
+db.env

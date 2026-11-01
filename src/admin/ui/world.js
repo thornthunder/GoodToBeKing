@@ -820,9 +820,17 @@ async function logsTab(body, w) {
 
 // ---- Settings --------------------------------------------------------------------------------
 
-export function settingInput(s, value) {
+export function settingInput(s, value, isSet = false) {
   const placeholder = s.default ? `default: ${s.default}` : ''
   if (s.managed) return input({ value, readonly: true, placeholder: 'set by the container' })
+  // A secret is never shown: typing one replaces it, leaving it empty keeps it.
+  if (s.type === 'secret')
+    return input({
+      type: 'password',
+      value: '',
+      autocomplete: 'new-password',
+      placeholder: isSet ? 'set (hidden): type to replace it' : 'not set',
+    })
   if (s.type === 'select')
     return select(
       s.options.map((o) => [
@@ -845,7 +853,7 @@ export function settingInput(s, value) {
 }
 
 /** A form of settings; returns the element and a function giving what changed. */
-export function settingsForm(sections, values) {
+export function settingsForm(sections, values, secretsSet = []) {
   const inputs = {}
   const form = h(
     'div',
@@ -858,7 +866,7 @@ export function settingsForm(sections, values) {
           'div',
           { class: 'form' },
           sec.settings.flatMap((s) => {
-            const el = settingInput(s, values[s.key] ?? '')
+            const el = settingInput(s, values[s.key] ?? '', secretsSet.includes(s.key))
             inputs[s.key] = el
             const field = h(
               'div',
@@ -892,7 +900,7 @@ export function settingsForm(sections, values) {
 
 async function settingsTab(body, w) {
   const s = await get(`/api/worlds/${w.id}/settings`)
-  const { form, changes } = settingsForm(s.sections, s.values)
+  const { form, changes } = settingsForm(s.sections, s.values, s.secretsSet)
   const applyBox = h('div')
   const save = act(
     async () => {

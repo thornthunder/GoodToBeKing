@@ -292,7 +292,10 @@ export function loadConfig(): AppConfig {
       throw new Error(`${file} must contain a non-empty JSON array of bot overrides`)
     }
     // The admin's changes (src/admin) on top of the file in git.
-    const edited = applyBotEdits(parsed as Array<BotOverride & Record<string, unknown>>, readBotEdits(botEditsFile()))
+    const edited = applyBotEdits(
+      parsed as Array<BotOverride & Record<string, unknown>>,
+      readBotEdits(botEditsFile())
+    )
     if (edited.length === 0) throw new Error('the admin left no bot in the court')
     bots = edited.map((override: BotOverride) => mergeBotConfig(base, override))
   }

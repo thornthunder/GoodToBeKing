@@ -20,6 +20,7 @@ import { worldPage } from './world.js'
 import { botsPage, memoryPage, ordersPage, rosterPage } from './court.js'
 import { ollamaPage, serversPage } from './services.js'
 import { adminPage, backupsPage, containersPage, jobsPage, toolsPage } from './ops.js'
+import { databasePage, historyPage } from './history.js'
 
 const root = document.getElementById('root')
 let worlds = []
@@ -31,6 +32,8 @@ const PAGES = {
   roster: rosterPage,
   memory: memoryPage,
   orders: ordersPage,
+  history: historyPage,
+  database: databasePage,
   servers: serversPage,
   ollama: ollamaPage,
   containers: containersPage,
@@ -112,9 +115,11 @@ function showApp(me) {
       navLink('#/roster', 'Royal family'),
       navLink('#/memory', 'Memories'),
       navLink('#/orders', 'Orders & rules'),
+      navLink('#/history', 'History'),
       h('div', { class: 'nav-group' }, 'Services'),
       navLink('#/servers', 'Game servers'),
       navLink('#/ollama', 'Ollama'),
+      navLink('#/database', 'Database'),
       h('div', { class: 'nav-group' }, 'Operations'),
       navLink('#/containers', 'Containers & deploy'),
       navLink('#/tools', 'Tools'),
@@ -187,9 +192,15 @@ async function overviewPage(main) {
   )
   const body = h('div', { class: 'stack' })
   const models = h('div', { class: 'grid' })
-  fill(main, head, body, h('h2', {}, 'Model servers'), models)
+  fill(main, head, body, h('h2', {}, 'Model servers and database'), models)
   // The model servers apart: one far away or down must not hold up the rest.
-  every(30_000, async () => fill(models, (await get('/api/overview/ollama')).map(ollamaCard)))
+  every(30_000, async () => {
+    const [ollama, database] = await Promise.all([
+      get('/api/overview/ollama'),
+      get('/api/database').catch((err) => ({ configured: true, up: false, error: err.message })),
+    ])
+    fill(models, ollama.map(ollamaCard), databaseCard(database))
+  })
   every(10_000, async () => {
     const o = await get('/api/overview')
     const courtIn = o.presence?.world
@@ -275,6 +286,26 @@ function localCard(s) {
       ['Version', s.version],
       ['Players', s.players.length ? s.players.join(', ') : 'nobody'],
     ])
+  )
+}
+
+function databaseCard(d) {
+  return card(
+    h('a', { href: '#/database' }, 'Database'),
+    !d.configured
+      ? h('p', { class: 'muted' }, 'None: the court keeps everything in files.')
+      : d.up
+        ? h(
+            'div',
+            {},
+            stat(d.version ?? '?', 'version'),
+            stat(`${d.sizeMb} MB`, 'on disk'),
+            stat(
+              (d.history ?? []).reduce((n, r) => n + r.count, 0),
+              h('a', { href: '#/history' }, 'history lines')
+            )
+          )
+        : h('div', { class: 'notice bad' }, `Not answering: ${d.error}`)
   )
 }
 

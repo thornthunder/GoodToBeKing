@@ -14,7 +14,12 @@ describe('playerSpawn', () => {
   it('reads the bed a player respawns at, none, or nothing about the player', () => {
     // As the Dev world sent it (2026-10-31): at login with no bed, then after a tap.
     expect(
-      playerSpawn({ spawn_type: 'player', player_position: none, dimension: 3, world_position: none })
+      playerSpawn({
+        spawn_type: 'player',
+        player_position: none,
+        dimension: 3,
+        world_position: none,
+      })
     ).toBeNull()
     expect(
       playerSpawn({

@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { databaseUrl, openDatabase } from '../db/Database'
 import { createLogger } from '../logger'
 import { errMsg } from '../util'
 import { COOKIE, routes } from './api'
@@ -20,7 +21,9 @@ import { World } from './world'
  *   ADMIN_SERVER ("bds-test=/home/jean/testserver", a systemd service and its folder),
  *   ADMIN_SERVER_WORLD (the world that plays on it), ADMIN_BACKUPS (a folder),
  *   ADMIN_OLLAMA ("Ava=http://ava:11434", the servers it knows at first start),
- *   ADMIN_PASSWORD (the password at first start; else one is made and put in ADMIN_DATA).
+ *   ADMIN_PASSWORD (the password at first start; else one is made and put in ADMIN_DATA),
+ *   DATABASE_URL (the court's Postgres: history, audit log) and ADMIN_DB_CONTAINER (the
+ *   container it runs in, for backups; goodtobeking-db).
  */
 function pairs(value: string | undefined): Array<[string, string]> {
   return (value ?? '')
@@ -65,6 +68,9 @@ function main(): void {
     },
     (t) => log.warn(t)
   )
+  const url = databaseUrl()
+  const database = url ? openDatabase(url, 'admin', log.child('db')) : undefined
+  if (database) store.useDatabase(database.db, database.ready, (t) => log.warn(t))
   const sessions = new Sessions()
   const router = new Router()
   routes(router, {
@@ -75,6 +81,14 @@ function main(): void {
     throttle: new Throttle(),
     jobs: new Jobs(),
     backups: path.resolve(process.env.ADMIN_BACKUPS || path.join(store.dir, 'backups')),
+    db:
+      database && url
+        ? {
+            db: database.db,
+            url,
+            container: process.env.ADMIN_DB_CONTAINER || 'goodtobeking-db',
+          }
+        : undefined,
     log,
   })
   const port = Number(process.env.ADMIN_PORT) || 8080

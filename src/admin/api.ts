@@ -4,8 +4,11 @@ import { botEdits, botProblems } from '../botEdits'
 import type { Logger } from '../logger'
 import { errMsg } from '../util'
 import { verifyPassword, weakPassword, type Sessions, type Throttle } from './auth'
+import type { Database } from '../db/Database'
+import { HISTORY_KINDS, readHistory } from '../db/history'
 import { backupPath, listBackups, serverBackup, stateBackupSteps } from './backups'
 import type { LocalServer } from './bds'
+import { databaseBackupStep, databaseStatus } from './database'
 import {
   BLUEPRINTS,
   BUILTIN_SPELLS,
@@ -32,6 +35,8 @@ export interface Context {
   throttle: Throttle
   jobs: Jobs
   backups: string
+  /** The court's database (DATABASE_URL), its URL and the container it runs in. */
+  db?: { db: Database; url: string; container: string }
   log: Logger
 }
 
@@ -233,9 +238,17 @@ export function routes(router: Router, ctx: Context): void {
     const w = world(req.params.w)
     const values = w.env().entries()
     const known = new Set(SECTIONS.flatMap((s) => s.settings.map((x) => x.key)))
+    // A secret (the database's password) never goes to the page: only whether it is set.
+    const secretsSet: string[] = []
+    for (const s of SECTIONS.flatMap((x) => x.settings))
+      if (s.type === 'secret' && values[s.key] !== undefined) {
+        if (values[s.key]) secretsSet.push(s.key)
+        values[s.key] = ''
+      }
     return json({
       sections: SECTIONS,
       values,
+      secretsSet,
       other: Object.keys(values).filter((k) => !known.has(k)),
     })
   })
@@ -790,13 +803,44 @@ export function routes(router: Router, ctx: Context): void {
   )
   router.on('GET', '/api/backups/:name', (req) => ({
     file: backupPath(ctx.backups, req.params.name),
-    type: 'application/gzip',
+    type: req.params.name.endsWith('.dump') ? 'application/octet-stream' : 'application/gzip',
     download: req.params.name,
   }))
   router.on('DELETE', '/api/backups/:name', (req) => {
     fs.rmSync(backupPath(ctx.backups, req.params.name))
     audit(req, 'deleted a backup', req.params.name)
     return json({ ok: true })
+  })
+
+  // ---- The court's database and its history ----------------------------------------------------
+
+  router.on('GET', '/api/database', async () =>
+    json({ ...(await databaseStatus(ctx.db?.db)), container: ctx.db?.container })
+  )
+  router.on('POST', '/api/database/backup', (req) => {
+    if (!ctx.db) throw new HttpError(400, 'the admin has no database (DATABASE_URL)')
+    fs.mkdirSync(ctx.backups, { recursive: true })
+    const { file, step } = databaseBackupStep(ctx.db.url, ctx.db.container, ctx.backups)
+    audit(req, 'backed up the database', path.basename(file))
+    return json(ctx.jobs.start('Database backup', 'backup:database', [step]))
+  })
+  router.on('GET', '/api/history', async (req) => {
+    if (!ctx.db) throw new HttpError(400, 'the admin has no database (DATABASE_URL)')
+    const q = req.query
+    const kind = q.get('kind') || undefined
+    if (kind && !HISTORY_KINDS.includes(kind as never)) throw new HttpError(400, 'no such kind')
+    const id = (name: string) => Number(q.get(name)) || undefined
+    return json(
+      await readHistory(ctx.db.db, {
+        world: q.get('world') || undefined,
+        kind,
+        who: q.get('who')?.trim() || undefined,
+        q: q.get('q')?.trim() || undefined,
+        before: id('before'),
+        after: id('after'),
+        limit: id('limit'),
+      })
+    )
   })
 
   // ---- The admin itself ----------------------------------------------------------------------
@@ -815,5 +859,5 @@ export function routes(router: Router, ctx: Context): void {
       firstPassword: ctx.store.get().firstPassword ?? false,
     })
   )
-  router.on('GET', '/api/audit', () => json(ctx.store.auditLog()))
+  router.on('GET', '/api/audit', async () => json(await ctx.store.auditLog()))
 }

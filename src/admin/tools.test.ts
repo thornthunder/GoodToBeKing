@@ -21,11 +21,7 @@ describe("the admin's tools", () => {
       toolArgs(tool('survey-terrain'), { x1: '90', z1: '10', x2: '130', z2: '40' }, CHOICES)
     ).toEqual(['90', '10', '130', '40'])
     expect(
-      toolArgs(
-        tool('say-as'),
-        { player: 'BigDad', lines: ['Merlin, hello', 'GMH'] },
-        CHOICES
-      )
+      toolArgs(tool('say-as'), { player: 'BigDad', lines: ['Merlin, hello', 'GMH'] }, CHOICES)
     ).toEqual(['BigDad', 'Merlin, hello', 'GMH'])
     expect(
       toolArgs(tool('check-section'), { design: 'config/castles/great-castle.json' }, CHOICES)

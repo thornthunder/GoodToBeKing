@@ -1,12 +1,16 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { insertAudit, readAudit, type AuditEntry } from '../db/audit'
+import type { Database } from '../db/Database'
+import { errMsg } from '../util'
 import { hashPassword, newPassword } from './auth'
 import { readJson, writeJson } from './files'
 import type { OllamaService } from './ollama'
 
 /**
  * The admin's own data (ADMIN_DATA, a host folder): its password hash, the Ollama servers it
- * knows, and an audit log of every change made through it.
+ * knows, and an audit log of every change made through it (in the database when there is one;
+ * in audit.log while it is away, whose lines go in once it answers).
  */
 export interface AdminData {
   passwordHash: string
@@ -15,15 +19,12 @@ export interface AdminData {
   ollama: OllamaService[]
 }
 
-export interface AuditEntry {
-  at: number
-  ip: string
-  action: string
-  detail?: unknown
-}
+export type { AuditEntry }
 
 export class AdminStore {
   private data: AdminData
+  private database?: Database
+  private importing = false
 
   constructor(
     readonly dir: string,
@@ -71,13 +72,76 @@ export class AdminStore {
     fs.chmodSync(this.file, 0o600)
   }
 
+  /** Keep the audit log in the database once it answers. */
+  useDatabase(db: Database, ready: Promise<void>, log: (text: string) => void): void {
+    void ready.then(async () => {
+      this.database = db
+      await this.importAuditFile().catch((err) =>
+        log(`audit: the file's lines did not go in (${errMsg(err)})`)
+      )
+    })
+  }
+
   audit(entry: Omit<AuditEntry, 'at'>): void {
-    const line = JSON.stringify({ at: Date.now(), ...entry })
-    fs.appendFileSync(path.join(this.dir, 'audit.log'), line + '\n')
+    const full: AuditEntry = { at: Date.now(), ...entry }
+    const db = this.database
+    if (!db) return this.auditToFile([full])
+    void insertAudit(db, [full])
+      .then(() => this.importAuditFile())
+      .catch(() => this.auditToFile([full]))
+  }
+
+  private get auditFile(): string {
+    return path.join(this.dir, 'audit.log')
+  }
+
+  private auditToFile(entries: AuditEntry[]): void {
+    fs.appendFileSync(this.auditFile, entries.map((e) => JSON.stringify(e) + '\n').join(''))
+  }
+
+  /** Lines written while the database was away go in (kept in audit.imported.log too). */
+  private async importAuditFile(): Promise<void> {
+    const db = this.database
+    if (!db || this.importing || !fs.existsSync(this.auditFile)) return
+    this.importing = true
+    const moving = `${this.auditFile}.importing`
+    try {
+      fs.renameSync(this.auditFile, moving)
+      const text = fs.readFileSync(moving, 'utf8')
+      const entries = text
+        .split('\n')
+        .filter(Boolean)
+        .flatMap((l) => {
+          try {
+            return [JSON.parse(l) as AuditEntry]
+          } catch {
+            return []
+          }
+        })
+      try {
+        await insertAudit(db, entries)
+        fs.appendFileSync(path.join(this.dir, 'audit.imported.log'), text)
+      } catch (err) {
+        // Back into the file, to go in next time (the entries keep their times).
+        this.auditToFile(entries)
+        throw err
+      } finally {
+        fs.rmSync(moving, { force: true })
+      }
+    } finally {
+      this.importing = false
+    }
   }
 
   /** The newest entries first. */
-  auditLog(limit = 500): AuditEntry[] {
+  async auditLog(limit = 500): Promise<AuditEntry[]> {
+    if (this.database) {
+      try {
+        return await readAudit(this.database, limit)
+      } catch {
+        // The database is away: what the file holds.
+      }
+    }
     try {
       const lines = fs.readFileSync(path.join(this.dir, 'audit.log'), 'utf8').trim().split('\n')
       return lines

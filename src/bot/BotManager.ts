@@ -31,6 +31,7 @@ import type { Rect } from '../build/design'
 import type { AppConfig } from '../config'
 import { CourtRoster, type CourtMember } from '../court'
 import type { Logger } from '../logger'
+import { record } from '../db/history'
 import { errMsg, sleep } from '../util'
 import { Bot } from './Bot'
 import { MATERIALS, type Material } from './gathering'
@@ -236,6 +237,7 @@ export class BotManager {
         estate: this.estate,
       })
       bot.on('chat', (event: ChatEvent) => {
+        this.heard(bot, event)
         if (court.find(event.from)) this.lastRoyalLine = Date.now()
         // Every bot hears the line: the Castellan's ears are the ones that count.
         if (bot === this.castellan()) this.kingAnswers(event)
@@ -354,9 +356,9 @@ export class BotManager {
       this.underway.clear()
       for (const b of this.bots) b.dropCourtWork()
     }
-    this.log.info(
-      `${by} made ${home.x},${home.y},${home.z} the court's home${moving ? ': the court moves house' : ''}`
-    )
+    const said = `${by} made ${home.x},${home.y},${home.z} the court's home${moving ? ': the court moves house' : ''}`
+    this.log.info(said)
+    record({ kind: 'court', actor: by, text: said, data: { home } })
   }
 
   /** When courtiers died at home lately. */
@@ -534,7 +536,10 @@ export class BotManager {
       if (!p) continue
       // Overrun by night: whoever is away (woken at the world spawn) stays away till morning.
       if (this.homeOverrun(bot) && Math.hypot(p.x - home.x, p.z - home.z) > OVERRUN_NEAR) {
-        if (!this.overrunSaid) this.log.info('the home is overrun: nobody goes back till morning')
+        if (!this.overrunSaid) {
+          this.log.info('the home is overrun: nobody goes back till morning')
+          record({ kind: 'court', text: 'the home is overrun: nobody goes back till morning' })
+        }
         this.overrunSaid = true
         continue
       }
@@ -684,6 +689,38 @@ export class BotManager {
   /** Work someone is doing right now: nobody else is sent to do it too. */
   private readonly underway = new Set<string>()
 
+  /** The court's work, in the log ("housekeeping: …", "the army: …") and in its history. */
+  private work(prefix: string, text: string): void {
+    this.log.info(`${prefix}: ${text}`)
+    const actor = this.cfg.bots.find((b) => text.startsWith(`${b.name} `))?.name
+    record({ kind: 'work', text, ...(actor ? { actor } : {}) })
+  }
+
+  /**
+   * The court's history of what it heard: whispers by the courtier whispered to, public lines and
+   * the server's notices by the household (every mind of a world hears them), and each courtier's
+   * own lines by that courtier (Bot.chat), so every line is written once.
+   */
+  private heard(bot: Bot, event: ChatEvent): void {
+    if (event.kind === 'whisper')
+      return record({
+        kind: 'chat',
+        actor: event.from,
+        target: bot.cfg.name,
+        text: event.message,
+        data: { whisper: true },
+      })
+    if (!HOUSEHOLD) return
+    if (event.kind === 'system')
+      return record({
+        kind: 'notice',
+        text: event.message,
+        ...(event.notice ? { data: { key: event.notice.key } } : {}),
+      })
+    if (this.cfg.bots.some((b) => b.name === event.from)) return
+    record({ kind: 'chat', actor: event.from, text: event.message })
+  }
+
   /** Mark work as underway till it ends, then rest it if it came to nothing. */
   private doing(kind: string, work: Promise<boolean>): void {
     this.underway.add(kind)
@@ -698,7 +735,7 @@ export class BotManager {
     if (ok) this.resting.delete(kind)
     else {
       this.resting.set(kind, Date.now() + REST_MS)
-      this.log.info(`housekeeping: ${kind} came to nothing; it rests a while`)
+      this.work('housekeeping', `${kind} came to nothing; it rests a while`)
     }
   }
 
@@ -777,7 +814,7 @@ export class BotManager {
       const spot = eyes.findFishingSpot()
       if (spot) {
         this.household.setFishing(spot)
-        this.log.info(`housekeeping: water to fish in at ${spot.water.join(',')}`)
+        this.work('housekeeping', `water to fish in at ${spot.water.join(',')}`)
       } else this.household.noteNoWater()
     }
     const state: CourtState = {
@@ -950,8 +987,9 @@ export class BotManager {
     switch (action.kind) {
       case 'hallwork': {
         const builder = by(action.by)
-        this.log.info(
-          `housekeeping: ${action.work} for the hall${builder ? ` by ${builder.cfg.name}` : ''}`
+        this.work(
+          'housekeeping',
+          `${action.work} for the hall${builder ? ` by ${builder.cfg.name}` : ''}`
         )
         if (builder)
           this.doing(
@@ -969,14 +1007,14 @@ export class BotManager {
       case 'hunt': {
         const hunter = by(action.by)
         if (!hunter) return
-        this.log.info(`housekeeping: ${hunter.cfg.name} goes hunting for the court's food`)
+        this.work('housekeeping', `${hunter.cfg.name} goes hunting for the court's food`)
         void hunter.startHunt(action.animals).then((meat) => this.rest('hunt', meat > 0))
         return
       }
       case 'mine': {
         const miner = by(action.by)
         if (!miner) return
-        this.log.info(`housekeeping: ${miner.cfg.name} goes down the mine for stone`)
+        this.work('housekeeping', `${miner.cfg.name} goes down the mine for stone`)
         this.doing(
           'mine',
           miner.startMining(action.want).then((got) => got > 0)
@@ -986,14 +1024,14 @@ export class BotManager {
       case 'arm': {
         const guard = by(action.by)
         if (!guard) return
-        this.log.info(`housekeeping: ${guard.cfg.name} arms himself`)
+        this.work('housekeeping', `${guard.cfg.name} arms himself`)
         this.doing('arm', guard.startArming())
         return
       }
       case 'smelt': {
         const smith = by(action.by)
         if (!smith) return
-        this.log.info(`housekeeping: ${smith.cfg.name} smelts the storehouse's ore`)
+        this.work('housekeeping', `${smith.cfg.name} smelts the storehouse's ore`)
         this.doing(
           'smelt',
           smith.startSmelting().then((n) => n > 0)
@@ -1003,7 +1041,7 @@ export class BotManager {
       case 'charcoal': {
         const maker = by(action.by)
         if (!maker) return
-        this.log.info(`housekeeping: ${maker.cfg.name} makes charcoal for torches`)
+        this.work('housekeeping', `${maker.cfg.name} makes charcoal for torches`)
         this.doing(
           'charcoal',
           maker.startCharcoal().then((n) => n > 0)
@@ -1013,21 +1051,21 @@ export class BotManager {
       case 'farm': {
         const farmer = by(action.by)
         if (!farmer) return
-        this.log.info(`housekeeping: ${farmer.cfg.name} tends the wheat field`)
+        this.work('housekeeping', `${farmer.cfg.name} tends the wheat field`)
         this.doing('farm', farmer.startFarming())
         return
       }
       case 'water': {
         const carrier = by(action.by)
         if (!carrier) return
-        this.log.info(`housekeeping: ${carrier.cfg.name} fetches water for the field`)
+        this.work('housekeeping', `${carrier.cfg.name} fetches water for the field`)
         this.doing('water', carrier.startWatering())
         return
       }
       case 'fish': {
         const fisher = by(action.by)
         if (!fisher) return
-        this.log.info(`housekeeping: ${fisher.cfg.name} goes fishing for the court's food`)
+        this.work('housekeeping', `${fisher.cfg.name} goes fishing for the court's food`)
         this.doing(
           'fish',
           fisher.startFishing().then((n) => n > 0)
@@ -1037,14 +1075,14 @@ export class BotManager {
       case 'forest': {
         const forester = by(action.by)
         if (!forester) return
-        this.log.info(`housekeeping: ${forester.cfg.name} tends the grove`)
+        this.work('housekeeping', `${forester.cfg.name} tends the grove`)
         this.doing('forest', forester.startForestry())
         return
       }
       case 'estate': {
         const builder = by(action.by)
         if (!builder) return
-        this.log.info(`housekeeping: ${builder.cfg.name} sees to the estate: ${action.work}`)
+        this.work('housekeeping', `${builder.cfg.name} sees to the estate: ${action.work}`)
         const work = builder.startEstateWork(action.work, castellan.cfg.name)
         this.doing(`estate:${action.work}`, work)
         // Surveyed again afterwards: what it still wants.
@@ -1054,7 +1092,7 @@ export class BotManager {
       case 'move': {
         const mover = by(action.by)
         if (!mover) return
-        this.log.info(`housekeeping: ${mover.cfg.name} carries the old storehouse over`)
+        this.work('housekeeping', `${mover.cfg.name} carries the old storehouse over`)
         this.doing(
           'move',
           mover.startMovingStores().then((n) => n > 0)
@@ -1064,7 +1102,7 @@ export class BotManager {
       case 'cook': {
         const cook = by(action.by)
         if (!cook) return
-        this.log.info(`housekeeping: ${cook.cfg.name} cooks the meat in the storehouse`)
+        this.work('housekeeping', `${cook.cfg.name} cooks the meat in the storehouse`)
         this.doing(
           'cook',
           cook.startCooking().then((n) => n > 0)
@@ -1073,8 +1111,9 @@ export class BotManager {
       }
       case 'errand': {
         const hand = by(action.by)
-        this.log.info(
-          `housekeeping: ${hand ? `${hand.cfg.name} fetches ` : ''}${action.count} ${action.material} for the storehouse`
+        this.work(
+          'housekeeping',
+          `${hand ? `${hand.cfg.name} fetches ` : ''}${action.count} ${action.material} for the storehouse`
         )
         if (hand) {
           // One out for it at a time (a second would go through the same woods).
@@ -1098,7 +1137,7 @@ export class BotManager {
       case 'ask': {
         if (Date.now() - this.askedKing.at < ASK_MS) return
         this.askedKing = { at: Date.now(), wants: action.wants }
-        this.log.info(`housekeeping: asking the King for ${action.what}`)
+        this.work('housekeeping', `asking the King for ${action.what}`)
         await castellan.speak(
           `The court needs ${action.what}, which only Merlin's magic can provide just now. Ask ` +
             'the King, politely and in one short sentence, whether Merlin may conjure it.',
@@ -1155,7 +1194,7 @@ export class BotManager {
     })
     const armer = (canArm ? unarmed : undefined) ?? toOutfit
     if (armer && !this.underway.has('arm') && (this.resting.get('arm') ?? 0) < Date.now()) {
-      this.log.info(`the army: ${armer.cfg.name} arms himself from the storehouse`)
+      this.work('the army', `${armer.cfg.name} arms himself from the storehouse`)
       this.doing('arm', armer.startArming())
     }
     this.patrolShift(sarge, soldiers)
@@ -1205,8 +1244,9 @@ export class BotManager {
     if (route.length < 3) return
     const until = now + SHIFT_MS
     this.shift = { until, soldiers: fit.map((b) => b.cfg.name) }
-    this.log.info(
-      `the army: ${fit.map((b) => b.cfg.name).join(', ')} patrol round home (${route.length} points)`
+    this.work(
+      'the army',
+      `${fit.map((b) => b.cfg.name).join(', ')} patrol round home (${route.length} points)`
     )
     fit.forEach((b, k) => {
       this.walked.set(b.cfg.name, now)
@@ -1241,7 +1281,7 @@ export class BotManager {
     if (count(FOOD_ITEM) < ARMY_FOOD && !rests('hunt')) {
       const hunter = free.shift()
       if (hunter) {
-        this.log.info(`the army: ${hunter.cfg.name} goes hunting for the court's food`)
+        this.work('the army', `${hunter.cfg.name} goes hunting for the court's food`)
         this.doing(
           'hunt',
           hunter.startHunt(3).then((meat) => meat > 0)
@@ -1251,7 +1291,7 @@ export class BotManager {
     if (!rests('mine')) {
       const miner = free.shift()
       if (miner) {
-        this.log.info(`the army: ${miner.cfg.name} goes down the army's mine`)
+        this.work('the army', `${miner.cfg.name} goes down the army's mine`)
         this.doing(
           'mine',
           miner.startMining(32).then((got) => got > 0)
@@ -1326,7 +1366,7 @@ export class BotManager {
     const answer = confirmation(event.message)
     if (!answer) return
     this.blessAsked = Date.now() - ANSWER_MS - 1
-    this.log.info(`the army: the King says ${answer} to the blessing`)
+    this.work('the army', `the King says ${answer} to the blessing`)
     if (answer === 'no') return
     const report = this.board.report()
     if (report) this.board.writeReport({ ...report, request: { by: event.from, at: Date.now() } })
@@ -1379,7 +1419,7 @@ export class BotManager {
       for (const step of steps) {
         const result = await merlin.command(step.command)
         if (!result.ok) {
-          this.log.info(`the blessing: "${step.command}" refused: ${result.output.join('; ')}`)
+          this.work('the blessing', `"${step.command}" refused: ${result.output.join('; ')}`)
           continue
         }
         this.magic?.noteGift(step.to, step.item, [step.undo])
@@ -1387,7 +1427,7 @@ export class BotManager {
       }
       done(Date.now())
       const blessed = new Set(steps.map((s) => s.to)).size
-      this.log.info(`the blessing: ${given} pieces for ${blessed} soldiers, by ${by}'s word`)
+      this.work('the blessing', `${given} pieces for ${blessed} soldiers, by ${by}'s word`)
       merlin.chat(
         `Behold, ${address}: the army is blessed! Copper for the soldiers, iron for ${report.leader || 'their sergeant'}.`
       )
@@ -1410,8 +1450,9 @@ export class BotManager {
     const answer = confirmation(event.message)
     if (!answer) return
     this.askedKing = { at: asked.at, wants: [] }
-    this.log.info(
-      `housekeeping: the King says ${answer} to ${asked.wants.map((w) => w.why).join(', ')}`
+    this.work(
+      'housekeeping',
+      `the King says ${answer} to ${asked.wants.map((w) => w.why).join(', ')}`
     )
     const castellan = this.castellan()
     const merlin = this.bots.find((b) => b.cfg.magic)
@@ -1425,7 +1466,7 @@ export class BotManager {
   private async conjureFor(castellan: Bot, merlin: Bot, action: MagicWant): Promise<void> {
     const by = (name?: string) => this.bots.find((b) => b.cfg.name === name)
     const before = merlin.magicLeft()
-    this.log.info(`housekeeping: ${castellan.cfg.name} asks ${merlin.cfg.name} for ${action.why}`)
+    this.work('housekeeping', `${castellan.cfg.name} asks ${merlin.cfg.name} for ${action.why}`)
     await castellan.speak(
       `You ask Merlin, the court wizard, to conjure ${action.why} (${action.count} ` +
         `${action.item.replace(/_/g, ' ')} for ${action.to}). Say it to him in one short, ` +
@@ -2377,6 +2418,11 @@ export class BotManager {
     const presence = this.presence
     if (!presence || rankOf(this.court.find(by)?.role) < rankOf(this.king()?.role)) return
     this.log.info(`${by} calls the court to ${worldWords(presence.here)}`)
+    record({
+      kind: 'court',
+      actor: by,
+      text: `${by} calls the court to ${worldWords(presence.here)}`,
+    })
     presence.callHere(by)
     this.summoned = { by, at: Date.now(), merlin }
     void this.followCourt()

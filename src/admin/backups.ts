@@ -8,7 +8,8 @@ import type { World } from './world'
 /**
  * Backups into one host folder (ADMIN_BACKUPS): a world's court state (.state without its logs,
  * and the shared folder), or the local server's world, copied while the server holds its saving
- * (save hold / save query / save resume, as Bedrock's own docs say).
+ * (save hold / save query / save resume, as Bedrock's own docs say), or the court's database
+ * (database.ts: pg_dump's .dump files).
  */
 export interface Backup {
   name: string
@@ -16,7 +17,7 @@ export interface Backup {
   at: number
 }
 
-const NAME = /^[\w.-]+\.tgz$/
+const NAME = /^[\w.-]+\.(tgz|dump)$/
 
 function stamp(): string {
   return new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 13)

@@ -1,0 +1,26 @@
+# The court's Postgres, one per machine (CLAUDE.md, "The database"). Its own compose project, so
+# redeploying a court or the admin never stops it. It listens on this machine only (127.0.0.1):
+# the courts and the admin use host networking. Data in DB_DATA_DIR, password in db.env:
+#   docker compose -f compose.db.yaml --env-file db.env up -d
+name: goodtobeking-db
+
+services:
+  db:
+    image: postgres:18-alpine
+    container_name: goodtobeking-db
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      POSTGRES_USER: court
+      POSTGRES_DB: court
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in db.env}
+    command: ['postgres', '-c', 'listen_addresses=127.0.0.1', '-c', 'port=5432']
+    volumes:
+      - ${DB_DATA_DIR:?set DB_DATA_DIR in db.env}:/var/lib/postgresql
+    shm_size: 256mb
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-h', '127.0.0.1', '-U', 'court', '-d', 'court']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    stop_grace_period: 60s

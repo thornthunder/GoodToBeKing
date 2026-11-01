@@ -1,5 +1,6 @@
 import { execFile, spawn } from 'node:child_process'
 import crypto from 'node:crypto'
+import fs from 'node:fs'
 
 /**
  * Programs the admin runs (docker, git, the court's scripts): never through a shell, always with
@@ -82,7 +83,8 @@ export class Jobs {
   start(
     title: string,
     key: string,
-    steps: Array<{ cmd: string; args: string[]; cwd?: string; timeoutMs?: number }>,
+    /** `out`: a file for the step's output (a database dump) instead of the job's text. */
+    steps: Array<{ cmd: string; args: string[]; cwd?: string; timeoutMs?: number; out?: string }>,
     opts: { file?: string; after?: (job: Job) => void } = {}
   ): Job {
     const busy = this.running(key)
@@ -116,12 +118,21 @@ export class Jobs {
             },
             step.timeoutMs ?? 30 * 60_000
           )
-          child.stdout.on('data', (d: Buffer) => write(d.toString()))
+          const out = step.out ? fs.createWriteStream(step.out) : undefined
+          if (out) child.stdout.pipe(out)
+          else child.stdout.on('data', (d: Buffer) => write(d.toString()))
           child.stderr.on('data', (d: Buffer) => write(d.toString()))
           child.on('error', (err) => write(`\n${err.message}\n`))
           child.on('close', (c) => {
             clearTimeout(timer)
-            resolve(c ?? 1)
+            if (!out || !step.out) return resolve(c ?? 1)
+            const file = step.out
+            // The file is whole once its stream has finished; a failed step leaves none.
+            out.end(() => {
+              if (c !== 0) fs.rmSync(file, { force: true })
+              else write(`(${Math.round(fs.statSync(file).size / 1024)} KB written to ${file})\n`)
+              resolve(c ?? 1)
+            })
           })
         })
         job.code = code

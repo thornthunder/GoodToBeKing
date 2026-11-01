@@ -24,3 +24,4 @@ config/court.json
 ServerFiles/
 # The admin's own settings: folders of this machine, perhaps its first password
 admin.env
+db.env

@@ -224,7 +224,10 @@ export class Miner {
       mine.branchSteps = 0
     }
     // A new mine: to its entrance first (its first step is dug from there, within reach).
-    if (mine.steps === 0 && !(await this.walkTo(new Vec3(mine.x, mine.y, mine.z), 'the entrance'))) {
+    if (
+      mine.steps === 0 &&
+      !(await this.walkTo(new Vec3(mine.x, mine.y, mine.z), 'the entrance'))
+    ) {
       mine.lost = (mine.lost ?? 0) + 1
       if (mine.lost >= LOST_ROUNDS) mine.ended = 'unreachable'
       result.ended = mine.ended
@@ -411,7 +414,8 @@ export class Miner {
     const eyes = () => this.bot.entity.position.offset(0, 1.62, 0)
     const queue: Vec3[] = []
     for (let dx = -1; dx <= 1; dx++)
-      for (let dy = -1; dy <= 2; dy++) for (let dz = -1; dz <= 1; dz++) queue.push(f.offset(dx, dy, dz))
+      for (let dy = -1; dy <= 2; dy++)
+        for (let dz = -1; dz <= 1; dz++) queue.push(f.offset(dx, dy, dz))
     const seen = new Set<string>()
     while (queue.length && taken < VEIN && !this.cancelled) {
       const p = queue.shift() as Vec3

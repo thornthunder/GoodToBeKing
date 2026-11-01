@@ -21,6 +21,7 @@ import type { BotConfig, ServerConfig } from '../config'
 import type { CourtRoster } from '../court'
 import type { Logger } from '../logger'
 import type { BotSnapshot } from '../status'
+import { record } from '../db/history'
 import { errMsg, sleep, withTimeout } from '../util'
 import { useLanguage } from './language'
 import { BuildLog, type BuildRecord } from '../build/BuildLog'
@@ -2632,6 +2633,7 @@ export class Bot extends EventEmitter {
     for (const part of splitChatMessage(message)) {
       this.log.info(`<${this.username}> ${part}`)
       client.queue('text', buildTextPacket('chat', this.username, part))
+      record({ kind: 'chat', actor: this.username, text: part, data: { courtier: true } })
     }
   }
 
@@ -2640,6 +2642,13 @@ export class Bot extends EventEmitter {
     for (const part of splitChatMessage(message)) {
       this.log.info(`<${this.username} to ${player}> ${part}`)
       this.runCommand(`/tell "${player}" ${part}`)
+      record({
+        kind: 'chat',
+        actor: this.username,
+        target: player,
+        text: part,
+        data: { courtier: true, whisper: true },
+      })
     }
   }
 

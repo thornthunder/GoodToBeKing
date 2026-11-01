@@ -82,7 +82,10 @@ export class Cook {
   }
 
   /** Ingots from the storehouse's ore. */
-  ingots(furnaces: FurnaceSpot[], storehouse: { x: number; y: number; z: number }): Promise<number> {
+  ingots(
+    furnaces: FurnaceSpot[],
+    storehouse: { x: number; y: number; z: number }
+  ): Promise<number> {
     return this.smelt(furnaces, storehouse, ORES, FUEL)
   }
 
@@ -144,10 +147,7 @@ export class Cook {
   private async openAt(spot: FurnaceSpot): Promise<Furnace | undefined> {
     const at = spot.at
     try {
-      await withTimeout(
-        this.bot.pathfinder.goto(new goals.GoalNear(at.x, at.y, at.z, 2)),
-        30_000
-      )
+      await withTimeout(this.bot.pathfinder.goto(new goals.GoalNear(at.x, at.y, at.z, 2)), 30_000)
     } catch (err) {
       this.bot.pathfinder.setGoal(null)
       this.log.info(`could not get to the furnace at ${at}: ${errMsg(err)}`)

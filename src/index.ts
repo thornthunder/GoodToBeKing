@@ -3,6 +3,8 @@ import path from 'node:path'
 import { OllamaClient } from './ai/OllamaClient'
 import { BotManager } from './bot/BotManager'
 import { loadConfig } from './config'
+import { databaseUrl, openDatabase } from './db/Database'
+import { History, record, startHistory, stopHistory } from './db/history'
 import { closeLogFiles, createLogger, logToFiles, setLogLevel } from './logger'
 import { errMsg } from './util'
 
@@ -38,6 +40,34 @@ async function main(): Promise<void> {
     log.warn(`Ollama at ${first.ai.host} is not reachable (${errMsg(err)}); bots will stay quiet`)
   }
 
+  // The court's history goes to the database when there is one (DATABASE_URL); the court never
+  // waits for it.
+  const url = databaseUrl()
+  const division = process.env.COURT_DIVISION || 'all'
+  const world = process.env.COURT_WORLD || ''
+  const db = url
+    ? openDatabase(url, `court-${world || 'world'}-${division}`, log.child('db'))
+    : undefined
+  if (db) {
+    startHistory(
+      new History(
+        db.db,
+        db.ready,
+        {
+          world,
+          division,
+          chatDays: days(process.env.HISTORY_CHAT_DAYS, 7),
+          keepDays: days(process.env.HISTORY_DAYS, 30),
+        },
+        log.child('history')
+      )
+    )
+    record({
+      kind: 'court',
+      text: `the ${division} started: ${config.bots.map((b) => b.name).join(', ')}`,
+    })
+  }
+
   const manager = new BotManager(config, log)
 
   let shuttingDown = false
@@ -46,6 +76,9 @@ async function main(): Promise<void> {
     shuttingDown = true
     log.info(`${reason}, disconnecting bots`)
     await manager.stopAll()
+    record({ kind: 'court', text: `the ${division} stopped (${reason})` })
+    await stopHistory()
+    await db?.db.end().catch(() => {})
     await closeLogFiles()
     process.exit(0)
   }
@@ -76,6 +109,11 @@ async function main(): Promise<void> {
   }, 1_000).unref()
 
   await manager.startAll()
+}
+
+function days(value: string | undefined, fallback: number): number {
+  const n = Number(value)
+  return value && Number.isFinite(n) && n > 0 ? n : fallback
 }
 
 const STOP_FILE = process.env.STOP_FILE || '.stop'

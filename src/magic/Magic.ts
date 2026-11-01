@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { record } from '../db/history'
 import type { Place } from './places'
 import {
   BUILTIN_SPELLS,
@@ -190,13 +191,37 @@ export class Magic {
     return learned
   }
 
-  /** Cast a spell: run its commands in order, keep its gifts, count it against the hour. */
+  /**
+   * Cast a spell: run its commands in order, keep its gifts, count it against the hour. Every
+   * casting, done or not, goes into the court's history.
+   */
   async cast(
     spell: Spell,
     args: SpellArgs,
     who: { requester: string; target: string; merlin: string },
     run: RunCommand,
     now = Date.now()
+  ): Promise<{ ok: boolean; reason?: string }> {
+    const result = await this.castSteps(spell, args, who, run, now)
+    const given = Object.entries(args).filter(([k, v]) => k !== 'target' && v !== undefined)
+    record({
+      kind: 'magic',
+      actor: who.merlin,
+      target: who.target,
+      text:
+        `${spell.name}${given.length ? ` (${given.map(([k, v]) => `${k} ${String(v)}`).join(', ')})` : ''}` +
+        ` for ${who.requester}${result.ok ? '' : `: not cast, ${result.reason ?? 'it failed'}`}`,
+      data: { spell: spell.id, requester: who.requester, ok: result.ok },
+    })
+    return result
+  }
+
+  private async castSteps(
+    spell: Spell,
+    args: SpellArgs,
+    who: { requester: string; target: string; merlin: string },
+    run: RunCommand,
+    now: number
   ): Promise<{ ok: boolean; reason?: string }> {
     const spent = this.spent(spell, now)
     if (spent) return { ok: false, reason: spent }

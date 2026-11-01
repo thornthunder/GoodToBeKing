@@ -1,6 +1,7 @@
 import type { BotConfig } from '../config'
 import type { CourtMember, CourtRoster } from '../court'
 import type { Logger } from '../logger'
+import { record } from '../db/history'
 import { errMsg } from '../util'
 import { makeBlueprint, spellbookList, type Palette } from '../build/blueprints'
 import { choosePalette } from '../build/palette'
@@ -523,6 +524,13 @@ export class OllamaBrain implements Brain {
       }
       const gone = this.orders.remove(mine)
       this.log.info(`released: ${gone.map((o) => o.text).join(' ') || 'nothing'}`)
+      if (gone.length)
+        record({
+          kind: 'order',
+          actor: member.player,
+          target: this.cfg.name,
+          text: `released: ${gone.map((o) => o.text).join(' ')}`,
+        })
       return gone.length
         ? {
             ...turn,
@@ -537,6 +545,12 @@ export class OllamaBrain implements Brain {
     const verdict = judge(rank, this.topRank(), clashes)
     if (verdict.kind === 'decline') {
       const law = verdict.clashes.some((id) => id.startsWith('L'))
+      record({
+        kind: 'order',
+        actor: member.player,
+        target: this.cfg.name,
+        text: `declined: ${reading.summary} (it clashes with ${this.describe(verdict.clashes)})`,
+      })
       return {
         note:
           `(${giver} asks: "${reading.summary}" But that clashes with ${this.describe(verdict.clashes)}. ` +
@@ -895,6 +909,13 @@ export class OllamaBrain implements Brain {
         giver
       )
       this.log.info(`learned the spell ${spell.id} from ${giver}: ${JSON.stringify(spell.steps)}`)
+      record({
+        kind: 'order',
+        actor: member.player,
+        target: this.cfg.name,
+        text: `taught the spell ${spell.name}: ${spell.does}`,
+        data: { spell: spell.id },
+      })
       return {
         ...turn,
         note: `(You have learned the spell "${spell.name}". Say so proudly in one short sentence.)`,
@@ -908,6 +929,12 @@ export class OllamaBrain implements Brain {
       this.rules.remove(replaces.filter((id) => id.startsWith('R')))
       const rule = this.rules.add({ from: member.player, by: giver, text: reading.summary })
       this.log.info(`new rule ${rule.id} from ${giver}: ${rule.text}`)
+      record({
+        kind: 'order',
+        actor: member.player,
+        text: `rule: ${rule.text}`,
+        data: { rule: rule.id },
+      })
       return {
         ...turn,
         note: join(
@@ -933,6 +960,13 @@ export class OllamaBrain implements Brain {
       if (post) this.orders.remove((o) => o.post !== undefined)
       const order = this.orders.add({ from: member.player, by: giver, text: reading.summary, post })
       this.log.info(`order ${order.id} from ${giver}: ${order.text}`)
+      record({
+        kind: 'order',
+        actor: member.player,
+        target: this.cfg.name,
+        text: `order: ${order.text}`,
+        data: { order: order.id },
+      })
     }
     if (this.cfg.reportsTo) this.orders.addReport(`${giver} gave me an order: ${reading.summary}`)
     const stays =
