@@ -22,3 +22,5 @@ config/court.json
 
 # Copies of the Bedrock server's own files, edited here and uploaded by hand
 ServerFiles/
+# The admin's own settings: folders of this machine, perhaps its first password
+admin.env

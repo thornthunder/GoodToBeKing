@@ -2,6 +2,7 @@ import 'dotenv/config'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { SkinConfig } from './bot/skin'
+import { applyBotEdits, readBotEdits } from './botEdits'
 import type { Zone } from './build/site'
 import { loadCourt, type CourtConfig } from './court'
 import { isLogLevel, type LogLevel } from './logger'
@@ -269,6 +270,16 @@ export function mergeBotConfig(base: BotConfig, override: BotOverride): BotConfi
   } as BotConfig
 }
 
+/**
+ * The admin's edits to the bots (see botEdits.ts): BOTS_EDITS, else bots.edits.json in the
+ * folder both worlds share (one court, two worlds), else in .state.
+ */
+export function botEditsFile(): string {
+  return path.resolve(
+    env('BOTS_EDITS') ?? path.join(env('SHARED_STATE_DIR') ?? '.state', 'bots.edits.json')
+  )
+}
+
 export function loadConfig(): AppConfig {
   const base = defaultBotConfig()
   let bots: BotConfig[] = [base]
@@ -280,7 +291,10 @@ export function loadConfig(): AppConfig {
     if (!Array.isArray(parsed) || parsed.length === 0) {
       throw new Error(`${file} must contain a non-empty JSON array of bot overrides`)
     }
-    bots = parsed.map((override: BotOverride) => mergeBotConfig(base, override))
+    // The admin's changes (src/admin) on top of the file in git.
+    const edited = applyBotEdits(parsed as Array<BotOverride & Record<string, unknown>>, readBotEdits(botEditsFile()))
+    if (edited.length === 0) throw new Error('the admin left no bot in the court')
+    bots = edited.map((override: BotOverride) => mergeBotConfig(base, override))
   }
 
   const names = new Set<string>()

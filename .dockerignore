@@ -10,3 +10,4 @@ ServerFiles
 .command
 .stop
 *.log
+admin.env

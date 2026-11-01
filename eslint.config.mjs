@@ -15,4 +15,28 @@ export default defineConfig([
       '@typescript-eslint/consistent-type-imports': 'warn',
     },
   },
+  {
+    // The admin's page (src/admin/ui): plain browser modules, no build step.
+    files: ['src/admin/ui/**/*.js'],
+    languageOptions: {
+      sourceType: 'module',
+      globals: Object.fromEntries(
+        [
+          'window',
+          'document',
+          'location',
+          'fetch',
+          'console',
+          'setTimeout',
+          'clearTimeout',
+          'setInterval',
+          'clearInterval',
+          'URLSearchParams',
+          'Node',
+          'Event',
+          'structuredClone',
+        ].map((name) => [name, 'readonly'])
+      ),
+    },
+  },
 ])

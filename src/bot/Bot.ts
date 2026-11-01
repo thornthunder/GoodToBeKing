@@ -20,6 +20,7 @@ import { mentionsName, splitChatMessage } from '../ai/text'
 import type { BotConfig, ServerConfig } from '../config'
 import type { CourtRoster } from '../court'
 import type { Logger } from '../logger'
+import type { BotSnapshot } from '../status'
 import { errMsg, sleep, withTimeout } from '../util'
 import { useLanguage } from './language'
 import { BuildLog, type BuildRecord } from '../build/BuildLog'
@@ -272,6 +273,8 @@ export class Bot extends EventEmitter {
   /** Out fetching something for a royal (survival). */
   private gatherer?: Gatherer
   private gathering = false
+  /** What the errand under way is (for the admin's view of the court). */
+  private errand = ''
   /** Taken a hall job (busy from the moment it takes it, not only once it builds). */
   private onHallWork = false
   /** Builds by hand in survival (the hall's roof, floor, light and door). */
@@ -565,6 +568,7 @@ export class Bot extends EventEmitter {
     // Busy meanwhile: once the home was a long walk from the storehouse, the hungry were called
     // home halfway there every minute, and never ate.
     this.gathering = true
+    this.errand = 'fetching food'
     try {
       await gatherer.withChest(chest, async (window) => {
         let left = 4
@@ -849,6 +853,63 @@ export class Bot extends EventEmitter {
       sword: bestSword(items),
       shield: items.includes('shield') || slot(OFFHAND_INDEX) === 'shield',
     }
+  }
+
+  /** What this bot is and does right now, for the admin's view of the court (src/status.ts). */
+  snapshot(): BotSnapshot {
+    const body = this.body
+    const spawned = Boolean(body) && this.state.status === 'spawned'
+    const post = this.brain.post?.()
+    const walking = this.movement?.current()
+    const doing = !spawned
+      ? undefined
+      : body?.isSleeping
+        ? 'asleep'
+        : this.building || this.mason?.busy
+          ? 'building'
+          : this.onHallWork || this.handbuilder?.busy
+            ? 'hall work'
+            : this.patrol
+              ? 'on patrol'
+              : this.gathering
+                ? this.errand || 'on an errand'
+                : this.survival?.busy
+                  ? 'looking after itself'
+                  : walking
+                    ? `${walking.kind} ${walking.target}`
+                    : undefined
+    const round = (n: number) => Math.round(n * 10) / 10
+    const p = this.position()
+    const spawn = this.state.spawnPoint
+    return {
+      name: this.cfg.name,
+      role: this.cfg.role,
+      division: this.cfg.division ?? 'household',
+      status: this.state.status,
+      ...(p ? { position: { x: round(p.x), y: round(p.y), z: round(p.z) } } : {}),
+      ...(spawned && body ? { health: body.health, food: body.food } : {}),
+      ...(spawned ? { gameMode: this.gameMode() } : {}),
+      free: this.isFree(),
+      ...(doing ? { doing } : {}),
+      ...(post ? { post: post.type === 'follow' ? `follow ${post.target}` : 'stay' } : {}),
+      ...(spawned ? { gear: this.gear() } : {}),
+      ...(spawn !== undefined
+        ? { spawnPoint: spawn ? { x: spawn.x, y: spawn.y, z: spawn.z } : null }
+        : {}),
+    }
+  }
+
+  /** Players online, with where they stand when in sight. */
+  playersOnline(): Array<{ name: string; position?: { x: number; y: number; z: number } }> {
+    const round = (n: number) => Math.round(n * 10) / 10
+    return [...this.state.players.values()]
+      .filter((p) => p.name !== this.cfg.name)
+      .map((p) => ({
+        name: p.name,
+        ...(p.position
+          ? { position: { x: round(p.position.x), y: round(p.position.y), z: round(p.position.z) } }
+          : {}),
+      }))
   }
 
   /** Is this player on the server (seen in the player list)? */
@@ -1176,6 +1237,7 @@ export class Bot extends EventEmitter {
       return 0
     }
     this.gathering = true
+    this.errand = `fetching ${material}`
     this.pauseWorks()
     this.dutyFollowing = false
     this.movement?.stop()
@@ -1422,6 +1484,7 @@ export class Bot extends EventEmitter {
     const body = this.body
     if (!gatherer || !from || !to || !body || this.gathering || !byHand(this.gameMode())) return 0
     this.gathering = true
+    this.errand = 'moving the stores'
     this.pauseWorks()
     this.dutyFollowing = false
     this.movement?.stop()
@@ -1521,6 +1584,7 @@ export class Bot extends EventEmitter {
     const chest = this.household?.storehouse
     if (!hunter || !chest || this.gathering || !byHand(this.gameMode())) return 0
     this.gathering = true
+    this.errand = 'hunting'
     this.pauseWorks()
     this.dutyFollowing = false
     this.movement?.stop()
@@ -1567,6 +1631,7 @@ export class Bot extends EventEmitter {
       )
     }
     this.gathering = true
+    this.errand = 'farming'
     this.pauseWorks()
     this.dutyFollowing = false
     this.movement?.stop()
@@ -1623,6 +1688,7 @@ export class Bot extends EventEmitter {
     const at = waterCell(farm)
     if (!at) return false
     this.gathering = true
+    this.errand = 'watering the field'
     this.pauseWorks()
     this.dutyFollowing = false
     this.movement?.stop()
@@ -1782,6 +1848,7 @@ export class Bot extends EventEmitter {
       this.log.info(`the court fishes at ${spot.water.join(',')}`)
     }
     this.gathering = true
+    this.errand = 'fishing'
     this.pauseWorks()
     this.dutyFollowing = false
     this.movement?.stop()
@@ -1820,6 +1887,7 @@ export class Bot extends EventEmitter {
       this.log.info(`laid out a grove of ${grove.spots.length} trees near home`)
     }
     this.gathering = true
+    this.errand = 'tending the grove'
     this.pauseWorks()
     this.dutyFollowing = false
     this.movement?.stop()
@@ -1889,6 +1957,7 @@ export class Bot extends EventEmitter {
       this.log.info(`started a mine at ${mine.x},${mine.y},${mine.z}`)
     }
     this.gathering = true
+    this.errand = 'mining'
     this.pauseWorks()
     this.dutyFollowing = false
     this.movement?.stop()
@@ -1967,6 +2036,7 @@ export class Bot extends EventEmitter {
     const wanted = this.outfitWanted()
     if (!wanted.sword && wanted.armour.length === 0) return false
     this.gathering = true
+    this.errand = 'arming'
     const log = this.log.child('arms')
     let made = 0
     try {
@@ -2144,6 +2214,7 @@ export class Bot extends EventEmitter {
       .sort((a, b) => Number(b.own) - Number(a.own) || a.at.distanceTo(me) - b.at.distanceTo(me))
     if (!furnaces.length) return 0
     this.gathering = true
+    this.errand = 'at the furnace'
     this.pauseWorks()
     this.dutyFollowing = false
     this.movement?.stop()

@@ -8,7 +8,9 @@
 # this world's .state; one process would have to run all sixteen bots on one thread.
 services:
   court:
-    build: .
+    build:
+      context: .
+      target: court
     image: goodtobeking-court
     container_name: goodtobeking-court
     restart: unless-stopped

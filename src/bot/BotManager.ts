@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { monitorEventLoopDelay } from 'node:perf_hooks'
 import { CourtMemory } from '../ai/CourtMemory'
 import { CourtRules, OrderBook, confirmation, rankOf } from '../ai/orders'
 import type { ChatEvent } from '../ai/Brain'
@@ -65,6 +66,7 @@ import { groveNeed } from '../build/grove'
 import { FOODS } from './survival'
 import type { HallWork } from '../ai/Brain'
 import { ChatFloor, FilePartners } from './ChatFloor'
+import { writeStatus } from '../status'
 
 /** Runtime state that should survive restarts (git-ignored). */
 const STATE_DIR = '.state'
@@ -85,6 +87,8 @@ const DIVISION = process.env.COURT_DIVISION as 'household' | 'army' | undefined
 /** The household's mind keeps house, the works and the estate; the army only follows them. */
 const HOUSEHOLD = DIVISION !== 'army'
 
+/** How often this process writes its status for the admin. */
+const STATUS_MS = 5_000
 /** A palace a royal orders goes up within this many blocks of the spot they chose. */
 const ORDERED_RADIUS = 48
 /** A new home further than this from the old one: the court moves house. */
@@ -131,6 +135,10 @@ export class BotManager {
   readonly bots: Bot[] = []
   works?: Works
   private worksTimer?: NodeJS.Timeout
+  /** Writes this process's status for the admin (see status.ts). */
+  private statusTimer?: NodeJS.Timeout
+  private readonly lag = monitorEventLoopDelay({ resolution: 20 })
+  private readonly startedAt = Date.now()
   private lastChatter = 0
   private lastRoyalLine = 0
   private milestone = 0
@@ -2285,6 +2293,9 @@ export class BotManager {
 
   /** Connect bots one after another; a failure does not stop the others (auto-reconnect takes over). */
   async startAll(staggerMs = 2_000): Promise<void> {
+    this.lag.enable()
+    this.statusTimer = setInterval(() => this.writeStatus(), STATUS_MS)
+    this.statusTimer.unref()
     // The court is in one world; Merlin in every one.
     const away = this.bots.filter((b) => !this.inThisWorld(b))
     for (const bot of away) this.away.add(bot)
@@ -2389,8 +2400,48 @@ export class BotManager {
     })
   }
 
+  /** What this process is and does now, for the admin (`.state/status-<division>.json`). */
+  private writeStatus(): void {
+    try {
+      const first = this.bots.find((b) => b.state.status === 'spawned')
+      const mem = process.memoryUsage()
+      const merlin = this.bots.find((b) => b.cfg.magic && b.state.status === 'spawned')
+      writeStatus(path.join(STATE_DIR, `status-${DIVISION ?? 'all'}.json`), {
+        at: Date.now(),
+        division: DIVISION ?? 'all',
+        ...(WORLD ? { world: WORLD } : {}),
+        ...(this.presence ? { courtWorld: this.presence.world } : {}),
+        process: {
+          pid: process.pid,
+          startedAt: this.startedAt,
+          rssMb: Math.round(mem.rss / 1048576),
+          heapMb: Math.round(mem.heapUsed / 1048576),
+          lagMs: Math.round(this.lag.mean / 1e6),
+        },
+        bots: this.bots.map((b) => ({
+          ...b.snapshot(),
+          ...(this.away.has(b) ? { status: 'away' } : {}),
+        })),
+        players: (first?.playersOnline() ?? []).map((p) => {
+          const royal = this.court.find(p.name)
+          return { ...p, ...(royal ? { title: royal.title } : {}) }
+        }),
+        ...(this.household.home
+          ? { home: { x: this.household.home.x, y: this.household.home.y, z: this.household.home.z } }
+          : {}),
+        underway: [...this.underway],
+        resting: [...this.resting].filter(([, until]) => until > Date.now()).map(([kind]) => kind),
+        ...(merlin ? { magicLeft: merlin.magicLeft() } : {}),
+      })
+      this.lag.reset()
+    } catch (err) {
+      this.log.debug(`could not write the status: ${errMsg(err)}`)
+    }
+  }
+
   async stopAll(): Promise<void> {
     clearInterval(this.worksTimer)
+    clearInterval(this.statusTimer)
     await Promise.all(this.bots.map((bot) => bot.disconnect('Shutting down')))
   }
 }

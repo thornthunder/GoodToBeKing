@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CourtRules, OrderBook, confirmation, judge, rankOf } from './orders'
 
 const KING = rankOf('king')
@@ -75,6 +75,32 @@ describe('the order book', () => {
     expect(new CourtRules(file).rules.map((r) => `${r.id} ${r.text}`)).toEqual([
       'R1 Nobody digs in the garden.',
     ])
+  })
+
+  it('sees what the other world or the admin changed in its file', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'orders-'))
+    const file = path.join(dir, 'o.json')
+    const book = new OrderBook(file)
+    book.add({ from: 'BigDad', by: 'the King', text: 'Stay by the gate.', post: { type: 'stay' } })
+    expect(book.post()).toBeDefined()
+    // The admin takes the order away.
+    const saved = JSON.parse(fs.readFileSync(file, 'utf8')) as { orders: unknown[] }
+    fs.writeFileSync(file, JSON.stringify({ ...saved, orders: [] }))
+    fs.utimesSync(file, new Date(), new Date(Date.now() + 5_000))
+    const now = Date.now()
+    vi.spyOn(Date, 'now').mockReturnValue(now + 3_000)
+    try {
+      expect(book.post()).toBeUndefined()
+    } finally {
+      vi.restoreAllMocks()
+    }
+    // Two courts on one rules file: neither writes over the other's rule.
+    const rules = path.join(dir, 'r.json')
+    const here = new CourtRules(rules)
+    const there = new CourtRules(rules)
+    here.add({ from: 'BigDad', by: 'the King', text: 'Nobody digs in the garden.' })
+    there.add({ from: 'BigDad', by: 'the King', text: 'Torches by every door.' })
+    expect(new CourtRules(rules).rules.map((r) => r.id)).toEqual(['R1', 'R2'])
   })
 })
 

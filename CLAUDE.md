@@ -125,6 +125,31 @@ a portal (`.state/army-portals.json`, `watchPortals`). The new courtiers' skins 
 painted by `scripts/make-court-skins.ts` (soldiers in open kettle hats so hair and faces show,
 Sarge's gold sleeve stripes, Joan's dress and kerchief, Wat's tunic and straw hat).
 
+### The admin (web page)
+
+`src/admin` is a web page and JSON API for every lever above (the King's wish, 2026-11-01):
+each world's live court, commands (the command files, built and checked by `admin/commands.ts`),
+household, works, magic, army, logs and `.env` settings (`admin/settings.ts` lists every setting
+the court reads; a test keeps it complete), the bots, the royal roster, memories, orders and
+rules, the Ollama servers (never loads, pulls or unloads a model; the test chat asks as the court
+asks a shared model), the local Bedrock server (console, server.properties, start/stop),
+containers (start/stop/restart, apply settings = `compose up -d`, rebuild), the court's scripts as
+tools (in the world's court container, one per world: they join as Surveyor), backups and an audit
+log. It runs in its own container (`compose.admin.yaml`, the Dockerfile's `admin` stage, one per
+machine): `docker compose -f compose.admin.yaml --env-file admin.env up -d --build`
+(`admin.env` is git-ignored, see `admin.env.example`). Each world's checkout, the shared folder,
+the server's folder and the backups are mounted at their host paths, with the Docker socket, so
+compose runs in a checkout as on the host; whoever signs in can do what the docker group can.
+One password (scrypt hash in `ADMIN_DATA`; made at first start into `first-password.txt` unless
+`ADMIN_PASSWORD` is set), sessions in memory, an `X-Admin` header on every change, strict CSP.
+The page is plain browser modules in `src/admin/ui` (no build step; every text set as text).
+Each court process writes `.state/status-<mind>.json` every 5 s (`status.ts`, `Bot.snapshot`).
+The admin's bot changes go to `bots.edits.json` in the shared folder (`botEdits.ts`, merged over
+`config/bots.json` at start), so deploys never meet local changes in a checkout. Orders and rules
+re-read their files when changed elsewhere. Starting and stopping the systemd Bedrock server goes
+through `<server>/.control`, carried out by root's `bds-control` (a systemd path unit;
+`sudo server/install-bds-control.sh bds-test /home/jean/testserver`, once).
+
 ### Stopping a running app
 
 Create a file named `.stop` in the project root. The app checks for it every second, sends

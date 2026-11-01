@@ -1,0 +1,34 @@
+# The court's admin: a web page to watch and steer the courts of every world, their bots, the
+# Ollama servers, the local Bedrock server and the court's tools (see src/admin/main.ts).
+# One admin for the whole machine, run from any one checkout:
+#   cp admin.env.example admin.env                      (and fill it in)
+#   docker compose -f compose.admin.yaml --env-file admin.env up -d --build
+#   docker compose -f compose.admin.yaml --env-file admin.env logs -f
+#
+# It mounts each world's checkout (and the shared folder, the local server's folder and the
+# backups) at the same path it has on the host, and the Docker socket, so it runs docker compose
+# in a checkout as one would in a shell on the host. Whoever signs in can do what the host's
+# docker group can: keep it to the family's own network, behind its password.
+name: goodtobeking-admin
+services:
+  admin:
+    build:
+      context: .
+      target: admin
+    image: goodtobeking-admin
+    container_name: goodtobeking-admin
+    restart: unless-stopped
+    # Listens on the machine's own address; reaches Ollama and the game servers as the court does.
+    network_mode: host
+    env_file: admin.env
+    # The host's docker group, for the socket (getent group docker).
+    group_add: ['${DOCKER_GID:?set DOCKER_GID in admin.env and pass --env-file admin.env}']
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${ADMIN_DATA_DIR:?set ADMIN_DATA_DIR in admin.env}:/data
+      - ${WORLD_DIR_1:?set WORLD_DIR_1 in admin.env}:${WORLD_DIR_1}
+      - ${WORLD_DIR_2:-/dev/null}:${WORLD_DIR_2:-/dev/null-world-2}
+      - ${SHARED_DIR:?set SHARED_DIR in admin.env}:${SHARED_DIR}
+      - ${SERVER_DIR:-/dev/null}:${SERVER_DIR:-/dev/null-server}
+      - ${ADMIN_BACKUPS:?set ADMIN_BACKUPS in admin.env}:${ADMIN_BACKUPS}
+      - /etc/localtime:/etc/localtime:ro

@@ -84,37 +84,81 @@ interface BookData {
   reports: string[]
 }
 
-/** One bot's standing orders and the reports it owes its superior. File-backed. */
-export class OrderBook {
-  private data: BookData = { next: 1, orders: [], reports: [] }
+/**
+ * A JSON file read again when someone else changed it: the court of the other world, or the admin
+ * (src/admin). Looked at every RELOAD_MS at most, and always before a change is written, so a
+ * change made elsewhere is not written over.
+ */
+class FileCopy<T> {
+  private mtime = 0
+  private checkedAt = 0
 
   constructor(
-    private readonly file?: string,
-    private readonly max = 12
-  ) {
-    if (file && fs.existsSync(file)) {
-      try {
-        const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<BookData>
-        this.data = {
-          next: parsed.next ?? 1,
-          orders: parsed.orders ?? [],
-          reports: parsed.reports ?? [],
-        }
-      } catch {
-        // A broken file: start with an empty book rather than crash.
-      }
+    private readonly file: string | undefined,
+    private readonly parse: (raw: unknown) => T
+  ) {}
+
+  /** The file's content if it changed since last read (or `force`d), else undefined. */
+  changed(force = false): T | undefined {
+    if (!this.file) return undefined
+    const now = Date.now()
+    if (!force && now - this.checkedAt < RELOAD_MS) return undefined
+    this.checkedAt = now
+    try {
+      const mtime = fs.statSync(this.file).mtimeMs
+      if (mtime === this.mtime) return undefined
+      this.mtime = mtime
+      return this.parse(JSON.parse(fs.readFileSync(this.file, 'utf8')))
+    } catch {
+      // Missing or broken: keep what is in memory rather than crash.
+      return undefined
     }
   }
 
+  write(data: unknown): void {
+    if (!this.file) return
+    fs.mkdirSync(path.dirname(this.file), { recursive: true })
+    fs.writeFileSync(this.file, JSON.stringify(data, null, 2))
+    this.mtime = fs.statSync(this.file).mtimeMs
+  }
+}
+
+/** Orders and rules files are looked at this often for changes made elsewhere. */
+const RELOAD_MS = 2_000
+
+/** One bot's standing orders and the reports it owes its superior. File-backed. */
+export class OrderBook {
+  private data: BookData = { next: 1, orders: [], reports: [] }
+  private readonly copy: FileCopy<BookData>
+
+  constructor(
+    file?: string,
+    private readonly max = 12
+  ) {
+    this.copy = new FileCopy(file, (raw) => {
+      const parsed = (raw ?? {}) as Partial<BookData>
+      return { next: parsed.next ?? 1, orders: parsed.orders ?? [], reports: parsed.reports ?? [] }
+    })
+    this.fresh(true)
+  }
+
+  /** The book as last written, by this court or elsewhere. */
+  private fresh(force = false): BookData {
+    const read = this.copy.changed(force)
+    if (read) this.data = read
+    return this.data
+  }
+
   get orders(): Order[] {
-    return [...this.data.orders]
+    return [...this.fresh().orders]
   }
 
   find(id: string): Order | undefined {
-    return this.data.orders.find((o) => o.id === id)
+    return this.fresh().orders.find((o) => o.id === id)
   }
 
   add(order: Omit<Order, 'id' | 'at'>, at = Date.now()): Order {
+    this.fresh(true)
     const added = { ...order, id: `O${this.data.next++}`, at }
     this.data.orders.push(added)
     while (this.data.orders.length > this.max) this.data.orders.shift()
@@ -124,6 +168,7 @@ export class OrderBook {
 
   /** Remove orders by id or by test; returns what was removed. */
   remove(which: string[] | ((o: Order) => boolean)): Order[] {
+    this.fresh(true)
     const test = Array.isArray(which) ? (o: Order) => which.includes(o.id) : which
     const gone = this.data.orders.filter(test)
     if (gone.length === 0) return []
@@ -134,59 +179,61 @@ export class OrderBook {
 
   /** The order that keeps the body busy, if any (the newest). */
   post(): Order | undefined {
-    return [...this.data.orders].reverse().find((o) => o.post)
+    return [...this.fresh().orders].reverse().find((o) => o.post)
   }
 
   addReport(text: string): void {
+    this.fresh(true)
     this.data.reports.push(text)
     this.save()
   }
 
   get reports(): string[] {
-    return [...this.data.reports]
+    return [...this.fresh().reports]
   }
 
   /** The reports were given: forget them. */
   reported(): void {
-    if (this.data.reports.length === 0) return
+    if (this.fresh(true).reports.length === 0) return
     this.data.reports = []
     this.save()
   }
 
   private save(): void {
-    if (!this.file) return
-    fs.mkdirSync(path.dirname(this.file), { recursive: true })
-    fs.writeFileSync(this.file, JSON.stringify(this.data, null, 2))
+    this.copy.write(this.data)
   }
 }
 
 /** The rules the royal family laid down for the whole court. File-backed, shared by all bots. */
 export class CourtRules {
   private data: { next: number; rules: Rule[] } = { next: 1, rules: [] }
+  private readonly copy: FileCopy<{ next: number; rules: Rule[] }>
 
-  constructor(private readonly file?: string) {
-    if (file && fs.existsSync(file)) {
-      try {
-        const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as {
-          next?: number
-          rules?: Rule[]
-        }
-        this.data = { next: parsed.next ?? 1, rules: parsed.rules ?? [] }
-      } catch {
-        // A broken file: no rules rather than a crash.
-      }
-    }
+  constructor(file?: string) {
+    this.copy = new FileCopy(file, (raw) => {
+      const parsed = (raw ?? {}) as { next?: number; rules?: Rule[] }
+      return { next: parsed.next ?? 1, rules: parsed.rules ?? [] }
+    })
+    this.fresh(true)
+  }
+
+  /** The rules as last written, by this court or elsewhere. */
+  private fresh(force = false): { next: number; rules: Rule[] } {
+    const read = this.copy.changed(force)
+    if (read) this.data = read
+    return this.data
   }
 
   get rules(): Rule[] {
-    return [...this.data.rules]
+    return [...this.fresh().rules]
   }
 
   find(id: string): Rule | undefined {
-    return this.data.rules.find((r) => r.id === id)
+    return this.fresh().rules.find((r) => r.id === id)
   }
 
   add(rule: Omit<Rule, 'id' | 'at'>, at = Date.now()): Rule {
+    this.fresh(true)
     const added = { ...rule, id: `R${this.data.next++}`, at }
     this.data.rules.push(added)
     this.save()
@@ -194,6 +241,7 @@ export class CourtRules {
   }
 
   remove(ids: string[]): Rule[] {
+    this.fresh(true)
     const gone = this.data.rules.filter((r) => ids.includes(r.id))
     if (gone.length === 0) return []
     this.data.rules = this.data.rules.filter((r) => !gone.includes(r))
@@ -202,9 +250,7 @@ export class CourtRules {
   }
 
   private save(): void {
-    if (!this.file) return
-    fs.mkdirSync(path.dirname(this.file), { recursive: true })
-    fs.writeFileSync(this.file, JSON.stringify(this.data, null, 2))
+    this.copy.write(this.data)
   }
 }
 
