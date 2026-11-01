@@ -224,6 +224,7 @@ export function routes(router: Router, ctx: Context): void {
       containers,
       version,
       presence: readJson(w.shared('presence.json')),
+      courtWorldHere: w.env().get('COURT_WORLD'),
       divisions: w.divisions(),
     })
   })

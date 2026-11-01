@@ -80,8 +80,12 @@ function gear(g) {
   if (!g) return '—'
   const parts = ['head', 'chest', 'legs', 'feet'].map((k) => g[k]).filter(Boolean)
   return [
-    g.sword ?? 'no sword',
-    parts.length ? `${parts.length}/4 ${[...new Set(parts)].join('/')}` : 'no armour',
+    g.sword
+      ? /sword|axe/.test(g.sword)
+        ? g.sword.replace(/_/g, ' ')
+        : `${g.sword} sword`
+      : 'no sword',
+    parts.length ? `${[...new Set(parts)].join('/')} armour (${parts.length}/4)` : 'no armour',
     g.shield ? 'shield' : '',
   ]
     .filter(Boolean)
@@ -216,7 +220,7 @@ async function courtTab(body, w, _rest, worlds) {
 function courtWhere(s, w, worlds) {
   const p = s.presence
   if (!p) return null
-  const here = s.status.find((m) => m.world)?.world
+  const here = s.courtWorldHere
   const others = worlds.filter((x) => x.id !== w.id)
   return h(
     'div',

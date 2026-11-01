@@ -2406,6 +2406,8 @@ export class BotManager {
       const first = this.bots.find((b) => b.state.status === 'spawned')
       const mem = process.memoryUsage()
       const merlin = this.bots.find((b) => b.cfg.magic && b.state.status === 'spawned')
+      // Players, not courtiers (of either mind).
+      const courtiers = new Set(this.cfg.bots.map((b) => b.name.toLowerCase()))
       writeStatus(path.join(STATE_DIR, `status-${DIVISION ?? 'all'}.json`), {
         at: Date.now(),
         division: DIVISION ?? 'all',
@@ -2422,12 +2424,20 @@ export class BotManager {
           ...b.snapshot(),
           ...(this.away.has(b) ? { status: 'away' } : {}),
         })),
-        players: (first?.playersOnline() ?? []).map((p) => {
-          const royal = this.court.find(p.name)
-          return { ...p, ...(royal ? { title: royal.title } : {}) }
-        }),
+        players: (first?.playersOnline() ?? [])
+          .filter((p) => !courtiers.has(p.name.toLowerCase()))
+          .map((p) => {
+            const royal = this.court.find(p.name)
+            return { ...p, ...(royal ? { title: royal.title } : {}) }
+          }),
         ...(this.household.home
-          ? { home: { x: this.household.home.x, y: this.household.home.y, z: this.household.home.z } }
+          ? {
+              home: {
+                x: this.household.home.x,
+                y: this.household.home.y,
+                z: this.household.home.z,
+              },
+            }
           : {}),
         underway: [...this.underway],
         resting: [...this.resting].filter(([, until]) => until > Date.now()).map(([kind]) => kind),
