@@ -87,4 +87,4 @@ bot.on('error', (e) => console.log('error', e.message))
 setTimeout(() => {
   console.log('timed out')
   process.exit(2)
-}, 90_000)
+}, (90 + 2 * waitSeconds) * 1000)
