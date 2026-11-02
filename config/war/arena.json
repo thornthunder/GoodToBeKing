@@ -4,9 +4,9 @@
   "raidCycles": 2,
   "rounds": 3,
   "series": 3,
-  "seed": 1234567,
+  "shared": true,
   "bases": {
-    "blue": { "home": { "x": -54, "y": 72, "z": -82 } },
-    "green": { "home": { "x": 82, "y": 70, "z": 46 } }
+    "blue": { "home": { "x": -6, "y": 64, "z": 398 } },
+    "green": { "home": { "x": 178, "y": 64, "z": 454 } }
   }
 }

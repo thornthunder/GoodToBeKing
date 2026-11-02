@@ -236,8 +236,14 @@ leagues improve through a season and has a hypothesis he keeps to himself till t
   (`score`: items, then kills; deaths merged from both sides' accounts), has each side draw its
   lessons, and writes `.war/rounds/series-N-round-M.json` with both accounts. `WAR_BUILD_CYCLES`,
   `WAR_RAID_CYCLES`, `WAR_ROUNDS`, `WAR_SERIES` override `config/war/arena.json` (trial rounds
-  are run with one day of peace). The war needs about five of the VM's eight cores, so it runs
-  with the Dev court stopped.
+  are run with one day of peace). The war needs about four of the VM's eight cores.
+- The first season runs in the Dev world (the King's wish after the trial, 2026-11-02: so he can
+  come and watch while the kids play), 390 blocks south of the court's home: `arena.json`
+  `shared: true` makes the referee touch only the two bases (no `time set`, no `weather`, no
+  killing of drops), `war.env` points at the Dev server and `~/testserver`, both courts ignore
+  each other's bots (`IGNORE_PLAYERS` on each side: what befalls an ignored player is not written
+  in the history either), and the Dev army is stopped meanwhile (CPU, and `max-players` 25). The
+  war's own server (`~/warserver`, seed 1234567) stays for a season of its own.
 
 ### Stopping a running app
 
