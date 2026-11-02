@@ -13,9 +13,10 @@ case ${1:-} in
     from=${2:?usage: war-server.sh make <test server dir> <war server dir>}
     dir=${3:?usage: war-server.sh make <test server dir> <war server dir>}
     mkdir -p "$dir"
-    # The program and its data, not the test world nor its players.
-    rsync -a --exclude worlds --exclude console.in --exclude console.log --exclude '*.bak*' \
-      --exclude allowlist.json --exclude permissions.json "$from/" "$dir/"
+    # The program and its data, not the test world nor its players (no rsync on the VM).
+    cp -a "$from/." "$dir/"
+    rm -rf "$dir/worlds" "$dir/console.in" "$dir/console.log" "$dir"/*.bak* \
+      "$dir/allowlist.json" "$dir/permissions.json" "$dir/.control" "$dir/.control-result"
     sed -i -E \
       -e 's/^server-name=.*/server-name=The war game/' \
       -e 's/^server-port=.*/server-port=19134/' \
