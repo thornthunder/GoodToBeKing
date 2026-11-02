@@ -45,7 +45,8 @@ services:
     image: goodtobeking-war
     container_name: goodtobeking-war-referee
     depends_on: [blue, green]
-    restart: unless-stopped
+    # The referee exits when the season is over; only a crash brings it back.
+    restart: on-failure
     network_mode: host
     env_file: war.env
     environment:
