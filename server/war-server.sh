@@ -21,6 +21,7 @@ case ${1:-} in
       -e 's/^server-name=.*/server-name=The war game/' \
       -e 's/^server-port=.*/server-port=19134/' \
       -e 's/^server-portv6=.*/server-portv6=19135/' \
+      -e 's/^server-udp-ports=.*/server-udp-ports=19134/' \
       -e 's/^level-name=.*/level-name=war/' \
       -e 's/^gamemode=.*/gamemode=survival/' \
       -e 's/^difficulty=.*/difficulty=normal/' \
