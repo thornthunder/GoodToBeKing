@@ -16,6 +16,8 @@ const [x1, z1, x2, z2, base = 60] = process.argv.slice(2).map(Number)
 const types = process.argv.includes('types')
 /** With "json=<file>", also write every column's top block and height to a file. */
 const jsonFile = process.argv.find((a) => a.startsWith('json='))?.slice(5)
+/** With "wait=<seconds>", wait that long after spawning first (time to teleport the surveyor from the server console to the area). */
+const waitSeconds = Number(process.argv.find((a) => a.startsWith('wait='))?.slice(5) ?? 0)
 const columns: Array<{ x: number; z: number; y: number | null; block: string | null }> = []
 const LETTER: Array<[RegExp, string]> = [
   [/^grass_block$/, 'g'],
@@ -35,8 +37,10 @@ const bot = createBot({
   auth: 'offline',
   hideErrors: true,
 })
-const SKIP = /^(air|cave_air|void_air|short_grass|tall_grass|fern|large_fern|.*flower.*|poppy|dandelion|allium|cornflower|azure_bluet|oxeye_daisy|.*tulip|lily_of_the_valley|sweet_berry_bush|snow_layer|deadbush|dead_bush|vine|glow_lichen|sugar_cane|bush|leaf_litter|firefly_bush|wildflowers|short_dry_grass|tall_dry_grass)$/
+const SKIP =
+  /^(air|cave_air|void_air|short_grass|tall_grass|fern|large_fern|.*flower.*|poppy|dandelion|allium|cornflower|azure_bluet|oxeye_daisy|.*tulip|lily_of_the_valley|sweet_berry_bush|snow_layer|deadbush|dead_bush|vine|glow_lichen|sugar_cane|bush|leaf_litter|firefly_bush|wildflowers|short_dry_grass|tall_dry_grass)$/
 bot.once('spawn', async () => {
+  if (waitSeconds > 0) await new Promise((r) => setTimeout(r, waitSeconds * 1000))
   await bot.waitForChunksToLoad()
   await new Promise((r) => setTimeout(r, 3000))
   const p = bot.entity.position
@@ -68,8 +72,12 @@ bot.once('spawn', async () => {
     console.log(`${String(z).padStart(5)} ${row}`)
   }
   if (types)
-    console.log('g grass, s sand, p path, d dirt, r rock, ~ water, T tree, # castle, B other (built)')
-  const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 15)
+    console.log(
+      'g grass, s sand, p path, d dirt, r rock, ~ water, T tree, # castle, B other (built)'
+    )
+  const top = Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 15)
   console.log('top surface blocks:', top.map(([n, c]) => `${n} ${c}`).join(', '))
   if (jsonFile) fs.writeFileSync(jsonFile, JSON.stringify(columns))
   bot.quit('survey done')

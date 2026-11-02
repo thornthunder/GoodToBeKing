@@ -95,6 +95,13 @@ const DIVISION = process.env.COURT_DIVISION as 'household' | 'army' | undefined
 const HOUSEHOLD = DIVISION !== 'army'
 /** The war game (src/war): this process is one side of it (COURT_SIDE), or not at war. */
 const SIDE = warSide()
+/** Players the court neither hears nor hails (our tools' Surveyor, the war game's sides). */
+const IGNORED = new Set(
+  (process.env.IGNORE_PLAYERS ?? 'Surveyor')
+    .split(',')
+    .map((n) => n.trim().toLowerCase())
+    .filter(Boolean)
+)
 /** A raid planned for day or night sets out then, or after this long anyway (a day is 20 min). */
 const WHEN_WAIT_MS = 25 * 60_000
 
@@ -251,10 +258,7 @@ export class BotManager {
       })
       const bot = new Bot(botCfg, brain, botLog, {
         // Our own helper scripts' players (the surveyor) are ignored like fellow bots.
-        fellowBots: [
-          ...botNames,
-          ...(process.env.IGNORE_PLAYERS ?? 'Surveyor').split(',').filter(Boolean),
-        ],
+        fellowBots: [...botNames, ...IGNORED],
         enemies: SIDE?.enemy.names,
         buildLog: builds,
         floor,
@@ -750,6 +754,9 @@ export class BotManager {
       // The courtiers' own coming and going is in their status, not a line each at every restart.
       if (event.notice?.key.startsWith('multiplayer.player.') && courtier(event.notice.params[0]))
         return
+      // Nor what befalls the players the court ignores (the war game's sides in the family's
+      // world: dozens of deaths a round would fill the history).
+      if (event.notice && IGNORED.has((event.notice.params[0] ?? '').toLowerCase())) return
       return record({
         kind: 'notice',
         text: event.message,

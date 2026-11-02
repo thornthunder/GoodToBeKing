@@ -85,6 +85,7 @@ function loadArena(): Arena {
     series: num('WAR_SERIES', raw.series ?? 3),
     bases: raw.bases,
     sides,
+    ...(raw.shared ? { shared: true } : {}),
   }
 }
 

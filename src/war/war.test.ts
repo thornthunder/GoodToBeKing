@@ -410,3 +410,22 @@ describe('the sides', () => {
     expect(shrank({ dirt: 40, bread: 3 }, { dirt: 10 })).toEqual({ dirt: 30, bread: 3 })
   })
 })
+
+describe('a shared world', () => {
+  it('leaves the time, the weather and what lies about alone', () => {
+    const arena: Arena = {
+      cycleMs: 1,
+      buildCycles: 1,
+      raidCycles: 1,
+      rounds: 1,
+      series: 1,
+      bases: { blue: { home: { x: 0, y: 70, z: 0 } }, green: { home: { x: 200, y: 70, z: 0 } } },
+      sides: { blue: ['Bram'], green: ['Gareth'] },
+      shared: true,
+    }
+    const cmds = prepareCommands(arena)
+    expect(cmds.some((c) => /^(time|weather|gamerule|kill)/.test(c))).toBe(false)
+    expect(cmds.filter((c) => c.startsWith('tp '))).toHaveLength(2)
+    expect(cmds.filter((c) => c.endsWith(' chest'))).toHaveLength(2)
+  })
+})

@@ -22,6 +22,12 @@ export interface Arena {
   bases: Record<string, Base>
   /** The bots of each side, by name. */
   sides: Record<string, string[]>
+  /**
+   * The arena is in a world others play in (the family's Dev world, the King's wish, 2026-11-02:
+   * so he can come and watch): the referee touches only the two bases, never the time, the
+   * weather or what lies about.
+   */
+  shared?: boolean
 }
 
 /** The hall: this many blocks from the home to each wall; walls this high; the chest's place. */
@@ -79,14 +85,19 @@ export function musterCommands(base: Base, names: string[]): string[] {
   ])
 }
 
-/** The round's start: morning, fair weather, both bases made, nothing lying about. */
+/**
+ * The round's start: both bases made and both sides mustered; in the war's own world also
+ * morning, fair weather and nothing lying about.
+ */
 export function prepareCommands(arena: Arena): string[] {
-  const out = ['time set 1000', 'weather clear', 'gamerule showcoordinates true']
+  const out = arena.shared
+    ? []
+    : ['time set 1000', 'weather clear', 'gamerule showcoordinates true']
   for (const [side, base] of Object.entries(arena.bases)) {
     out.push(...musterCommands(base, arena.sides[side] ?? []))
     out.push(...hallCommands(base))
   }
-  out.push('kill @e[type=item]')
+  if (!arena.shared) out.push('kill @e[type=item]')
   return out
 }
 
