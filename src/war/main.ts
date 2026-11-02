@@ -229,9 +229,12 @@ class Referee {
     // The sides' bots in the world first (a teleport finds nobody otherwise).
     const start = Date.now()
     while (!this.stopping && Date.now() - start < MUSTER_MS) {
-      const spawned = SIDES.map(
-        (s) => this.status(s)?.bots.filter((b) => b.status === 'spawned').length ?? 0
-      )
+      // A status written since this began: after a restart the old files say everyone is in.
+      const spawned = SIDES.map((s) => {
+        const status = this.status(s)
+        if (!status || status.at < start) return 0
+        return status.bots.filter((b) => b.status === 'spawned').length
+      })
       if (SIDES.every((s, i) => spawned[i] >= (a.sides[s]?.length ?? 0))) break
       this.log.info(`waiting for the sides to be in the world (${spawned.join(' and ')} spawned)`)
       await sleep(20_000)
