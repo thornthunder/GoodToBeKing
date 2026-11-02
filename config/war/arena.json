@@ -1,0 +1,11 @@
+{
+  "cycleMs": 1200000,
+  "buildCycles": 10,
+  "raidCycles": 2,
+  "rounds": 3,
+  "series": 3,
+  "bases": {
+    "blue": { "home": { "x": 0, "y": 70, "z": 0 } },
+    "green": { "home": { "x": 200, "y": 70, "z": 0 } }
+  }
+}

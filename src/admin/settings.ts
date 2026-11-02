@@ -438,6 +438,84 @@ export const SECTIONS: SettingSection[] = [
       },
     ],
   },
+  {
+    id: 'war',
+    title: 'The war game',
+    help: 'Two courts, Blue and Green, raid each other’s chests on the war server (compose.war.yaml); the referee runs the season. Not settings of the family’s courts.',
+    settings: [
+      {
+        key: 'COURT_SIDE',
+        label: 'Side',
+        type: 'text',
+        managed: true,
+        help: 'blue or green: this process is one side of the war game.',
+      },
+      {
+        key: 'WAR_ENEMY_FILE',
+        label: 'Enemy bots file',
+        type: 'text',
+        help: 'The other side’s bots file; empty: config/war/<other side>.json.',
+      },
+      {
+        key: 'OLLAMA_WAR_MODEL',
+        label: 'War model',
+        type: 'text',
+        default: 'gemma4:31b',
+        help: 'Draws each side’s lessons and writes the series report (the referee).',
+      },
+      {
+        key: 'WAR_DIR',
+        label: 'War folder',
+        type: 'text',
+        managed: true,
+        help: 'The referee’s folder, with a state folder per side.',
+      },
+      {
+        key: 'WAR_SERVER_DIR',
+        label: 'War server folder',
+        type: 'text',
+        managed: true,
+        help: 'The war server’s folder (its console.in).',
+      },
+      {
+        key: 'WAR_ARENA',
+        label: 'Arena file',
+        type: 'text',
+        default: 'config/war/arena.json',
+        help: 'The bases and the season’s shape.',
+      },
+      {
+        key: 'WAR_CYCLE_MS',
+        label: 'A day (ms)',
+        type: 'number',
+        help: 'One Minecraft day in real time; empty: the arena file’s (20 minutes).',
+      },
+      {
+        key: 'WAR_BUILD_CYCLES',
+        label: 'Days of peace',
+        type: 'number',
+        help: 'Before the raid; empty: the arena file’s (10).',
+      },
+      {
+        key: 'WAR_RAID_CYCLES',
+        label: 'Days of raid',
+        type: 'number',
+        help: 'The raid lasts this long at most; empty: the arena file’s (2).',
+      },
+      {
+        key: 'WAR_ROUNDS',
+        label: 'Rounds a series',
+        type: 'number',
+        help: 'Empty: the arena file’s (3).',
+      },
+      {
+        key: 'WAR_SERIES',
+        label: 'Series',
+        type: 'number',
+        help: 'How many series the referee plays; empty: the arena file’s (3).',
+      },
+    ],
+  },
 ]
 
 export const SETTINGS: Setting[] = SECTIONS.flatMap((s) => s.settings)

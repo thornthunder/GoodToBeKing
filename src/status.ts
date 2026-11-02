@@ -26,6 +26,15 @@ export interface CourtStatus {
   resting: string[]
   /** Merlin's magic left this hour, when this process has him. */
   magicLeft?: number
+  /** The war game (src/war): this process is one side of it. */
+  war?: {
+    side: string
+    phase: string
+    done: boolean
+    brought: number
+    kills: number
+    deaths: number
+  }
 }
 
 export interface BotSnapshot {

@@ -52,6 +52,13 @@ import { chooseFishingSpot, type FishingSpot } from '../build/fishing'
 import { chooseGrove } from '../build/grove'
 import { Handbuilder } from '../build/Handbuilder'
 import {
+  Defender,
+  Raider,
+  type DefenceOrders,
+  type RaidBody,
+  type RaidOrders,
+} from '../war/raiding'
+import {
   bedCells,
   chestCells,
   doorCells,
@@ -216,6 +223,8 @@ const claimedBeds = new Map<string, string>()
 export interface BotOptions {
   /** Names of all bots run by this app: they never greet or answer each other. */
   fellowBots?: string[]
+  /** The other side's bots in the war game: never spoken to, fought when at war (src/war). */
+  enemies?: string[]
   /** Shared record of what each bot built. */
   buildLog?: BuildLog
   /** Shared: decides which bot answers a line. */
@@ -303,6 +312,10 @@ export class Bot extends EventEmitter {
   private reconnectTimer?: NodeJS.Timeout
   /** Lower-cased names of all bots run by this app; they never greet or count each other. */
   private readonly botNames: Set<string>
+  /** The other side's players in the war game (lower-cased), and this courtier's part in a raid. */
+  private readonly enemies: Set<string>
+  private raider?: Raider
+  private defender?: Defender
 
   private readonly buildLog: BuildLog
   private readonly floor?: ChatFloor
@@ -321,7 +334,10 @@ export class Bot extends EventEmitter {
     opts: BotOptions = {}
   ) {
     super()
-    this.botNames = new Set([cfg.name, ...(opts.fellowBots ?? [])].map((n) => n.toLowerCase()))
+    this.botNames = new Set(
+      [cfg.name, ...(opts.fellowBots ?? []), ...(opts.enemies ?? [])].map((n) => n.toLowerCase())
+    )
+    this.enemies = new Set((opts.enemies ?? []).map((n) => n.toLowerCase()))
     this.buildLog = opts.buildLog ?? new BuildLog()
     this.floor = opts.floor
     this.court = opts.court
@@ -404,6 +420,7 @@ export class Bot extends EventEmitter {
     if (this.state.status !== 'spawned' || !this.body || !this.mason) return false
     if (this.building || this.mason.busy || this.gathering || this.handbuilder?.busy) return false
     if (this.onHallWork || this.patrol) return false
+    if (this.raider || this.defender) return false // at war
     if (this.survival?.busy) return false
     const walking = this.movement?.current()
     if (walking && !this.dutyFollowing && walking.kind !== 'going') return false
@@ -872,13 +889,17 @@ export class Bot extends EventEmitter {
             ? 'hall work'
             : this.patrol
               ? 'on patrol'
-              : this.gathering
-                ? this.errand || 'on an errand'
-                : this.survival?.busy
-                  ? 'looking after itself'
-                  : walking
-                    ? `${walking.kind} ${walking.target}`
-                    : undefined
+              : this.raider
+                ? 'raiding'
+                : this.defender
+                  ? 'holding the chest'
+                  : this.gathering
+                    ? this.errand || 'on an errand'
+                    : this.survival?.busy
+                      ? 'looking after itself'
+                      : walking
+                        ? `${walking.kind} ${walking.target}`
+                        : undefined
     const round = (n: number) => Math.round(n * 10) / 10
     const p = this.position()
     const spawn = this.state.spawnPoint
@@ -1053,6 +1074,13 @@ export class Bot extends EventEmitter {
       guard: this.cfg.duty?.kind === 'escort',
       royals: () => this.royalPositions(),
       inside: (p) => this.household?.inHall(p) ?? false,
+      // The war game: the other side's players are foes, as this courtier's part allows.
+      enemies: () => this.enemies,
+      aggression: () => this.raider?.aggression ?? this.defender?.aggression ?? 'none',
+      defend: () => {
+        const chest = this.defender ? this.household?.storehouse : undefined
+        return chest ? new WorldVec(chest.x, chest.y, chest.z) : undefined
+      },
       fetchFood: () => this.fetchFood(),
       speak: (instruction, fallback) => this.speak(instruction, fallback),
     })
@@ -2312,6 +2340,75 @@ export class Bot extends EventEmitter {
     if (!this.patrol) return
     this.patrol.stop = true
     this.patrol = undefined
+  }
+
+  /** What a raider or defender works with (see src/war/raiding.ts). */
+  private raidBody(): RaidBody | undefined {
+    const body = this.body
+    const gatherer = this.gatherer
+    if (!body || !gatherer || !byHand(this.gameMode())) return undefined
+    return {
+      bot: body,
+      log: this.log.child('war'),
+      withChest: (chest, work) => gatherer.withChest(chest, work),
+      alive: () => this.state.status === 'spawned' && !this.died && Boolean(this.body?.entity),
+      busy: () => this.survival?.busy ?? false,
+      enemies: () =>
+        Object.values(body.entities)
+          .filter((e) => e.type === 'player' && this.enemies.has((e.username ?? '').toLowerCase()))
+          .map((e) => ({ name: e.username ?? '', position: e.position })),
+    }
+  }
+
+  /**
+   * The war game: raid the other side's chest as ordered, until the trips are done, the chest
+   * is found empty, there is no way there, or the raid is called off (`stopWar`).
+   */
+  async startRaid(orders: RaidOrders): Promise<void> {
+    const rb = this.raidBody()
+    if (!rb || this.raider || this.defender) return
+    this.dropCourtWork()
+    this.gatherer?.cancel()
+    this.dutyFollowing = false
+    this.movement?.stop()
+    const raider = new Raider(rb, orders)
+    this.raider = raider
+    this.log.info(
+      `off to raid the chest at ${fmtVec(orders.chest)} (${orders.tactic}, ${orders.trips} trips)`
+    )
+    try {
+      await raider.run()
+    } finally {
+      if (this.raider === raider) this.raider = undefined
+    }
+  }
+
+  /** The war game: hold the side's chest until the raid is called off. */
+  async startDefence(orders: DefenceOrders): Promise<void> {
+    const rb = this.raidBody()
+    if (!rb || this.raider || this.defender) return
+    this.dropCourtWork()
+    this.gatherer?.cancel()
+    this.dutyFollowing = false
+    this.movement?.stop()
+    const defender = new Defender(rb, orders)
+    this.defender = defender
+    try {
+      await defender.run()
+    } finally {
+      if (this.defender === defender) this.defender = undefined
+    }
+  }
+
+  /** The raid is over: whatever this courtier does in it stops. */
+  stopWar(): void {
+    this.raider?.cancel()
+    this.defender?.cancel()
+  }
+
+  /** At war: raiding or holding the chest. */
+  get atWar(): boolean {
+    return Boolean(this.raider || this.defender)
   }
 
   /** A guard of the royal family (duty: escort). */

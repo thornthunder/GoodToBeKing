@@ -69,6 +69,10 @@ import type { HallWork } from '../ai/Brain'
 import { ChatFloor, FilePartners } from './ChatFloor'
 import { writeStatus } from '../status'
 import type { InDatabase, SharedState } from '../db/shared'
+import { sideTitle, warSide } from '../war/side'
+import { WarBook } from '../war/War'
+import { Playbook } from '../war/playbook'
+import { planRaid, type Brief } from '../war/plan'
 
 /** Runtime state that should survive restarts (git-ignored). */
 const STATE_DIR = '.state'
@@ -89,6 +93,10 @@ const HOME_WORLD = process.env.COURT_HOME_WORLD || 'dev'
 const DIVISION = process.env.COURT_DIVISION as 'household' | 'army' | undefined
 /** The household's mind keeps house, the works and the estate; the army only follows them. */
 const HOUSEHOLD = DIVISION !== 'army'
+/** The war game (src/war): this process is one side of it (COURT_SIDE), or not at war. */
+const SIDE = warSide()
+/** A raid planned for day or night sets out then, or after this long anyway (a day is 20 min). */
+const WHEN_WAIT_MS = 25 * 60_000
 
 /** How often this process writes its status for the admin. */
 const STATUS_MS = 5_000
@@ -152,6 +160,11 @@ export class BotManager {
   private readonly court: CourtRoster
   /** The builds the royal family asked for, and who is on them. */
   readonly commissions = new CommissionBook(path.resolve(STATE_DIR, 'commissions.json'))
+  /** The war game: this side's account of it, and the lessons it has drawn (COURT_SIDE). */
+  private readonly war?: WarBook
+  private readonly playbook?: Playbook
+  /** A raid waiting for its hour (day or night); cancelled when the raid is called off. */
+  private raidWait?: { cancel: boolean }
 
   constructor(
     cfg: AppConfig,
@@ -160,6 +173,14 @@ export class BotManager {
     shared?: SharedState
   ) {
     this.cfg = cfg
+    if (SIDE) {
+      this.war = new WarBook(path.resolve(STATE_DIR, 'war.json'), SIDE.name)
+      this.war.mine = new Set(cfg.bots.map((b) => b.name.toLowerCase()))
+      this.playbook = new Playbook(path.resolve(STATE_DIR, 'playbook.json'))
+      log.info(
+        `the war game: this is the ${SIDE.name} side; the enemy is ${SIDE.enemy.name} (${SIDE.enemy.names.join(', ')})`
+      )
+    }
     // Memories, orders, hails, rules and where the court is: in the database, else in files.
     const keep = (file: string, bot?: string): string | InDatabase =>
       shared ? { shared, bot } : path.resolve(SHARED_DIR, file)
@@ -234,6 +255,7 @@ export class BotManager {
           ...botNames,
           ...(process.env.IGNORE_PLAYERS ?? 'Surveyor').split(',').filter(Boolean),
         ],
+        enemies: SIDE?.enemy.names,
         buildLog: builds,
         floor,
         court,
@@ -706,6 +728,14 @@ export class BotManager {
    * own lines by that courtier (Bot.chat), so every line is written once.
    */
   private heard(bot: Bot, event: ChatEvent): void {
+    // The war game keeps count of the dead on both sides (every bot hears it; counted once).
+    if (this.war && event.kind === 'system' && event.notice?.key.startsWith('death.')) {
+      const { key, params } = event.notice
+      const killer = /^death\.attack\.(player|mob|arrow|trident|thrown|indirectMagic)/.test(key)
+        ? params[1]
+        : undefined
+      this.war.death(params[0] ?? '', killer, key)
+    }
     if (event.kind === 'whisper')
       return record({
         kind: 'chat',
@@ -2173,9 +2203,158 @@ export class BotManager {
    *   <bot> commission <blueprint> [at <x> <y> <z>] [for <player>]  (as if a royal asked the bot)
    *   <bot> undo [for <player>]
    */
+  // ---- The war game (src/war) ---------------------------------------------------------------
+
+  /**
+   * The referee's orders: `war reset <series> <round> <home x y z> <chest x y z>` (a new round:
+   * everything forgotten, a home and a storehouse as given), `war raid <enemy chest x y z>
+   * <enemy home x y z>` (the captain plans and the side raids), `war end`, `war status`.
+   */
+  private warCommand(words: string[]): void {
+    const war = this.war
+    if (!war || !SIDE) return this.log.warn('not at war: COURT_SIDE is not set')
+    const [verb] = words
+    const nums = (from: number, n: number) => words.slice(from, from + n).map(Number)
+    if (verb === 'reset') {
+      const [series, round, hx, hy, hz, cx, cy, cz] = nums(1, 8)
+      if ([series, round, hx, hy, hz, cx, cy, cz].some((v) => !Number.isFinite(v)))
+        return this.log.warn('usage: war reset <series> <round> <home x y z> <chest x y z>')
+      this.endRaid('a new round begins')
+      this.household.forgetAll()
+      this.estate.clear()
+      this.resting.clear()
+      this.underway.clear()
+      this.homeTrips.clear()
+      this.placesCache = undefined
+      for (const b of this.bots) b.dropCourtWork()
+      war.reset(series, round)
+      this.makeHome({ x: hx, y: hy, z: hz }, 'the referee')
+      this.household.setStorehouse({ x: cx, y: cy, z: cz }, 'the referee')
+      this.work('the war', `round ${round} of series ${series} begins: peace, for now`)
+      return
+    }
+    if (verb === 'raid') {
+      const [cx, cy, cz, hx, hy, hz] = nums(1, 6)
+      if ([cx, cy, cz, hx, hy, hz].some((v) => !Number.isFinite(v)))
+        return this.log.warn('usage: war raid <enemy chest x y z> <enemy home x y z>')
+      this.endRaid('a new order')
+      war.order({
+        side: SIDE.enemy.name,
+        names: SIDE.enemy.names,
+        chest: { x: cx, y: cy, z: cz },
+        home: { x: hx, y: hy, z: hz },
+      })
+      this.work('the war', `the order: raid the ${SIDE.enemy.name} chest at ${cx},${cy},${cz}`)
+      void this.orderRaid().catch((err) => this.log.warn(`the raid failed: ${errMsg(err)}`))
+      return
+    }
+    if (verb === 'end') return this.endRaid('the referee ended it')
+    if (verb === 'status') {
+      const { events, ...rest } = war.data
+      return this.log.info(`war: ${JSON.stringify({ ...rest, events: events.length })}`)
+    }
+    this.log.warn('usage: war reset|raid|end|status')
+  }
+
+  /** The captain plans the raid (the model, with the playbook), and the side carries it out. */
+  private async orderRaid(): Promise<void> {
+    const war = this.war
+    const enemy = war?.enemy
+    const captain = this.castellan() ?? this.bots[0]
+    if (!war || !enemy || !SIDE || !captain) return
+    const store = this.household.storehouse
+    const home = this.household.home
+    if (!store || !home) return war.remark('no storehouse: the order cannot be carried out')
+    const soldiers = this.bots.filter((b) => b.isGuard()).map((b) => b.cfg.name)
+    const book = this.playbook?.forPlanning() ?? { lessons: [], record: [] }
+    const brief: Brief = {
+      side: sideTitle(SIDE.name),
+      captain: captain.cfg.name,
+      enemySide: sideTitle(enemy.side),
+      members: this.bots.map((b) => {
+        const s = b.snapshot()
+        const p = b.position()
+        return {
+          name: b.cfg.name,
+          role: b.cfg.role,
+          gear: s.gear,
+          health: s.health,
+          food: s.food,
+          home: Boolean(p && Math.hypot(p.x - home.x, p.z - home.z) < 24),
+        }
+      }),
+      stock: this.household.stock.items,
+      home,
+      enemyChest: enemy.chest,
+      night: captain.isNight(),
+      playbook: book.lessons,
+      record: book.record,
+    }
+    const log = this.log.child('war')
+    const ai = new OllamaClient(captain.cfg.ai, log)
+    const plan = await planRaid(ai, brief, soldiers, log, {
+      model: captain.cfg.ai.orderModel,
+      timeoutMs: 180_000,
+    })
+    if (war.phase !== 'raid') return // called off meanwhile
+    war.setPlan(plan)
+    this.work(
+      'the war',
+      `the plan (${plan.by}): ${plan.tactic}, ${plan.when}, ${plan.trips} trip(s); ` +
+        `raiders ${plan.raiders.join(', ') || 'none'}; defenders ${plan.defenders.join(', ') || 'none'}`
+    )
+    if (plan.words) captain.chat(plan.words)
+    // The defenders take their posts at once; the raiders set out when the plan says.
+    for (const name of plan.defenders) {
+      const b = this.find(name)
+      if (b)
+        void b.startDefence({ chest: store, onRecovered: (items) => war.recovered(name, items) })
+    }
+    const wait = { cancel: false }
+    this.raidWait = wait
+    const due = () =>
+      plan.when === 'now' || (plan.when === 'day' ? !captain.isNight() : captain.isNight())
+    const since = Date.now()
+    while (!due() && !wait.cancel && Date.now() - since < WHEN_WAIT_MS) await sleep(10_000)
+    if (wait.cancel || war.phase !== 'raid') return
+    war.start()
+    for (const name of plan.raiders) {
+      const b = this.find(name)
+      if (!b) {
+        war.raiderDone(name, 'not here')
+        continue
+      }
+      void b
+        .startRaid({
+          chest: enemy.chest,
+          store,
+          tactic: plan.tactic,
+          trips: plan.trips,
+          onGrab: (items) => war.grab(name, items),
+          onDeposit: (items) => war.deposit(name, items),
+          onLost: () => war.lost(name),
+          onDone: (why) => war.raiderDone(name, why),
+        })
+        .finally(() => {
+          if (!war.data.raiders[name]?.done) war.raiderDone(name, 'could not go')
+        })
+    }
+  }
+
+  /** The raid is over (the referee's word, or a new round): everyone stops. */
+  private endRaid(why: string): void {
+    if (this.raidWait) this.raidWait.cancel = true
+    for (const b of this.bots) b.stopWar()
+    if (this.war && this.war.phase === 'raid') {
+      this.war.end()
+      this.work('the war', `the raid is over: ${why}`)
+    }
+  }
+
   runCommand(line: string): void {
     const words = line.trim().split(/\s+/)
     const [name, verb] = words
+    if (name?.toLowerCase() === 'war') return this.warCommand(words.slice(1))
     if (name?.toLowerCase() === 'works') return this.worksCommand(words.slice(1))
     if (name?.toLowerCase() === 'household') {
       // household home|storehouse <x> <y> <z> [for <player>]: a home as if they declared it
@@ -2497,6 +2676,18 @@ export class BotManager {
         underway: [...this.underway],
         resting: [...this.resting].filter(([, until]) => until > Date.now()).map(([kind]) => kind),
         ...(merlin ? { magicLeft: merlin.magicLeft() } : {}),
+        ...(this.war
+          ? {
+              war: {
+                side: this.war.side,
+                phase: this.war.phase,
+                done: this.war.data.done,
+                brought: Object.values(this.war.data.brought).reduce((n, k) => n + k, 0),
+                kills: this.war.data.kills,
+                deaths: this.war.data.deaths,
+              },
+            }
+          : {}),
       })
       this.lag.reset()
     } catch (err) {

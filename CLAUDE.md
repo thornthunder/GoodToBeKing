@@ -190,6 +190,55 @@ forgetful and catches up. The shared folder's files were taken in once (`db/impo
 `.shared/before-database/`; the admin uses the files until that import has happened. A change from
 outside the stores (the admin) goes through `changeShared` (its transaction bumps the scope).
 
+### The war game
+
+The King's experiment (2026-11-02): two courts, Blue and Green, each six bots (a captain in the
+Castellan's role, two workers, three soldiers; `config/war/blue.json`, `green.json`; no Merlin,
+no royals: `config/war/court.json`), live their survival lives in two identical halls on the
+**war server** (a second BDS on the court VM, port 19134, `server/war-server.sh make|start|stop`,
+run with `run-bds.sh` so its `console.in` takes the referee's commands) for ten Minecraft days,
+then both are ordered at once to raid each other's storehouse chest, no rules. The side that
+brings more of the other's items home and into its own chest wins; kills break a tie. Three
+rounds make a series; after each round each side draws lessons (`src/war/lessons.ts`, the 31b
+model, from that side's own account only) into its playbook (`.state/playbook.json`,
+`src/war/playbook.ts`), which its captain reads when planning; after a series the referee writes
+a report (`.war/series-N.md`) and the next series begins. Both sides run identical code and
+model: what sets them apart over a season is only what they have been through, so the season's
+table (`.war/season.md`) shows whether experience makes a side better. The King watches amateur
+leagues improve through a season and has a hypothesis he keeps to himself till the stats are in.
+
+- `COURT_SIDE=blue|green` makes a process one side (`src/war/side.ts`): the enemy's bots (from
+  its bots file) are never spoken to (`Bot` `enemies`) and are foes when at war (`Survival`:
+  `enemies`, `aggression` none/near/range, `defend`). `compose.war.yaml` runs `blue`, `green` and
+  `referee` from the court's image with `war.env` (`war.env.example`), each side's `.state` in
+  `.war/<side>`, no database.
+- The side's account is `.state/war.json` (`src/war/War.ts`, `WarBook`: phase peace/raid/ended,
+  the enemy, the plan, each raider's trips and what it carries, what was brought home, lost and
+  recovered, kills and deaths from the death notices every bot hears (counted once), every event).
+  The referee's orders come through the command file: `war reset <series> <round> <home x y z>
+  <chest x y z>` (everything forgotten: `Household.forgetAll`, the estate; a home and storehouse
+  as given), `war raid <enemy chest x y z> <enemy home x y z>`, `war end`, `war status`.
+- The plan (`src/war/plan.ts`): the captain asks the order model (gemma4:31b, else the default
+  plan) for raiders, defenders, a tactic (rush: take and run; fight: the defenders first; wait:
+  hold off till the chest is unguarded), when (now, day, night) and trips, given the side's gear,
+  health, stock, the enemy chest and the playbook; the plan is the one place experience changes
+  what a side does. `src/war/raiding.ts`: a `Raider` walks in 48-block legs, takes all that fits,
+  walks home, puts it in its own chest (only what came from theirs counts), and goes again; dead,
+  it wakes at home (the referee sets spawn points) and carries on; a `Defender` holds the chest
+  and puts back what falls by it. `Bot.startRaid`/`startDefence`/`stopWar`; at war a bot is not
+  free, so the steward leaves it alone.
+- The referee (`src/war/main.ts`, `node dist/war/main.js`; `src/war/referee.ts` is the pure part)
+  runs the season from `.war/season.json` (a restart carries on): it makes both halls anew and
+  musters each side home with empty pockets and its spawn point there (server commands on the
+  console; a test tool outside the court, so the no-operator rule stands), sends `war reset`,
+  waits the days of peace (wall clock, `WAR_CYCLE_MS` 20 min), sends both `war raid` at once,
+  ends the raid when both sides are done or the raid's days are up, scores
+  (`score`: items, then kills; deaths merged from both sides' accounts), has each side draw its
+  lessons, and writes `.war/rounds/series-N-round-M.json` with both accounts. `WAR_BUILD_CYCLES`,
+  `WAR_RAID_CYCLES`, `WAR_ROUNDS`, `WAR_SERIES` override `config/war/arena.json` (trial rounds
+  are run with one day of peace). The war needs about five of the VM's eight cores, so it runs
+  with the Dev court stopped.
+
 ### Stopping a running app
 
 Create a file named `.stop` in the project root. The app checks for it every second, sends

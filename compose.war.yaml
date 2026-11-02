@@ -1,0 +1,58 @@
+# The war game (the King's experiment, 2026-11-02; see CLAUDE.md, "The war game"): two courts,
+# Blue and Green, on the war server, and the referee that runs the season. Each side is a court
+# like any other, with its own state folder; the referee writes to the war server's console and
+# to the sides' command files, and reads their war files. The court's image serves all three.
+#   docker compose -f compose.war.yaml --env-file war.env up -d --build
+#   docker compose -f compose.war.yaml --env-file war.env logs -f referee
+#   docker compose -f compose.war.yaml --env-file war.env stop
+services:
+  blue:
+    build:
+      context: .
+      target: court
+    image: goodtobeking-war
+    container_name: goodtobeking-war-blue
+    restart: unless-stopped
+    network_mode: host
+    env_file: war.env
+    environment: &side
+      COURT_SIDE: blue
+      BOTS_FILE: config/war/blue.json
+      COURT_FILE: config/war/court.json
+      COMMAND_FILE: .state/.command
+      SHARED_STATE_DIR: .state/shared
+      LOG_DIR: .state/logs
+    volumes:
+      - ./.war/blue:/app/.state
+      - /etc/localtime:/etc/localtime:ro
+    stop_grace_period: 60s
+  green:
+    image: goodtobeking-war
+    container_name: goodtobeking-war-green
+    depends_on: [blue]
+    restart: unless-stopped
+    network_mode: host
+    env_file: war.env
+    environment:
+      <<: *side
+      COURT_SIDE: green
+      BOTS_FILE: config/war/green.json
+    volumes:
+      - ./.war/green:/app/.state
+      - /etc/localtime:/etc/localtime:ro
+    stop_grace_period: 60s
+  referee:
+    image: goodtobeking-war
+    container_name: goodtobeking-war-referee
+    depends_on: [blue, green]
+    restart: unless-stopped
+    network_mode: host
+    env_file: war.env
+    environment:
+      WAR_DIR: /app/.war
+      WAR_SERVER_DIR: /server
+    volumes:
+      - ./.war:/app/.war
+      - ${WAR_SERVER:-./server/war}:/server
+      - /etc/localtime:/etc/localtime:ro
+    command: ["node", "dist/war/main.js"]

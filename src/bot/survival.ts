@@ -57,8 +57,13 @@ const CREEPER_NEAR = 6
 const CREEPER_SAFE = 10
 /** A monster it has not got any closer to for this long is out of reach (in a pit, behind a wall). */
 const OUT_OF_REACH_MS = 6_000
+/** Enemies this close to the spot a defender holds are fought (the war game). */
+const DEFEND_RANGE = 12
 
 type SurvivalBot = MineflayerBot & { pathfinder: Pathfinder }
+
+/** How a courtier fights players of the other side in the war game (src/war). */
+export type Aggression = 'none' | 'near' | 'range'
 
 export interface SurvivalOptions {
   /** A guard defends the royal family (duty: escort). */
@@ -67,6 +72,12 @@ export interface SurvivalOptions {
   royals: () => Vec3[]
   /** Is this spot inside the court's hall? */
   inside?: (p: Vec3) => boolean
+  /** Players of the other side in the war game (lower-cased names): foes, as `aggression` allows. */
+  enemies?: () => Set<string>
+  /** none: never strike first; near: only one at arm's length; range: any within GUARD_RANGE. */
+  aggression?: () => Aggression
+  /** A spot held (the side's chest): enemies within DEFEND_RANGE of it are fought too. */
+  defend?: () => Vec3 | undefined
   /** Take food out of the storehouse: how many it took; undefined when it cannot go now (busy). */
   fetchFood: () => Promise<number | undefined>
   /** Say something in character (the brain words it). */
@@ -103,11 +114,42 @@ export class Survival {
   async tick(): Promise<void> {
     if (!this.bot.entity) return
     if (!this.fighting && (await this.awayFromCreepers())) return
-    if (this.opts.guard && !this.fighting) {
-      const foe = this.foe()
+    if (!this.fighting) {
+      const foe = (this.opts.guard ? this.foe() : undefined) ?? this.enemy()
       if (foe) await this.fight(foe)
     }
     if (!this.fighting) await this.eatIfHungry()
+  }
+
+  /**
+   * The nearest player of the other side to be fought (the war game): one at arm's length when
+   * only striking back, any within reach when fighting, and any near the spot held.
+   */
+  private enemy(): ReturnType<typeof this.monsters>[number] | undefined {
+    const names = this.opts.enemies?.()
+    const aggression = this.opts.aggression?.() ?? 'none'
+    if (!names?.size || aggression === 'none') return undefined
+    const me = this.bot.entity.position
+    const held = this.opts.defend?.()
+    const now = Date.now()
+    return Object.values(this.bot.entities)
+      .filter(
+        (e) =>
+          e !== this.bot.entity &&
+          e.type === 'player' &&
+          e.isValid !== false &&
+          names.has((e.username ?? '').toLowerCase()) &&
+          (this.letGo.get(e.id) ?? 0) < now
+      )
+      .filter((e) => {
+        const gap = e.position.distanceTo(me)
+        if (gap <= STRIKE + 1) return true
+        if (aggression !== 'range') return false
+        return (
+          gap <= GUARD_RANGE || (held !== undefined && held.distanceTo(e.position) <= DEFEND_RANGE)
+        )
+      })
+      .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me))[0]
   }
 
   /**
@@ -143,7 +185,8 @@ export class Survival {
   /** Go after the monster and strike until it is gone, far away, or the fight runs too long. */
   private async fight(foe: ReturnType<typeof this.monsters>[number]): Promise<void> {
     this.fighting = true
-    this.log.info(`fighting a ${foe.name} at ${foe.position.floored()}`)
+    const what = foe.type === 'player' ? (foe.username ?? 'an enemy') : `a ${foe.name}`
+    this.log.info(`fighting ${what} at ${foe.position.floored()}`)
     let strikes = 0
     let outcome = 'gave up after 30 seconds'
     try {
@@ -188,7 +231,7 @@ export class Survival {
       this.bot.pathfinder.setGoal(null)
       this.fighting = false
       if (outcome.startsWith('gave up')) this.letGo.set(foe.id, Date.now() + 60_000)
-      this.log.info(`fight with a ${foe.name}: ${strikes} strikes, ${outcome}`)
+      this.log.info(`fight with ${what}: ${strikes} strikes, ${outcome}`)
     }
   }
 

@@ -358,6 +358,12 @@ export class Household {
     return items.length ? items.join(', ') : 'nothing'
   }
 
+  /** Everything forgotten (a new round of the war game): no home, no stores, nothing seen. */
+  forgetAll(): void {
+    this.data = {}
+    this.save()
+  }
+
   private save(): void {
     if (!this.file || this.follow) return
     fs.mkdirSync(path.dirname(this.file), { recursive: true })
