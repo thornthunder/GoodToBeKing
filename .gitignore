@@ -25,3 +25,5 @@ ServerFiles/
 # The admin's own settings: folders of this machine, perhaps its first password
 admin.env
 db.env
+# The war game's settings on the court VM (war.env.example)
+war.env
