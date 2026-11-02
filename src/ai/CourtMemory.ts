@@ -1,5 +1,5 @@
-import fs from 'node:fs'
-import path from 'node:path'
+import { insertFacts, loadFacts, type Memory } from '../db/court'
+import { FileKeeper, inDatabase, type InDatabase, type Keeper } from '../db/shared'
 
 export interface Fact {
   text: string
@@ -34,7 +34,8 @@ export function isSecret(fact: string): boolean {
   return SECRET.test(fact)
 }
 
-function normalise(text: string): string {
+/** A fact as compared with the others: the same fact twice is kept once. */
+export function normalise(text: string): string {
   return text
     .toLowerCase()
     .replace(/[^a-z0-9 ]+/g, ' ')
@@ -42,37 +43,41 @@ function normalise(text: string): string {
     .trim()
 }
 
+/** A memory file as written (subject -> facts), anything broken in it left out. */
+export function parseMemory(raw: unknown): Memory {
+  const data: Memory = {}
+  for (const [subject, facts] of Object.entries((raw ?? {}) as Record<string, unknown>)) {
+    if (Array.isArray(facts))
+      data[subject] = facts.filter((f): f is Fact => typeof f?.text === 'string')
+  }
+  return data
+}
+
 /**
  * One bot's long-term memory: short facts per subject (a player name or a bot name), only what
- * that bot heard itself. Backed by a JSON file so it survives restarts.
+ * that bot heard itself. Kept in the database (DATABASE_URL) or a JSON file, so it survives
+ * restarts; either is read again when changed elsewhere (Merlin is in both worlds; the admin
+ * makes a courtier forget), and a file may be edited by hand while the court runs.
  */
 export class CourtMemory {
-  private data: Record<string, Fact[]> = {}
-  /** Modification time of the file when last read or written; detects hand edits. */
-  private loadedMtimeMs = 0
+  private readonly keeper: Keeper<Memory>
+  /** Whose memory it is (in the database). */
+  private readonly bot: string
 
   constructor(
-    private readonly file?: string,
+    where?: string | InDatabase,
     private readonly maxPerSubject = 400
   ) {
-    this.refresh()
-  }
-
-  /** Re-read the file if someone edited it since we last read or wrote it. */
-  private refresh(): void {
-    if (!this.file || !fs.existsSync(this.file)) return
-    const mtimeMs = fs.statSync(this.file).mtimeMs
-    if (mtimeMs === this.loadedMtimeMs) return
-    this.loadedMtimeMs = mtimeMs
-    try {
-      const parsed = JSON.parse(fs.readFileSync(this.file, 'utf8')) as Record<string, Fact[]>
-      const data: Record<string, Fact[]> = {}
-      for (const [subject, facts] of Object.entries(parsed)) {
-        if (Array.isArray(facts)) data[subject] = facts.filter((f) => typeof f?.text === 'string')
-      }
-      this.data = data
-    } catch {
-      // A half-written or broken file: keep what we have rather than crashing or forgetting.
+    if (inDatabase(where)) {
+      const bot = (this.bot = (where.bot ?? '').toLowerCase())
+      this.keeper = where.shared.replica(
+        `memory:${bot}`,
+        (q) => loadFacts(q, bot),
+        () => ({})
+      )
+    } else {
+      this.bot = ''
+      this.keeper = new FileKeeper(where, parseMemory, () => ({}))
     }
   }
 
@@ -85,8 +90,7 @@ export class CourtMemory {
 
   /** Everything known about a subject, oldest first. */
   entries(subject: string): Fact[] {
-    this.refresh()
-    return (this.data[subject.toLowerCase()] ?? []).map((f) => ({ ...f }))
+    return (this.keeper.read()[subject.toLowerCase()] ?? []).map((f) => ({ ...f }))
   }
 
   /**
@@ -94,42 +98,46 @@ export class CourtMemory {
    * Returns what was kept.
    */
   add(subject: string, facts: NewFact[], at = Date.now()): Fact[] {
-    this.refresh()
     const key = subject.toLowerCase()
-    const list = (this.data[key] ??= [])
-    const seen = new Set(list.map((f) => normalise(f.text)))
     const added: Fact[] = []
-    for (const item of facts) {
-      const raw = typeof item === 'string' ? item : item.text
-      // The prompt marks private and secret facts itself; a mark copied into the text is undone.
-      const text = raw
-        .replace(/\s+/g, ' ')
-        .replace(/(\s*\((private|secret)\)\.?)+\s*$/i, '')
-        .trim()
-      const norm = normalise(text)
-      if (!norm || seen.has(norm) || isSecret(text)) continue
-      seen.add(norm)
-      const realLife = (typeof item !== 'string' && item.private) || isPersonalInfo(text)
-      const secret = typeof item !== 'string' && item.secret
-      const fact: Fact = {
-        text,
-        at,
-        ...(realLife ? { private: true } : {}),
-        ...(secret ? { secret: true } : {}),
-      }
-      list.push(fact)
-      added.push(fact)
-    }
-    while (list.length > this.maxPerSubject) list.shift()
-    if (added.length) this.save()
+    this.keeper.update(
+      (data) => {
+        const list = (data[key] ??= [])
+        const seen = new Set(list.map((f) => normalise(f.text)))
+        for (const item of facts) {
+          const raw = typeof item === 'string' ? item : item.text
+          // The prompt marks private and secret facts itself; a mark copied into the text is undone.
+          const text = raw
+            .replace(/\s+/g, ' ')
+            .replace(/(\s*\((private|secret)\)\.?)+\s*$/i, '')
+            .trim()
+          const norm = normalise(text)
+          if (!norm || seen.has(norm) || isSecret(text)) continue
+          seen.add(norm)
+          const realLife = (typeof item !== 'string' && item.private) || isPersonalInfo(text)
+          const secret = typeof item !== 'string' && item.secret
+          const fact: Fact = {
+            text,
+            at,
+            ...(realLife ? { private: true } : {}),
+            ...(secret ? { secret: true } : {}),
+          }
+          list.push(fact)
+          added.push(fact)
+        }
+        while (list.length > this.maxPerSubject) list.shift()
+        return added.length > 0
+      },
+      (tx) =>
+        insertFacts(
+          tx,
+          this.bot,
+          key,
+          added.map((f) => ({ ...f, norm: normalise(f.text) })),
+          this.maxPerSubject
+        )
+    )
     return added
-  }
-
-  private save(): void {
-    if (!this.file) return
-    fs.mkdirSync(path.dirname(this.file), { recursive: true })
-    fs.writeFileSync(this.file, JSON.stringify(this.data, null, 2))
-    this.loadedMtimeMs = fs.statSync(this.file).mtimeMs
   }
 }
 

@@ -39,6 +39,74 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    id: 2,
+    what: "the court's shared state: memories, orders, reports, rules, hails, where the court is",
+    sql: [
+      `create table court_versions (
+        scope text primary key,
+        version bigint not null default 0,
+        at timestamptz not null default now()
+      )`,
+      `create table court_facts (
+        id bigserial primary key,
+        bot text not null,
+        subject text not null,
+        text text not null,
+        norm text not null,
+        at timestamptz not null,
+        private boolean not null default false,
+        secret boolean not null default false
+      )`,
+      'create unique index court_facts_once on court_facts (bot, subject, norm)',
+      `create table court_counters (
+        name text primary key,
+        next integer not null
+      )`,
+      `create table court_orders (
+        bot text not null,
+        num integer not null,
+        giver text not null,
+        giver_title text not null,
+        text text not null,
+        post jsonb,
+        at timestamptz not null,
+        primary key (bot, num)
+      )`,
+      `create table court_reports (
+        id bigserial primary key,
+        bot text not null,
+        text text not null,
+        at timestamptz not null default now()
+      )`,
+      'create index court_reports_bot on court_reports (bot, id)',
+      `create table court_rules (
+        num integer primary key,
+        giver text not null,
+        giver_title text not null,
+        text text not null,
+        at timestamptz not null
+      )`,
+      `create table court_hails (
+        bot text not null,
+        player text not null,
+        at timestamptz not null,
+        primary key (bot, player)
+      )`,
+      `create table court_presence (
+        id integer primary key default 1 check (id = 1),
+        world text not null,
+        at timestamptz,
+        called_by text,
+        king_seen jsonb not null default '{}'
+      )`,
+      `create table court_imports (
+        name text primary key,
+        at timestamptz not null default now(),
+        detail jsonb
+      )`,
+    ],
+  },
 ]
 
 /** Any number will do, as long as nothing else on the server takes the same lock. */

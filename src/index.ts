@@ -1,10 +1,12 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { OllamaClient } from './ai/OllamaClient'
-import { BotManager } from './bot/BotManager'
+import { BotManager, SHARED_DIR } from './bot/BotManager'
 import { loadConfig } from './config'
 import { databaseUrl, openDatabase } from './db/Database'
 import { History, record, startHistory, stopHistory } from './db/history'
+import { importSharedFiles } from './db/importFiles'
+import { SharedState } from './db/shared'
 import { closeLogFiles, createLogger, logToFiles, setLogLevel } from './logger'
 import { errMsg } from './util'
 
@@ -71,7 +73,18 @@ async function main(): Promise<void> {
     })
   }
 
-  const manager = new BotManager(config, log)
+  // Memories, orders, rules, hails and where the court is: in the database too, once the shared
+  // folder's files were taken in (by whichever court process comes first).
+  const shared = db
+    ? new SharedState(db.db, db.ready, log.child('shared'), {
+        before: () =>
+          importSharedFiles(db.db, path.resolve(SHARED_DIR), log.child('shared'), {
+            home: process.env.COURT_HOME_WORLD || 'dev',
+          }),
+      })
+    : undefined
+  const manager = new BotManager(config, log, shared)
+  shared?.start()
 
   let shuttingDown = false
   const shutdown = async (reason: string) => {
@@ -79,6 +92,7 @@ async function main(): Promise<void> {
     shuttingDown = true
     log.info(`${reason}, disconnecting bots`)
     await manager.stopAll()
+    await shared?.stop()
     record({ kind: 'court', text: `the ${division} stopped (${reason})` })
     await stopHistory()
     await db?.db.end().catch(() => {})
@@ -111,8 +125,21 @@ async function main(): Promise<void> {
     for (const line of lines) manager.runCommand(line)
   }, 1_000).unref()
 
+  if (shared) {
+    // The court waits a while for what it remembers, not for ever: without the database it plays
+    // on, forgetful, and catches up once it answers.
+    const loaded = await Promise.race([
+      shared.loaded.then(() => true),
+      new Promise<boolean>((r) => setTimeout(() => r(false), LOAD_WAIT_MS)),
+    ])
+    if (!loaded)
+      log.warn('shared state: the database does not answer; the court starts without its memories')
+  }
   await manager.startAll()
 }
+
+/** How long the court waits for its memories at start. */
+const LOAD_WAIT_MS = 60_000
 
 /** The history is kept six months (the King's choice, 2026-11-01). */
 const HALF_YEAR = 183

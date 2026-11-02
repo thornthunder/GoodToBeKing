@@ -193,7 +193,7 @@ export async function databasePage(main) {
       h(
         'p',
         {},
-        'The court’s Postgres (compose.db.yaml), on this machine only. It holds the court’s history and the admin’s audit log; the court keeps playing when it is away, and writes once it is back.'
+        'The court’s Postgres (compose.db.yaml), on this machine only. It holds the court’s history, what the courtiers remember, their orders and hails, the royals’ rules, the world the court is in, and the admin’s audit log. The court keeps playing when it is away (with what it holds), and writes once it is back.'
       )
     )
   )

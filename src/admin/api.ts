@@ -5,7 +5,20 @@ import type { Logger } from '../logger'
 import { errMsg } from '../util'
 import { verifyPassword, weakPassword, type Sessions, type Throttle } from './auth'
 import type { Database } from '../db/Database'
+import {
+  deleteFact,
+  deleteOrders,
+  deleteRules,
+  loadBook,
+  loadFacts,
+  loadPresence,
+  loadRules,
+  memorySizes,
+  moveCourt,
+} from '../db/court'
 import { HISTORY_KINDS, readHistory } from '../db/history'
+import { IMPORT } from '../db/importFiles'
+import { changeShared } from '../db/shared'
 import { backupPath, listBackups, serverBackup, stateBackupSteps } from './backups'
 import type { LocalServer } from './bds'
 import { databaseBackupStep, databaseStatus } from './database'
@@ -73,6 +86,32 @@ export function routes(router: Router, ctx: Context): void {
     return ctx.server
   }
   const division = (v: unknown): Division => (v === 'army' ? 'army' : 'household')
+  /**
+   * The court's shared state (memories, orders, rules, hails, where the court is) is in the
+   * database once a court process took the shared folder's files in (db/importFiles.ts); until
+   * then, and with no database, it is in the files.
+   */
+  let sharedInDb = false
+  const sharedDb = async (): Promise<Database | undefined> => {
+    const d = ctx.db?.db
+    if (!d) return undefined
+    if (!sharedInDb) {
+      try {
+        const { rows } = await d.query('select 1 from court_imports where name = $1', [IMPORT])
+        sharedInDb = rows.length > 0
+      } catch (err) {
+        throw new HttpError(503, `the database does not answer (${errMsg(err)})`)
+      }
+    }
+    return sharedInDb ? d : undefined
+  }
+  /** Where the court is; nothing when that cannot be told (the database away). */
+  const presenceOf = async (w: World | undefined): Promise<unknown> => {
+    const d = await sharedDb().catch(() => null)
+    if (d) return loadPresence(d).catch(() => undefined)
+    if (d === null) return undefined
+    return w ? readJson(w.shared('presence.json')) : undefined
+  }
 
   // ---- Signing in ----------------------------------------------------------------------------
 
@@ -167,7 +206,7 @@ export function routes(router: Router, ctx: Context): void {
         }
       })
     )
-    const presence = readJson(ctx.worlds[0]?.shared('presence.json') ?? '')
+    const presence = await presenceOf(ctx.worlds[0])
     const s = ctx.server
     const local = s && {
       label: s.def.label ?? s.def.service,
@@ -228,7 +267,7 @@ export function routes(router: Router, ctx: Context): void {
       status: w.status(),
       containers,
       version,
-      presence: readJson(w.shared('presence.json')),
+      presence: await presenceOf(w),
       courtWorldHere: w.env().get('COURT_WORLD'),
       divisions: w.divisions(),
     })
@@ -422,14 +461,18 @@ export function routes(router: Router, ctx: Context): void {
     return json(data)
   })
 
-  router.on('POST', '/api/worlds/:w/presence', (req) => {
+  router.on('POST', '/api/worlds/:w/presence', async (req) => {
     const w = world(req.params.w)
     const target = str(body(req).world, 'world')
     const worlds = ctx.worlds.map((x) => x.env().get('COURT_WORLD')).filter(Boolean)
     if (!worlds.includes(target)) throw new HttpError(400, `not a world of the court: ${target}`)
-    const file = w.shared('presence.json')
-    const now = readJson<Record<string, unknown>>(file) ?? { kingSeen: {} }
-    writeJson(file, { ...now, world: target, at: Date.now(), by: 'the admin' })
+    const d = await sharedDb()
+    if (d) await changeShared(d, 'presence', (tx) => moveCourt(tx, target, Date.now(), 'the admin'))
+    else {
+      const file = w.shared('presence.json')
+      const now = readJson<Record<string, unknown>>(file) ?? { kingSeen: {} }
+      writeJson(file, { ...now, world: target, at: Date.now(), by: 'the admin' })
+    }
     audit(req, `moved the court to ${target}`)
     return json({ ok: true })
   })
@@ -535,16 +578,22 @@ export function routes(router: Router, ctx: Context): void {
     return json({ ok: true, worlds: targets.map((t) => t.id) })
   })
 
+  // In the database once a court took the shared folder's files in (sharedDb), else in files.
   type Fact = { text: string; at: number; private?: boolean; secret?: boolean }
-  const memoryFile = (w: World, bot: string) => {
+  const botName = (bot: string) => {
     if (!/^[A-Za-z0-9_]{1,16}$/.test(bot)) throw new HttpError(400, 'not a bot')
-    return w.shared(`memory-${bot.toLowerCase()}.json`)
+    return bot.toLowerCase()
   }
+  const memoryFile = (w: World, bot: string) => w.shared(`memory-${botName(bot)}.json`)
 
-  router.on('GET', '/api/court/memory', (req) => {
+  router.on('GET', '/api/court/memory', async (req) => {
     const w = world(req.query.get('world') ?? undefined)
+    const d = await sharedDb()
+    const sizes = d ? await memorySizes(d) : undefined
     return json(
       w.bots().map((b) => {
+        if (sizes)
+          return { bot: b.name, ...(sizes.get(botName(b.name)) ?? { subjects: 0, facts: 0 }) }
         const m = readJson<Record<string, Fact[]>>(memoryFile(w, b.name)) ?? {}
         return {
           bot: b.name,
@@ -555,33 +604,52 @@ export function routes(router: Router, ctx: Context): void {
     )
   })
 
-  router.on('GET', '/api/court/memory/:bot', (req) => {
+  router.on('GET', '/api/court/memory/:bot', async (req) => {
     const w = world(req.query.get('world') ?? undefined)
+    const d = await sharedDb()
+    if (d) return json(await loadFacts(d, botName(req.params.bot)))
     return json(readJson(memoryFile(w, req.params.bot)) ?? {})
   })
 
-  router.on('DELETE', '/api/court/memory/:bot', (req) => {
+  router.on('DELETE', '/api/court/memory/:bot', async (req) => {
     const w = world(req.query.get('world') ?? undefined)
     const b = body<{ subject: string; at: number; text: string }>(req)
-    const file = memoryFile(w, req.params.bot)
-    const m = readJson<Record<string, Fact[]>>(file) ?? {}
-    const facts = m[b.subject] ?? []
-    const kept = facts.filter((f) => !(f.at === b.at && f.text === b.text))
-    if (kept.length === facts.length) throw new HttpError(404, 'no such fact (changed meanwhile?)')
-    if (kept.length) m[b.subject] = kept
-    else delete m[b.subject]
-    writeJson(file, m)
-    audit(req, `made ${req.params.bot} forget a fact about ${b.subject}`, b.text)
+    const subject = str(b.subject, 'subject')
+    const fact = { text: str(b.text, 'text'), at: Number(b.at) }
+    const bot = botName(req.params.bot)
+    const d = await sharedDb()
+    if (d) {
+      const gone = await changeShared(d, `memory:${bot}`, (tx) =>
+        deleteFact(tx, bot, subject, fact)
+      )
+      if (!gone) throw new HttpError(404, 'no such fact (changed meanwhile?)')
+    } else {
+      const file = memoryFile(w, bot)
+      const m = readJson<Record<string, Fact[]>>(file) ?? {}
+      const facts = m[subject] ?? []
+      const kept = facts.filter((f) => !(f.at === fact.at && f.text === fact.text))
+      if (kept.length === facts.length)
+        throw new HttpError(404, 'no such fact (changed meanwhile?)')
+      if (kept.length) m[subject] = kept
+      else delete m[subject]
+      writeJson(file, m)
+    }
+    audit(req, `made ${req.params.bot} forget a fact about ${subject}`, fact.text)
     return json({ ok: true })
   })
 
-  const ordersFile = (w: World, bot: string) => {
-    if (!/^[A-Za-z0-9_]{1,16}$/.test(bot)) throw new HttpError(400, 'not a bot')
-    return w.shared(`orders-${bot.toLowerCase()}.json`)
-  }
+  const ordersFile = (w: World, bot: string) => w.shared(`orders-${botName(bot)}.json`)
 
-  router.on('GET', '/api/court/orders', (req) => {
+  router.on('GET', '/api/court/orders', async (req) => {
     const w = world(req.query.get('world') ?? undefined)
+    const d = await sharedDb()
+    if (d)
+      return json({
+        bots: await Promise.all(
+          w.bots().map(async (b) => ({ bot: b.name, ...(await loadBook(d, botName(b.name))) }))
+        ),
+        rules: await loadRules(d),
+      })
     return json({
       bots: w.bots().map((b) => ({
         bot: b.name,
@@ -591,22 +659,41 @@ export function routes(router: Router, ctx: Context): void {
     })
   })
 
-  router.on('DELETE', '/api/court/orders/:bot/:id', (req) => {
+  router.on('DELETE', '/api/court/orders/:bot/:id', async (req) => {
     const w = world(req.query.get('world') ?? undefined)
-    const file = ordersFile(w, req.params.bot)
+    const bot = botName(req.params.bot)
+    const id = req.params.id
+    const d = await sharedDb()
+    if (d) {
+      const order = (await loadBook(d, bot)).orders.find((o) => o.id === id)
+      if (!order) throw new HttpError(404, 'no such order')
+      await changeShared(d, `orders:${bot}`, (tx) => deleteOrders(tx, bot, [id]))
+      audit(req, `released ${req.params.bot} from an order`, order.text)
+      return json({ ok: true })
+    }
+    const file = ordersFile(w, bot)
     const book = readJson<{ orders: Array<{ id: string; text: string }> }>(file)
-    const order = book?.orders.find((o) => o.id === req.params.id)
+    const order = book?.orders.find((o) => o.id === id)
     if (!book || !order) throw new HttpError(404, 'no such order')
     writeJson(file, { ...book, orders: book.orders.filter((o) => o !== order) })
     audit(req, `released ${req.params.bot} from an order`, order.text)
     return json({ ok: true })
   })
 
-  router.on('DELETE', '/api/court/rules/:id', (req) => {
+  router.on('DELETE', '/api/court/rules/:id', async (req) => {
     const w = world(req.query.get('world') ?? undefined)
+    const id = req.params.id
+    const d = await sharedDb()
+    if (d) {
+      const rule = (await loadRules(d)).rules.find((r) => r.id === id)
+      if (!rule) throw new HttpError(404, 'no such rule')
+      await changeShared(d, 'rules', (tx) => deleteRules(tx, [id]))
+      audit(req, 'took away a rule', rule.text)
+      return json({ ok: true })
+    }
     const file = w.shared('rules.json')
     const data = readJson<{ rules: Array<{ id: string; text: string }> }>(file)
-    const rule = data?.rules.find((r) => r.id === req.params.id)
+    const rule = data?.rules.find((r) => r.id === id)
     if (!data || !rule) throw new HttpError(404, 'no such rule')
     writeJson(file, { ...data, rules: data.rules.filter((r) => r !== rule) })
     audit(req, 'took away a rule', rule.text)

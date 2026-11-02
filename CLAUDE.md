@@ -83,12 +83,12 @@ The court lives in the Dev world (the test server on the court VM, survival; the
 for it); the Creative world is the family's main server. Each world has its own container
 (`~/court-test` with `COURT_WORLD=dev`, `~/GoodToBeKing` with `COURT_WORLD=creative`), and both
 mount one host folder (`COURT_SHARED`, `/home/jean/court-shared`) as `.shared`
-(`SHARED_STATE_DIR`): each courtier's memories, orders and hails, the royals' rules, and
-`presence.json`, the world the court is in (`src/presence.ts`). Everything of a world stays in
-its own `.state` (home, storehouse, estate, castle works, commissions, Merlin's gifts and his
-hour's magic). Merlin (`everywhere: true`) is in both worlds; the rest connect only where the
-court is (`BotManager.followCourt`, every 5 s, reading the file the other court may have
-changed). The King asking Merlin to bring everyone in the world the court is not in calls it over
+(`SHARED_STATE_DIR`); with a database, what the two courts share is in it instead (see The
+database): each courtier's memories, orders and hails, the royals' rules, and the world the court
+is in (`src/presence.ts`). Everything of a world stays in its own `.state` (home, storehouse,
+estate, castle works, commissions, Merlin's gifts and his hour's magic). Merlin (`everywhere:
+true`) is in both worlds; the rest connect only where the court is (`BotManager.followCourt`,
+every 5 s, reading what the other court may have changed). The King asking Merlin to bring everyone in the world the court is not in calls it over
 (`summonCourt`; the King only): the other court's bots leave, this one's join, and Merlin gathers
 them to him. A court the King left in a world other than home goes home a day after he was last
 there (`returnIfForgotten`, `AWAY_MS`). The King's wish, 2026-10-31.
@@ -145,16 +145,17 @@ One password (scrypt hash in `ADMIN_DATA`; made at first start into `first-passw
 The page is plain browser modules in `src/admin/ui` (no build step; every text set as text).
 Each court process writes `.state/status-<mind>.json` every 5 s (`status.ts`, `Bot.snapshot`).
 The admin's bot changes go to `bots.edits.json` in the shared folder (`botEdits.ts`, merged over
-`config/bots.json` at start), so deploys never meet local changes in a checkout. Orders and rules
-re-read their files when changed elsewhere. Starting and stopping the systemd Bedrock server goes
+`config/bots.json` at start), so deploys never meet local changes in a checkout. Memories, orders,
+rules and where the court is are changed in the database (each change bumps its scope, so the
+courts load it again), or in their files without one. Starting and stopping the systemd Bedrock server goes
 through `<server>/.control`, carried out by root's `bds-control` (a systemd path unit;
 `sudo server/install-bds-control.sh bds-test /home/jean/testserver`, once).
 
 ### The database
 
 The court is moving its files into Postgres, step by step (the King's go, 2026-11-01): first new
-data (done), then what several processes share (memories, orders, rules, hails, presence), then
-each world's own state. `compose.db.yaml` runs Postgres 18 (`goodtobeking-db`, its own compose
+data (done), then what several processes share (memories, orders, rules, hails, presence; done
+2026-11-02), then each world's own state. `compose.db.yaml` runs Postgres 18 (`goodtobeking-db`, its own compose
 project so no court or admin deploy stops it) on 127.0.0.1:5432 only, data in `~/court-db`,
 password in `db.env` (git-ignored, `db.env.example`): `docker compose -f compose.db.yaml
 --env-file db.env up -d` in `~/court-test`. Each court process and the admin get `DATABASE_URL`
@@ -171,7 +172,23 @@ kept six months (the King's choice, 2026-11-01: talk `HISTORY_CHAT_DAYS`, the re
 `HISTORY_DAYS`, 183 each); a line `isSecret` flags is never written. The admin shows it (Court > History, Services > Database), backs it up (`pg_dump -Fc`
 in the container, `database-*.dump` in the backups folder; restore with `pg_restore`) and keeps
 its audit log there (`audit.log` while the database is away, taken in once it answers). Tests
-run on PGlite (a real Postgres in the process, `src/db/db.test.ts`).
+run on PGlite (a real Postgres in the process, `src/db/db.test.ts`, `shared.test.ts`).
+
+The shared state (`db/shared.ts`, `db/court.ts`): each store (`CourtMemory`, `OrderBook`,
+`CourtRules`, `HailLog`, `Presence`) takes a file or `{ shared, bot }` and keeps its data through
+a `Keeper`: a `FileKeeper` (the old files, re-read when changed), or a `SharedState` replica. A
+replica holds the data in memory, so reading never waits; a change is made there at once and
+written in the background, row by row (a fact, an order, a hail), with its scope's version bumped
+(`court_versions`: `memory:<bot>`, `orders:<bot>`, `hails:<bot>`, `rules`, `presence`). Each
+process asks for the versions every 2 s and loads again what another changed (Merlin's memory
+is written by both worlds, rules by four processes and the admin); a scope with its own writes
+still on the way waits for them. Order and rule numbers come from `court_counters` (two worlds
+taking an order at once get O3 and O4). Without the database the court plays on with what it
+holds and the changes wait; at start it waits up to 60 s for the first load, then starts
+forgetful and catches up. The shared folder's files were taken in once (`db/importFiles.ts`,
+`court_imports`, under an advisory lock by whichever court came first) and put aside in
+`.shared/before-database/`; the admin uses the files until that import has happened. A change from
+outside the stores (the admin) goes through `changeShared` (its transaction bumps the scope).
 
 ### Stopping a running app
 
@@ -337,9 +354,9 @@ Windows, killing a background `npx` shell does not kill its node children at all
 - `ai/abilities.ts`: detects requests for things the bots cannot do yet (follow, build, fetch),
   adds a one-off note next to the request, and replaces replies that promise them anyway.
   Remove an ability from this file when it becomes real.
-- `ai/HailLog.ts`: last hail time per player, file-backed in `.state/<bot>.hails.json`.
+- `ai/HailLog.ts`: last hail time per player, in the database (`court_hails`) or `<bot>.hails.json`.
 - `ai/CourtMemory.ts`: each bot's own long-term memory, facts per subject (royals and
-  courtiers, up to 400 each) in `.state/memory-<bot>.json`. Bots never read each other's
+  courtiers, up to 400 each) in the database (`court_facts`) or `memory-<bot>.json`. Bots never read each other's
   memory: a bot remembers only what it heard (`BrainContext.hears`: whispered to it, its turn to
   answer, named in the line, or said within `EARSHOT` 24 blocks), so one can keep a secret and
   news travels by being said where others hear it. A bot notes royal lines it hears and, while a
@@ -361,8 +378,8 @@ Windows, killing a background `npx` shell does not kill its node children at all
   not fit, so bots only tell riddles from this list; the open riddle and its answer sit in the
   system prompt until it is guessed, given up or 15 minutes pass.
 - `ai/orders.ts`: the court's laws (`COURT_LAWS`, above every order), each bot's standing
-  orders (`OrderBook`, `.state/orders-<bot>.json`) and the royals' rules for the whole court
-  (`CourtRules`, `.state/rules.json`). `OllamaBrain.orderTurn` reads every royal line meant for
+  orders (`OrderBook`, `court_orders` or `orders-<bot>.json`) and the royals' rules for the whole court
+  (`CourtRules`, `court_rules` or `rules.json`). `OllamaBrain.orderTurn` reads every royal line meant for
   the bot (it answers, it is named, or a call to everyone) with `OLLAMA_ORDER_MODEL` (gemma4:31b,
   15 s, else the chat model) into a `Reading`: order, rule, release or none, and what it clashes
   with. `judge`: a law clash is declined; the King is asked to confirm a clash ("yes"/"no" within
@@ -464,7 +481,8 @@ Windows, killing a background `npx` shell does not kill its node children at all
   by whisper for a whisper, kept out of the history).
 - Silence guard: when a royal names the bot (even misspelled, `mentionsNameLoosely`) or answers
   the bot's last line and the model replies `[silent]`, `generate` asks once more with a note.
-- `CourtMemory` re-reads its file when the mtime changes, so hand edits are safe while running.
+- `CourtMemory` re-reads its file when the mtime changes, so hand edits are safe while running
+  (without a database; with one, forget a fact on the admin's Memories page).
 - `.state/` holds runtime state that survives restarts; it is git-ignored.
 
 ## Project constraints

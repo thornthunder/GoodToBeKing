@@ -68,14 +68,16 @@ import { FOODS } from './survival'
 import type { HallWork } from '../ai/Brain'
 import { ChatFloor, FilePartners } from './ChatFloor'
 import { writeStatus } from '../status'
+import type { InDatabase, SharedState } from '../db/shared'
 
 /** Runtime state that should survive restarts (git-ignored). */
 const STATE_DIR = '.state'
 /**
  * What goes with each courtier from world to world (memories, orders, hails), the royals' rules,
- * and where the court is: one folder for the courts of both worlds (SHARED_STATE_DIR).
+ * and where the court is: one folder for the courts of both worlds (SHARED_STATE_DIR), unless they
+ * are in the database (DATABASE_URL; the folder's files are taken in once, see importFiles.ts).
  */
-const SHARED_DIR = process.env.SHARED_STATE_DIR || STATE_DIR
+export const SHARED_DIR = process.env.SHARED_STATE_DIR || STATE_DIR
 /** This court's world ("dev", "creative"); unset: one world, every bot in it. */
 const WORLD = process.env.COURT_WORLD
 /** The world the court lives in when the King has not called it away. */
@@ -153,9 +155,15 @@ export class BotManager {
 
   constructor(
     cfg: AppConfig,
-    private readonly log: Logger
+    private readonly log: Logger,
+    /** The court's shared state in the database (DATABASE_URL); without it, files. */
+    shared?: SharedState
   ) {
     this.cfg = cfg
+    // Memories, orders, hails, rules and where the court is: in the database, else in files.
+    const keep = (file: string, bot?: string): string | InDatabase =>
+      shared ? { shared, bot } : path.resolve(SHARED_DIR, file)
+    this.presence = WORLD ? new Presence(keep('presence.json'), WORLD, HOME_WORLD) : undefined
     const court = new CourtRoster(cfg.court)
     this.court = court
     const botNames = cfg.bots.map((b) => b.name)
@@ -187,13 +195,13 @@ export class BotManager {
       reportsTo: b.reportsTo,
     }))
     // The rules the royal family lays down bind the whole court.
-    const rules = new CourtRules(path.resolve(SHARED_DIR, 'rules.json'))
+    const rules = new CourtRules(keep('rules.json'))
     // What each bot built, so "take it down" removes only that bot's own blocks.
     const builds = new BuildLog(path.resolve(STATE_DIR, 'builds.json'))
     for (const botCfg of mine) {
       const botLog = log.child(botCfg.name)
       const ai = new OllamaClient(botCfg.ai, botLog.child('ollama'))
-      const hails = new HailLog(path.resolve(SHARED_DIR, `${botCfg.name}.hails.json`))
+      const hails = new HailLog(keep(`${botCfg.name}.hails.json`, botCfg.name))
       const magic = botCfg.magic
         ? (this.magic = new Magic({
             file: path.resolve(STATE_DIR, `magic-${botCfg.name.toLowerCase()}.json`),
@@ -208,11 +216,9 @@ export class BotManager {
         hails,
         // Each bot remembers only what it heard itself, so one can keep a secret and news
         // travels by being told.
-        memory: new CourtMemory(
-          path.resolve(SHARED_DIR, `memory-${botCfg.name.toLowerCase()}.json`)
-        ),
+        memory: new CourtMemory(keep(`memory-${botCfg.name.toLowerCase()}.json`, botCfg.name)),
         staff,
-        orders: new OrderBook(path.resolve(SHARED_DIR, `orders-${botCfg.name.toLowerCase()}.json`)),
+        orders: new OrderBook(keep(`orders-${botCfg.name.toLowerCase()}.json`, botCfg.name)),
         rules,
         magic,
         commissions: this.commissions,
@@ -674,9 +680,7 @@ export class BotManager {
   private blessAsked = 0
   private blessing = false
   /** Where the court is (in which world), shared with the court of the other world. */
-  private readonly presence = WORLD
-    ? new Presence(path.resolve(SHARED_DIR, 'presence.json'), WORLD, HOME_WORLD)
-    : undefined
+  private readonly presence?: Presence
   /** Bots of this court that are in the other world now. */
   private readonly away = new Set<Bot>()
   private moving = false
