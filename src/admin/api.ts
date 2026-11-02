@@ -619,10 +619,11 @@ export function routes(router: Router, ctx: Context): void {
     const bot = botName(req.params.bot)
     const d = await sharedDb()
     if (d) {
-      const gone = await changeShared(d, `memory:${bot}`, (tx) =>
-        deleteFact(tx, bot, subject, fact)
-      )
-      if (!gone) throw new HttpError(404, 'no such fact (changed meanwhile?)')
+      // Nothing to forget: thrown inside, so nothing is written and nobody loads again.
+      await changeShared(d, `memory:${bot}`, async (tx) => {
+        if (!(await deleteFact(tx, bot, subject, fact)))
+          throw new HttpError(404, 'no such fact (changed meanwhile?)')
+      })
     } else {
       const file = memoryFile(w, bot)
       const m = readJson<Record<string, Fact[]>>(file) ?? {}
@@ -667,7 +668,9 @@ export function routes(router: Router, ctx: Context): void {
     if (d) {
       const order = (await loadBook(d, bot)).orders.find((o) => o.id === id)
       if (!order) throw new HttpError(404, 'no such order')
-      await changeShared(d, `orders:${bot}`, (tx) => deleteOrders(tx, bot, [id]))
+      await changeShared(d, `orders:${bot}`, async (tx) => {
+        if (!(await deleteOrders(tx, bot, [id]))) throw new HttpError(404, 'no such order')
+      })
       audit(req, `released ${req.params.bot} from an order`, order.text)
       return json({ ok: true })
     }
@@ -687,7 +690,9 @@ export function routes(router: Router, ctx: Context): void {
     if (d) {
       const rule = (await loadRules(d)).rules.find((r) => r.id === id)
       if (!rule) throw new HttpError(404, 'no such rule')
-      await changeShared(d, 'rules', (tx) => deleteRules(tx, [id]))
+      await changeShared(d, 'rules', async (tx) => {
+        if (!(await deleteRules(tx, [id]))) throw new HttpError(404, 'no such rule')
+      })
       audit(req, 'took away a rule', rule.text)
       return json({ ok: true })
     }

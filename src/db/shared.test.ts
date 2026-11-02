@@ -235,6 +235,16 @@ describe('the shared state in the database', () => {
     expect(new Set((await memorySizes(db)).keys())).toEqual(new Set(['wat']))
   })
 
+  it('bumps nothing for a change from outside that came to nothing', async () => {
+    await expect(
+      changeShared(db, 'memory:nobody', async () => {
+        throw new Error('no such fact')
+      })
+    ).rejects.toThrow('no such fact')
+    const { rows } = await db.query("select 1 from court_versions where scope = 'memory:nobody'")
+    expect(rows).toHaveLength(0)
+  })
+
   it('tells a lost connection from a refusal', () => {
     expect(transient(Object.assign(new Error('x'), { code: 'ECONNREFUSED' }))).toBe(true)
     expect(transient(Object.assign(new Error('x'), { code: '08006' }))).toBe(true)
