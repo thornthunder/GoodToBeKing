@@ -94,6 +94,7 @@ import { Gatherer, type Material } from './gathering'
 import { GAME, Hunter, SPOILS } from './hunting'
 import { FOODS, Survival, duskFallen, isNight, outdoorHours } from './survival'
 import { Movement } from './movement'
+import { climbOut, noWay } from './escape'
 import type { CommandResult, Magic } from '../magic/Magic'
 import type { SpellArgs } from '../magic/spells'
 import { loadSkin } from './skin'
@@ -299,6 +300,9 @@ export class Bot extends EventEmitter {
   /** Eating and, for guards, fighting (survival). */
   private survival?: Survival
   private died = false
+  /** Digging steps out of a hole (bot/escape.ts), and when it last looked whether it is in one. */
+  private climbing = false
+  private lastClimb = 0
   private lastDeathWords = 0
   private surviving = false
   /** The court's home and storehouse (survival). */
@@ -421,7 +425,7 @@ export class Bot extends EventEmitter {
     if (this.building || this.mason.busy || this.gathering || this.handbuilder?.busy) return false
     if (this.onHallWork || this.patrol) return false
     if (this.raider || this.defender) return false // at war
-    if (this.survival?.busy) return false
+    if (this.survival?.busy || this.climbing) return false
     const walking = this.movement?.current()
     if (walking && !this.dutyFollowing && walking.kind !== 'going') return false
     if (this.cfg.duty?.auto && this.dutyTarget() && Date.now() >= this.dutyPausedUntil) return false
@@ -435,11 +439,39 @@ export class Bot extends EventEmitter {
     // Asleep: nothing to do till morning (or till a royal speaks to it).
     if (this.body?.isSleeping) return
     this.lookAfterSelf()
+    this.escapeHole()
     this.performDuty()
     this.keepPost()
     this.deliverReports()
     this.fadeGifts()
     this.watchMagic()
+  }
+
+  /**
+   * Down a hole at home (a creeper's crater under the spawn point: woken in it, with no way up,
+   * every job ends in "no path" and the monsters down there kill it over and over) with nothing
+   * to do: dig steps out towards the doorway (bot/escape.ts). Looked into every half minute.
+   */
+  private escapeHole(): void {
+    const body = this.body
+    const home = this.household?.home
+    if (!body || !home || this.climbing || !byHand(this.gameMode()) || !this.isFree()) return
+    if (Date.now() - this.lastClimb < 30_000) return
+    const p = this.position()
+    if (!p || p.y >= home.y - 1 || Math.hypot(p.x - home.x, p.z - home.z) > 16) return
+    this.lastClimb = Date.now()
+    const goal = new goals.GoalNear(home.x, home.y, home.z, 1)
+    if (!noWay(body, goal)) return
+    const door = this.household?.hall?.openings[0]
+    const toward = door ? { x: door[0], z: door[1] } : { x: home.x, z: home.z + 4 }
+    this.climbing = true
+    this.log.info(`down a hole at ${fmtVec(p)} with no way up to home: digging steps out`)
+    climbOut(body, this.log.child('climb'), toward, goal)
+      .then((climbed) => {
+        if (climbed < 0) this.log.info('could not climb out of the hole')
+      })
+      .catch((err) => this.log.warn(`climbing out failed: ${errMsg(err)}`))
+      .finally(() => (this.climbing = false))
   }
 
   /** In survival: eat, fight (guards), and close doors left open. One round at a time. */
@@ -2357,6 +2389,20 @@ export class Bot extends EventEmitter {
         Object.values(body.entities)
           .filter((e) => e.type === 'player' && this.enemies.has((e.username ?? '').toLowerCase()))
           .map((e) => ({ name: e.username ?? '', position: e.position })),
+      climbOut: (toward, goal) => climbOut(body, this.log.child('climb'), toward, goal),
+      findChest: (near, radius) => {
+        const at = new WorldVec(near.x, near.y, near.z)
+        if (/^(chest|trapped_chest)$/.test(body.blockAt(at)?.name ?? '')) return near
+        const found = body
+          .findBlocks({
+            matching: (b: { name: string }) => /^(chest|trapped_chest)$/.test(b.name),
+            point: at,
+            maxDistance: radius,
+            count: 8,
+          })
+          .sort((a: WorldVec, b: WorldVec) => a.distanceTo(at) - b.distanceTo(at))[0]
+        return found ? { x: found.x, y: found.y, z: found.z } : undefined
+      },
     }
   }
 

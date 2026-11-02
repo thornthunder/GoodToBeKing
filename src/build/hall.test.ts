@@ -54,6 +54,21 @@ describe('the hall survey', () => {
     expect(third.openings).toContainEqual([5, 2])
   })
 
+  it('keeps a doorway something stands in for the moment, so repairs never fill it', () => {
+    const first = surveyHall(hall(), { x: 2, y: 64, z: 2 })
+    if (typeof first === 'string') throw new Error(first)
+    // The doorway filled (or not seen) when the hall is looked at again.
+    const shut = hall({ '2,64,-1': 'cobblestone', '2,65,-1': 'cobblestone' })
+    const again = surveyHall(shut, { x: 2, y: 64, z: 2 }, first)
+    if (typeof again === 'string') throw new Error(again)
+    expect(again.openings).toEqual([[2, -1]])
+    const open = hall()
+    expect(repairCells(again, open).filter((c) => c.x === 2 && c.z === -1 && c.y <= 65)).toEqual([])
+    // No door is hung in a doorway something stands in; one in an open doorway.
+    expect(doorCells(again, shut)).toEqual([])
+    expect(doorCells(again, open)).toHaveLength(1)
+  })
+
   it('says so when the walls are not closed at three high', () => {
     const leaky = hall({ '5,66,2': 'air' })
     expect(surveyHall(leaky, { x: 2, y: 64, z: 2 })).toContain('not closed all round')

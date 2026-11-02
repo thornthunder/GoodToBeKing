@@ -226,7 +226,11 @@ leagues improve through a season and has a hypothesis he keeps to himself till t
   walks home, puts it in its own chest (only what came from theirs counts), and goes again; dead,
   it wakes at home (the referee sets spawn points) and carries on; a `Defender` holds the chest
   and puts back what falls by it. `Bot.startRaid`/`startDefence`/`stopWar`; at war a bot is not
-  free, so the steward leaves it alone.
+  free, so the steward leaves it alone. A raider with no way to their chest rests half a minute
+  and tries again, eight times, before giving up (on 2026-11-02 both sides gave up within half
+  a minute: Green's raiders were sealed in their own hall, Blue's stood in a crater); got nowhere
+  on a leg, it digs steps out of the hole it may be in (`bot/escape.ts`); a chest not where the
+  referee said (the court remakes a lost one beside it) is looked for within 8 blocks.
 - The referee (`src/war/main.ts`, `node dist/war/main.js`; `src/war/referee.ts` is the pure part)
   runs the season from `.war/season.json` (a restart carries on): it makes both halls anew and
   musters each side home with empty pockets and its spawn point there (server commands on the
@@ -281,7 +285,10 @@ Windows, killing a background `npx` shell does not kill its node children at all
   royals (not creepers or endermen; in the hall with no royal near, only what got in or comes
   within reach; a monster they get no closer to is let go), everyone backing away from a
   creeper (inside the hall only from one that got in or stands by the doorway), doors closed
-  behind; dying is said lightly and the bot comes home. In survival the mason (creative) is never used and builds by blueprint are declined.
+  behind; dying is said lightly and the bot comes home. A courtier down a hole at home with no
+  way up (a creeper's crater under the spawn point: on 2026-11-02 a whole war side woke in one
+  for three hours, killed over and over by the zombie villager in it) digs steps out towards
+  the doorway, natural blocks only (`bot/escape.ts`, `Bot.escapeHole`, every 30 s when free). In survival the mason (creative) is never used and builds by blueprint are declined.
   Beds: when a royal lies down at night every courtier sleeps in a free bed near home. Where
   each respawns the server says (`set_spawn_position`, `Bot.state.spawnPoint`): whoever's is
   not at home taps a bed near home, by day only (a bed tapped at night is lain in, and one
@@ -298,7 +305,9 @@ Windows, killing a background `npx` shell does not kill its node children at all
   (`kingAnswers`) has Merlin conjure them or not. Guards do not ask for swords themselves. Repairs go
   against the hall's shape as last seen whole (stone first, then planks, then dirt); a gap is a
   doorway only if it has a door or was one before (worn walls under a standing top course are
-  holes). Nobody goes out at night (no field, hunt, grove or wood errands, and the court's own
+  holes); once a doorway, always a doorway: one filled or unseen for the moment is still the way
+  in, never repaired over, and gets no door while something stands in it (2026-11-02: a war side's
+  repairs sealed its raiders in). Nobody goes out at night (no field, hunt, grove or wood errands, and the court's own
   hall work makes do with the storehouse). Food: `build/farm.ts` + `bot/farming.ts` (a 4x4
   wheat field near home, by water if any, growing by another 4x4 beside it, up to 160 squares,
   once sown with 16 seeds spare; hoe via `bot/crafting.ts`, which crafts at a table within 24

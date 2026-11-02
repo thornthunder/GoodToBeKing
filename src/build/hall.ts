@@ -113,8 +113,17 @@ export function surveyHall(
     before.inside.length === inside.length &&
     before.inside.every(([x, z]) => isInside.has(`${x},${z}`))
   const doorway = new Set(before?.openings.map(([x, z]) => `${x},${z}`))
+  // Once a doorway, always a doorway: one shut for the moment (a block put in it, or not seen)
+  // is still the way in, not a wall. On 2026-11-02 a side of the war game lost its doorway
+  // that way, its repairs filled it and its raiders stood sealed in their own hall.
+  const gapSet = new Set(gaps.map(([x, z]) => `${x},${z}`))
   const openings = same
-    ? gaps.filter(([x, z]) => doorway.has(`${x},${z}`) || DOOR.test(names(x, floorY, z) ?? ''))
+    ? [
+        ...gaps.filter(
+          ([x, z]) => doorway.has(`${x},${z}`) || DOOR.test(names(x, floorY, z) ?? '')
+        ),
+        ...before!.openings.filter(([x, z]) => !gapSet.has(`${x},${z}`)),
+      ]
     : gaps
   return { floorY, inside, ring, wallTop, openings }
 }
@@ -382,6 +391,9 @@ function againstWall(hall: Hall, names: BlockNames): Array<[number, number]> {
 
 /** A door in the first opening two high (the item places both halves). */
 export function doorCells(hall: Hall, names: BlockNames): HandCell[] {
-  const gap = hall.openings.find(([x, z]) => !DOOR.test(names(x, hall.floorY, z) ?? ''))
+  // An open doorway without a door; one something stands in is left as it is.
+  const gap = hall.openings.find(
+    ([x, z]) => open(names(x, hall.floorY, z)) && open(names(x, hall.floorY + 1, z))
+  )
   return gap ? [{ x: gap[0], y: hall.floorY, z: gap[1], block: 'wooden_door' }] : []
 }

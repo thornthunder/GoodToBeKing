@@ -21,8 +21,16 @@ export const GEAR =
 /** How far one leg of a long walk goes, and how long it may take. */
 const LEG = 48
 const LEG_MS = 90_000
-/** A walk that got nowhere this many times running: no way there. */
+/** A walk that got nowhere this many times running: no way there, for now. */
 const STUCK_LEGS = 3
+/**
+ * No way to their chest this many times (a rest between): the raider gives up. On 2026-11-02
+ * both sides gave up within half a minute of the order; a raid may last two days.
+ */
+const NO_WAY_TRIES = 8
+const NO_WAY_REST_MS = 30_000
+/** A chest not where it was said to be is looked for this close by (the court remakes a lost one beside it). */
+const CHEST_SEARCH = 8
 /** A "wait" raider holds this far from the chest, this long at most, for the defenders to leave. */
 const WAIT_OFF = 24
 const WAIT_MS = 4 * 60_000
@@ -51,6 +59,13 @@ export interface RaidBody {
   busy: () => boolean
   /** Enemies in sight, by name. */
   enemies: () => Array<{ name: string; position: Vec3 }>
+  /**
+   * Down a hole with no way on: dig steps out towards a spot until there is a way to the goal
+   * (bot/escape.ts). The steps climbed, or -1 when there is no way.
+   */
+  climbOut?: (toward: Point, goal: goals.Goal) => Promise<number>
+  /** The chest at a spot, or the nearest one this close by; none seen: undefined. */
+  findChest?: (near: Point, radius: number) => Point | undefined
 }
 
 export interface RaidOrders {
@@ -63,6 +78,8 @@ export interface RaidOrders {
   onLost: () => void
   onDone: (why: string) => void
 }
+
+const fmt = (p: Point) => `(${p.x}, ${p.y}, ${p.z})`
 
 /** What the courtier carries that is not gear, by item. */
 export function pockets(bot: MineflayerBot): Record<string, number> {
@@ -134,18 +151,22 @@ export class Raider {
           o.tactic === 'wait' ? await this.walk(o.chest, WAIT_OFF) : await this.walk(o.chest, 3)
         if (!near) {
           if (!this.body.alive()) continue
-          if (++failures >= STUCK_LEGS) return o.onDone('no way to their chest')
-          await sleep(5_000)
+          if (++failures >= NO_WAY_TRIES) return o.onDone('no way to their chest')
+          log.info(`no way to their chest yet (try ${failures} of ${NO_WAY_TRIES}); resting`)
+          await sleep(NO_WAY_REST_MS)
           continue
         }
         failures = 0
         if (o.tactic === 'wait' && !(await this.waitForOpening())) continue
         if (o.tactic === 'fight') await this.fightFirst()
         if (this.stop || !this.body.alive()) continue
-        // Take all that fits.
+        // Take all that fits (from a chest remade beside the one said, if that one is gone).
         const before = pockets(bot)
         let opened = false
-        await this.body.withChest(o.chest, async (window) => {
+        const theirs = this.body.findChest?.(o.chest, CHEST_SEARCH) ?? o.chest
+        if (theirs !== o.chest)
+          log.info(`their chest is not where it was said: one at ${fmt(theirs)}`)
+        await this.body.withChest(theirs, async (window) => {
           opened = true
           for (const item of window.containerItems()) {
             if (this.stop || bot.inventory.emptySlotCount() < 1) break
@@ -184,7 +205,8 @@ export class Raider {
         }
         if (!this.body.alive()) continue
         const had = pockets(bot)
-        await this.body.withChest(o.store, async (window) => {
+        const ours = this.body.findChest?.(o.store, CHEST_SEARCH) ?? o.store
+        await this.body.withChest(ours, async (window) => {
           for (const item of bot.inventory.items())
             if (!GEAR.test(item.name))
               await withTimeout(window.deposit(item.type, item.metadata, item.count), 5_000).catch(
@@ -256,6 +278,14 @@ export class Raider {
         if (this.body.busy()) continue
         const moved = bot.entity.position.distanceTo(me)
         log.info(`a leg of the walk stopped (${errMsg(err)}); moved ${Math.round(moved)}`)
+        // Got nowhere: down a hole, maybe (woken in a crater at home). Dig steps out.
+        if (moved < 4 && this.body.climbOut) {
+          const climbed = await this.body.climbOut({ x: leg.x, y: leg.y, z: leg.z }, goal)
+          if (climbed > 0) {
+            stuck = 0
+            continue
+          }
+        }
         if (moved < 4 && ++stuck >= STUCK_LEGS) return false
         await sleep(2_000)
       }
