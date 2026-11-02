@@ -8,7 +8,7 @@
  */
 import { serverOptions } from '../src/bot/Bot'
 import { createBot } from 'mineflayer-bedrock'
-import { pathfinder, Movements, goals } from 'mineflayer-pathfinder'
+import { pathfinder, Movements, goals, type Pathfinder } from 'mineflayer-pathfinder'
 import { Vec3 } from 'vec3'
 import { defaultBotConfig } from '../src/config'
 
@@ -30,7 +30,9 @@ const bot = createBot({
   auth: 'offline',
   hideErrors: true,
 })
-bot.loadPlugin(pathfinder)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+bot.loadPlugin(pathfinder as any)
+const walker = bot as unknown as typeof bot & { pathfinder: Pathfinder }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 bot.once('spawn', async () => {
@@ -45,7 +47,7 @@ bot.once('spawn', async () => {
   movements.canOpenDoors = true
   movements.allowParkour = false
   movements.maxDropDown = 3
-  bot.pathfinder.setMovements(movements)
+  walker.pathfinder.setMovements(movements)
   for (let round = 1; round <= rounds; round++) {
     const p = bot.entity.position
     const cx = Math.floor(p.x / 16)
@@ -78,9 +80,14 @@ bot.once('spawn', async () => {
     ]) {
       const t0 = Date.now()
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const gen = (bot.pathfinder as any).getPathFromTo(movements, bot.entity.position, goal.goal, {
-        timeout: 4000,
-      })
+      const gen = (walker.pathfinder as any).getPathFromTo(
+        movements,
+        bot.entity.position,
+        goal.goal,
+        {
+          timeout: 4000,
+        }
+      )
       let result: { status: string; visitedNodes: number; path: unknown[] } | undefined
       for (const step of gen) {
         result = step.result
