@@ -2502,6 +2502,10 @@ export class Bot extends EventEmitter {
       climbOut: (toward, goal) => climbOut(body, this.log.child('climb'), toward, goal),
       findChest: (near, radius) => {
         const at = new WorldVec(near.x, near.y, near.z)
+        // Only looked for close by: the search runs round the bot, whatever point it is given.
+        // On 2026-11-03 a raider killed at the enemy chest and awake at home a moment later
+        // "found" its own side's chest, took from it and put it back as loot.
+        if (body.entity.position.distanceTo(at) > radius + 8) return undefined
         if (/^(chest|trapped_chest)$/.test(body.blockAt(at)?.name ?? '')) return near
         const found = body
           .findBlocks({
@@ -2510,6 +2514,7 @@ export class Bot extends EventEmitter {
             maxDistance: radius,
             count: 8,
           })
+          .filter((p: WorldVec) => p.distanceTo(at) <= radius)
           .sort((a: WorldVec, b: WorldVec) => a.distanceTo(at) - b.distanceTo(at))[0]
         return found ? { x: found.x, y: found.y, z: found.z } : undefined
       },

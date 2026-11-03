@@ -190,6 +190,12 @@ export class Raider {
         if (o.tactic === 'fight') await this.fightFirst()
         if (this.stop || !this.body.alive()) continue
         // Take all that fits (from a chest remade beside the one said, if that one is gone).
+        // Still there (a death in the moment just past wakes it at home, 190 blocks off).
+        const chestAt = new Vec3(o.chest.x, o.chest.y, o.chest.z)
+        if (bot.entity.position.distanceTo(chestAt) > CHEST_SEARCH + 4) {
+          log.info('not by their chest after all (killed?): going again')
+          continue
+        }
         const before = pockets(bot)
         let opened = false
         const theirs = this.body.findChest?.(o.chest, CHEST_SEARCH) ?? o.chest
