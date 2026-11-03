@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Vec3 } from 'vec3'
-import { directions, planStep, type Names } from './escape'
+import { canRestore, directions, planStep, type Names } from './escape'
 
 /**
  * A pit in level ground: grass at y 63 (feet at 64) everywhere but a hole three by three (x and
@@ -38,13 +38,25 @@ describe('climbing out of a hole', () => {
     expect(planStep(pit({ '2,59,1': 'air' }), new Vec3(1, 60, 1), { x: 1, z: 0 })).toBeNull()
   })
 
-  it('never digs through what someone made, nor what it cannot see', () => {
-    expect(
-      planStep(pit({ '3,61,1': 'cobblestone' }), new Vec3(2, 60, 1), { x: 1, z: 0 })
-    ).toBeNull()
+  it('digs through what someone made only when it may, and never through what it cannot see', () => {
+    const made = pit({ '3,61,1': 'cobblestone' })
+    expect(planStep(made, new Vec3(2, 60, 1), { x: 1, z: 0 })).toBeNull()
     expect(planStep(pit({ '3,62,1': 'oak_planks' }), new Vec3(2, 60, 1), { x: 1, z: 0 })).toBeNull()
+    const borrowing = planStep(made, new Vec3(2, 60, 1), { x: 1, z: 0 }, () => true)
+    expect(borrowing?.dig).toEqual([new Vec3(3, 61, 1), new Vec3(3, 62, 1)])
     const blind: Names = (x, y, z) => (x === 3 && y === 61 ? undefined : pit()(x, y, z))
-    expect(planStep(blind, new Vec3(2, 60, 1), { x: 1, z: 0 })).toBeNull()
+    expect(planStep(blind, new Vec3(2, 60, 1), { x: 1, z: 0 }, () => true)).toBeNull()
+  })
+
+  it('borrows a made block only when it can put it back', () => {
+    // Planks come back to the hand; cobblestone only to a pickaxe; one carried already always.
+    expect(canRestore([], 'oak_planks')).toBe(true)
+    expect(canRestore([], 'cobblestone')).toBe(false)
+    expect(canRestore(['wooden_pickaxe'], 'cobblestone')).toBe(true)
+    expect(canRestore(['cobblestone'], 'cobblestone')).toBe(true)
+    // Stone drops cobblestone, glass nothing: neither comes back as it was.
+    expect(canRestore(['iron_pickaxe'], 'stone')).toBe(false)
+    expect(canRestore(['iron_pickaxe'], 'glass')).toBe(false)
   })
 
   it('reaches the surface in four steps from four blocks down', () => {

@@ -294,7 +294,11 @@ Windows, killing a background `npx` shell does not kill its node children at all
   behind; dying is said lightly and the bot comes home. A courtier down a hole at home with no
   way up (a creeper's crater under the spawn point: on 2026-11-02 a whole war side woke in one
   for three hours, killed over and over by the zombie villager in it) digs steps out towards
-  the doorway, natural blocks only (`bot/escape.ts`, `Bot.escapeHole`, every 30 s when free). In survival the mason (creative) is never used and builds by blueprint are declined.
+  the doorway (`bot/escape.ts`, `Bot.escapeHole`, every 30 s when free): natural blocks freely,
+  a made block only when it can put it back (one carried, or planks to the hand, cobblestone to
+  a pickaxe), and every borrowed block goes back once a way is found. The King's rule,
+  2026-11-03: a courtier may break a made block when it must, as long as it remakes it the way
+  it found it, right after. In survival the mason (creative) is never used and builds by blueprint are declined.
   Beds: when a royal lies down at night every courtier sleeps in a free bed near home. Where
   each respawns the server says (`set_spawn_position`, `Bot.state.spawnPoint`): whoever's is
   not at home taps a bed near home, by day only (a bed tapped at night is lain in, and one
