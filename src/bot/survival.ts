@@ -297,10 +297,10 @@ export class Survival {
       while (Date.now() - t1 < 150_000 && !gone()) {
         const c = this.bot.entities[id]
         const gap = c.position.distanceTo(me())
-        if (fromHome(c.position) >= LURE_FAR - 4 && gap > 6) break
-        if (gap > 12) {
-          // It wandered off far enough by itself.
-          if (fromHome(c.position) > CREEPER_WATCH + 6) break
+        // Done only once it has lost track and is off home's doorstep: a lure that turned for
+        // home with the creeper seven blocks behind was caught on the way (2026-11-03).
+        if (gap > 14) {
+          if (fromHome(c.position) >= CREEPER_WATCH) break
           this.bot.pathfinder.setGoal(new goals.GoalFollow(c, 7), true)
           const t2 = Date.now()
           while (Date.now() - t2 < 8_000 && !gone() && c.position.distanceTo(me()) > 8)
