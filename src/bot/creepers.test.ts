@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chooseLure, lurePoint, LURE_FAR } from './creepers'
+import { chooseLure, leadPoint, lurePoint, LEAD_STEP, LURE_FAR } from './creepers'
 
 describe('luring a creeper away from the hall', () => {
   it('sends the nearest fit soldier, else anyone fit but the captain, else whoever is best off', () => {
@@ -64,5 +64,27 @@ describe('luring a creeper away from the hall', () => {
     })
     // No doorway known and the creeper at home: south it is.
     expect(lurePoint(home, home)).toEqual({ x: 0, y: 64, z: LURE_FAR })
+  })
+})
+
+describe('leading a creeper', () => {
+  it('leads straight away from the creeper, and sideways when that would be towards home', () => {
+    const home = { x: 0, y: 64, z: 0 }
+    // The creeper east of the lure, the lure east of home: west would be home, so sideways.
+    const p = leadPoint(home, { x: 10, y: 64, z: 0 }, { x: 14, y: 64, z: 0 })
+    expect(p.x).toBe(10)
+    expect(Math.abs(p.z)).toBe(LEAD_STEP)
+    // The creeper between home and the lure: straight on, away from both.
+    expect(leadPoint(home, { x: 10, y: 64, z: 0 }, { x: 6, y: 64, z: 0 })).toEqual({
+      x: 10 + LEAD_STEP,
+      y: 64,
+      z: 0,
+    })
+    // On top of it: away from home.
+    expect(leadPoint(home, { x: 0, y: 64, z: 8 }, { x: 0, y: 64, z: 8 })).toEqual({
+      x: 0,
+      y: 64,
+      z: 8 + LEAD_STEP,
+    })
   })
 })

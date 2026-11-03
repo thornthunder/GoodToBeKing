@@ -50,6 +50,43 @@ export function chooseLure(candidates: LureCandidate[]): string | undefined {
   )
 }
 
+/** How far ahead of itself the lure aims each leg of the way out. */
+export const LEAD_STEP = 20
+
+/**
+ * Where the lure goes next with the creeper at its heels: straight away from the creeper, as
+ * seen from where the lure stands, and never towards home (then sideways, the side away from
+ * home). On 2026-11-03 a lure aimed out from home past the creeper walked into it, since the
+ * creeper was already between it and that point.
+ */
+export function leadPoint(home: Point3, me: Point3, creeper: Point3): Point3 {
+  let dx = me.x - creeper.x
+  let dz = me.z - creeper.z
+  if (Math.hypot(dx, dz) < 0.5) {
+    dx = me.x - home.x
+    dz = me.z - home.z
+  }
+  if (Math.hypot(dx, dz) < 0.5) dz = 1
+  let k = 1 / Math.hypot(dx, dz)
+  dx *= k
+  dz *= k
+  const hx = home.x - me.x
+  const hz = home.z - me.z
+  if (hx * dx + hz * dz > 0) {
+    // That way lies home: sideways instead, whichever side is further from home.
+    let px = -dz
+    let pz = dx
+    if (hx * px + hz * pz > 0) {
+      px = -px
+      pz = -pz
+    }
+    dx = px
+    dz = pz
+  }
+  k = LEAD_STEP
+  return { x: Math.round(me.x + dx * k), y: me.y, z: Math.round(me.z + dz * k) }
+}
+
 /**
  * Where the lure leads the creeper: out from home past the creeper, LURE_FAR from home. A
  * creeper at home itself (inside the hall) is led out through the doorway.

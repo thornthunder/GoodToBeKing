@@ -1,5 +1,5 @@
 import type { Bot as MineflayerBot } from 'mineflayer-bedrock'
-import { CREEPER_WATCH, LURE_FAR, lurePoint } from './creepers'
+import { CREEPER_WATCH, LURE_FAR, leadPoint } from './creepers'
 import { goals, type Pathfinder } from 'mineflayer-pathfinder'
 import { Vec3 } from 'vec3'
 import type { Logger } from '../logger'
@@ -280,7 +280,7 @@ export class Survival {
       if (gone()) return true
       // Then away: out past it, far from home; and on, away from it, if it is still at heel.
       // One that does not follow is gone back to, close enough to take notice, and led again.
-      let to = lurePoint(home, creeper.position, this.opts.doorway?.())
+      let to = leadPoint(home, me(), creeper.position)
       this.bot.pathfinder.setGoal(new goals.GoalNear(to.x, to.y, to.z, 2))
       const t1 = Date.now()
       while (Date.now() - t1 < 150_000 && !gone()) {
@@ -295,20 +295,13 @@ export class Survival {
           while (Date.now() - t2 < 8_000 && !gone() && c.position.distanceTo(me()) > 8)
             await sleep(250)
           if (gone()) break
-          to = lurePoint(home, c.position, this.opts.doorway?.())
+          to = leadPoint(home, me(), c.position)
           this.bot.pathfinder.setGoal(new goals.GoalNear(to.x, to.y, to.z, 2))
           continue
         }
         // At the point with it at heel: further out still, never back towards home.
         if (me().distanceTo(new Vec3(to.x, to.y, to.z)) < 3) {
-          const d = Math.max(fromHome(me()), 1)
-          const ux = (me().x - home.x) / d
-          const uz = (me().z - home.z) / d
-          to = {
-            x: Math.round(home.x + ux * (d + 15)),
-            y: home.y,
-            z: Math.round(home.z + uz * (d + 15)),
-          }
+          to = leadPoint(home, me(), c.position)
           this.bot.pathfinder.setGoal(new goals.GoalNear(to.x, to.y, to.z, 2))
         }
         await sleep(250)
