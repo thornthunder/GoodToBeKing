@@ -125,7 +125,7 @@ export function lastSpot(mine: Mine): Vec3 {
 type MineBot = MineflayerBot & { pathfinder: Pathfinder }
 
 /** Rounds in a row the miner may fail to get down before the mine is given up for a new one. */
-const LOST_ROUNDS = 3
+const LOST_ROUNDS = 2
 
 export interface MineResult {
   steps: number
@@ -206,6 +206,29 @@ export class Miner {
     return false
   }
 
+  /**
+   * Down the stairs and the tunnel a step at a time, from the entrance to the last step dug,
+   * clearing each step again on the way; then on to the branch being dug, if any.
+   */
+  private async descend(mine: Mine): Promise<boolean> {
+    this.log.info(`walking the mine's ${mine.steps} steps one by one`)
+    if (!(await this.walkTo(new Vec3(mine.x, mine.y, mine.z), 'the entrance'))) return false
+    for (let i = 1; i <= mine.steps; i++) {
+      if (this.cancelled) return false
+      for (const cell of stepCells(mine, i)) await this.digAt(cell)
+      const f = stepAt(mine, i)
+      try {
+        await withTimeout(this.bot.pathfinder.goto(new goals.GoalBlock(f.x, f.y, f.z)), 15_000)
+      } catch (err) {
+        this.log.info(`could not get down to step ${i}: ${errMsg(err)}`)
+        this.bot.pathfinder.setGoal(null)
+        return false
+      }
+    }
+    if (mine.branch === undefined) return true
+    return this.walkTo(lastSpot(mine), `branch ${mine.branch + 1}`)
+  }
+
   /** Dig on until `want` cobblestone and ore (or the mine ends); then walk back up. */
   async dig(mine: Mine, want: number): Promise<MineResult> {
     this.cancelled = false
@@ -234,8 +257,14 @@ export class Miner {
       return result
     }
     // Down the stairs dug before, to where it stopped: the next is dug from there, within reach.
+    // The pathfinder gives up on a long way down a dark stair (on 2026-11-03 "took too long to
+    // decide" cost a side three rounds of its ten days); then the stairs are walked a step at a
+    // time, each cleared again on the way (gravel falls, a monster's hole).
     if (mine.steps > 0) {
-      if (!(await this.walkTo(lastSpot(mine), `the mine's end (step ${mine.steps})`))) {
+      if (
+        !(await this.walkTo(lastSpot(mine), `the mine's end (step ${mine.steps})`)) &&
+        !(await this.descend(mine))
+      ) {
         mine.lost = (mine.lost ?? 0) + 1
         // Three rounds in a row: the stairs are blocked or overrun; a new mine is begun.
         if (mine.lost >= LOST_ROUNDS) mine.ended = 'unreachable'

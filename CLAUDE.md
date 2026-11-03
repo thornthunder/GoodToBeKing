@@ -368,7 +368,10 @@ Windows, killing a background `npx` shell does not kill its node children at all
   food under 8) are not sent far. `bot/mining.ts`: a branch mine near home: a staircase (32 deep
   for new mines, 18 for the first), a level tunnel of 40, then branches of 20 off it right and
   left every four steps; ore in the walls is dug and its vein followed (coal, iron, copper), a
-  torch every few steps (made of the mine's coal when there is none). Water, lava or a cave ends
+  torch every few steps (made of the mine's coal when there is none). A miner the pathfinder
+  cannot take down to the last step walks the stairs a step at a time, clearing each again
+  (`Miner.descend`; before, "took too long to decide" cost a war side three rounds); a mine
+  unreachable two rounds running is given up for a new one. Water, lava or a cave ends
   a branch (or the tunnel, which then branches off what there is); a mine worked out, flooded or
   lost is followed by a new one clear of the old (`oldMines`). Pickaxes made as needed, stone
   as soon as there is cobblestone. Gatherers
