@@ -327,6 +327,10 @@ export class Raider {
         : new goals.GoalNearXZ(leg.x, leg.z, 6)
       try {
         await withTimeout(walker.pathfinder.goto(goal), LEG_MS)
+        // The last leg reached: there. (The pathfinder's "near" counts whole blocks, the gap
+        // above the exact position: standing three and a half off, one said there and the other
+        // not, and the raider walked on the spot for fourteen minutes, 2026-11-03.)
+        if (last) return true
       } catch (err) {
         walker.pathfinder.setGoal(null)
         if (this.body.busy()) continue
