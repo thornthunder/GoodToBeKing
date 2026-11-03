@@ -72,7 +72,7 @@ import type { InDatabase, SharedState } from '../db/shared'
 import { sideTitle, warSide } from '../war/side'
 import { WarBook } from '../war/War'
 import { Playbook } from '../war/playbook'
-import { planRaid, type Brief } from '../war/plan'
+import { gearWords, planRaid, type Brief } from '../war/plan'
 
 /** Runtime state that should survive restarts (git-ignored). */
 const STATE_DIR = '.state'
@@ -2297,6 +2297,16 @@ export class BotManager {
       playbook: book.lessons,
       record: book.record,
     }
+    // The side as it stands now, for the lessons at the round's end (both sides see both).
+    war.muster(
+      brief.members.map((m) => ({
+        name: m.name,
+        role: m.role,
+        gear: gearWords(m),
+        health: m.health,
+        food: m.food,
+      }))
+    )
     const log = this.log.child('war')
     const ai = new OllamaClient(captain.cfg.ai, log)
     const plan = await planRaid(ai, brief, soldiers, log, {

@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { briefWords, defaultPlan, parsePlan, type Brief } from './plan'
+import { lessonsBrief } from './lessons'
 import { Playbook } from './playbook'
 import {
   chestOf,
@@ -430,5 +431,100 @@ describe('a shared world', () => {
     expect(cmds.some((c) => /^(time|weather|gamerule|kill)/.test(c))).toBe(false)
     expect(cmds.filter((c) => c.startsWith('tp '))).toHaveLength(2)
     expect(cmds.filter((c) => c.endsWith(' chest'))).toHaveLength(2)
+  })
+})
+
+describe('the lessons', () => {
+  const bare = (side: string): WarState => ({
+    side,
+    phase: 'ended',
+    orderedAt: 1000,
+    raiders: {},
+    brought: {},
+    lost: {},
+    recovered: {},
+    kills: 0,
+    deaths: 0,
+    done: true,
+    events: [],
+  })
+
+  it('shows each side the whole round: both plans, both musters, both chests and both accounts', () => {
+    const blue: WarState = {
+      ...bare('blue'),
+      plan: {
+        raiders: ['Brock'],
+        defenders: ['Bram'],
+        tactic: 'rush',
+        when: 'now',
+        trips: 3,
+        reason: 'our chest is empty',
+        by: 'model',
+      },
+      muster: [
+        { name: 'Bram', role: 'captain', gear: 'no sword, no armour', health: 3, food: 10 },
+        { name: 'Brock', role: 'soldier', gear: 'stone sword, no armour', health: 20, food: 18 },
+      ],
+      events: [
+        { at: 1000, kind: 'order', text: 'raid the green chest' },
+        { at: 61_000, kind: 'grab', who: 'Brock', items: { cobblestone: 64 } },
+      ],
+    }
+    const green: WarState = {
+      ...bare('green'),
+      plan: {
+        raiders: ['Gawain'],
+        defenders: ['Gareth'],
+        tactic: 'wait',
+        when: 'night',
+        trips: 1,
+        reason: 'we lack armour',
+        by: 'model',
+      },
+      muster: [
+        { name: 'Gareth', role: 'captain', gear: 'wooden sword, no armour', health: 18, food: 20 },
+      ],
+      events: [
+        { at: 1000, kind: 'order', text: 'raid the blue chest' },
+        { at: 90_000, kind: 'death', who: 'Gawain', by: 'Brock', text: 'death.attack.player' },
+      ],
+    }
+    const result = score([blue, green], { blue: BLUE, green: GREEN })
+    const brief = lessonsBrief({
+      series: 1,
+      round: 2,
+      state: green,
+      other: blue,
+      score: result,
+      stock: { mine: 40, theirs: 0 },
+      playbook: ['Keep two at home.'],
+    })
+    expect(brief).toContain('your side (green)')
+    expect(brief).toContain(
+      "Your side's plan: wait, night, 1 trip(s); 1 raiders, 1 defenders (reason given: we lack armour)"
+    )
+    expect(brief).toContain(
+      "The other side (blue)'s plan: rush, now, 3 trip(s); 1 raiders, 1 defenders (reason given: our chest is empty)"
+    )
+    expect(brief).toContain('Your side when the order came (its chest held 40 items):')
+    expect(brief).toContain('- Gareth, captain: wooden sword, no armour; health 18/20, food 20/20')
+    expect(brief).toContain('The other side (blue) when the order came (its chest held 0 items):')
+    expect(brief).toContain('- Brock, soldier: stone sword, no armour; health 20/20, food 18/20')
+    expect(brief).toContain('What the other side (blue) saw, in order:')
+    expect(brief).toContain('Brock took from their chest: 64 cobblestone')
+    expect(brief).toContain('Gawain died, killed by Brock')
+    expect(brief).toContain('- Keep two at home.')
+  })
+
+  it('still reads without the other side', () => {
+    const brief = lessonsBrief({
+      series: 1,
+      round: 1,
+      state: bare('blue'),
+      score: score([bare('blue'), bare('green')], { blue: BLUE, green: GREEN }),
+      playbook: [],
+    })
+    expect(brief).toContain('(not recorded)')
+    expect(brief).not.toContain('What the other side')
   })
 })

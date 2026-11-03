@@ -9,7 +9,7 @@ import { drawLessons, writeReport, type SeriesFacts } from './lessons'
 import { Playbook } from './playbook'
 import { chestOf, prepareCommands, resultOf, score, type Arena, type Score } from './referee'
 import { botNames, SIDES } from './side'
-import { readWar, type WarState } from './War'
+import { readWar, total, type WarState } from './War'
 
 /**
  * The referee of the war game (the King's experiment, 2026-11-02): runs the season round by
@@ -321,13 +321,17 @@ class Referee {
     for (const state of states) {
       const playbook = new Playbook(path.join(this.sideDir(state.side), 'playbook.json'))
       const before = playbook.forPlanning().lessons
+      const other = states.find((s) => s.side !== state.side)
+      const chest = (side: string) => total(round.stockAtOrder?.[side] ?? {})
       const lessons = await drawLessons(
         this.ai,
         {
           series: this.state.series,
           round: this.state.round,
           state,
+          other,
           score: result,
+          stock: other ? { mine: chest(state.side), theirs: chest(other.side) } : undefined,
           playbook: before,
         },
         this.log,

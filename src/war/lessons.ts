@@ -17,17 +17,30 @@ const LESSONS_SCHEMA = {
 
 const LESSONS_GUIDE = `You are the captain of one side in a war game between two courts on a Minecraft survival server.
 Each round, both sides are ordered at once to raid each other's storehouse chest. The side that brings more of the other's items home and into its own chest wins; kills break a tie.
-A round has just ended. Below is your side's own account of it: your plan, what your courtiers did and what happened to them, and the score.
-Draw one to three lessons for your next plan. Each lesson is one plain sentence, concrete and actionable (who should go or stay, which tactic, when, how many trips, what to watch for), and must follow from what happened in this round. Do not repeat a lesson already in the playbook unless this round confirmed it strongly; then say so in it.
+A round has just ended. Below is the full picture of it, for both sides: each side's plan and the reason its captain gave, how each side stood when the order came (every courtier's weapons, armour, health and food), what each chest held, what each side did and what happened to it, in order, and the score.
+Draw one to three lessons for your next plan, from the whole picture: what won and what lost, for you and for them. Each lesson is one plain sentence, concrete and actionable (who should go or stay, which tactic, when, how many trips, what arms or armour to have, what to watch for), and must follow from what happened in this round. Do not repeat a lesson already in the playbook unless this round confirmed it strongly; then say so in it.
 Answer with JSON only: {"lessons": ["...", "..."]}`
 
 export interface RoundFacts {
   series: number
   round: number
   state: WarState
+  /** The other side's account (both sides see the whole round, the King's wish, 2026-11-03). */
+  other?: WarState
   score: Score
+  /** What each chest held when the order came, in items. */
+  stock?: { mine: number; theirs: number }
   /** The playbook before this round, newest first. */
   playbook: string[]
+}
+
+/** The side as it stood when the order came, a line per courtier. */
+function musterLines(state: WarState): string[] {
+  if (!state.muster?.length) return ['- (not recorded)']
+  return state.muster.map(
+    (m) =>
+      `- ${m.name}, ${m.role}: ${m.gear}; health ${m.health ?? '?'}/20, food ${m.food ?? '?'}/20`
+  )
 }
 
 export function lessonsBrief(f: RoundFacts): string {
@@ -41,13 +54,29 @@ export function lessonsBrief(f: RoundFacts): string {
           ? `, first loot taken after ${s.firstGrabMin} min`
           : ', never took anything')
       : 'unknown'
+  const plan = (state: WarState | undefined, s: typeof mine) =>
+    `${s?.plan ?? 'none'}${state?.plan?.reason ? ` (reason given: ${state.plan.reason})` : ''}`
+  const side = (
+    title: string,
+    state: WarState | undefined,
+    s: typeof mine,
+    chest: number | undefined
+  ) => [
+    `${title}: ${line(s)}.`,
+    `${title}'s plan: ${plan(state, s)}.`,
+    `${title} when the order came${chest !== undefined ? ` (its chest held ${chest} items)` : ''}:`,
+    ...(state ? musterLines(state) : ['- (unknown)']),
+  ]
+  const other = theirs?.side ?? f.other?.side ?? 'the other side'
   return [
     `Series ${f.series}, round ${f.round}: your side (${f.state.side}) ${result === 'tie' ? 'tied' : result}. ${f.score.why}.`,
-    `Your side: ${line(mine)}.`,
-    `The other side (${theirs?.side ?? '?'}): ${line(theirs)}.`,
-    `Your plan: ${mine?.plan ?? 'none'}${f.state.plan?.reason ? ` (reason given: ${f.state.plan.reason})` : ''}.`,
+    ...side('Your side', f.state, mine, f.stock?.mine),
+    ...side(`The other side (${other})`, f.other, theirs, f.stock?.theirs),
     'What your side saw, in order:',
     ...timeline(f.state).map((l) => `- ${l}`),
+    ...(f.other
+      ? [`What the other side (${other}) saw, in order:`, ...timeline(f.other).map((l) => `- ${l}`)]
+      : []),
     f.playbook.length
       ? `Your playbook so far:\n${f.playbook.map((l) => `- ${l}`).join('\n')}`
       : 'Your playbook is empty so far.',

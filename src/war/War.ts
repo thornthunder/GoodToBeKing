@@ -71,6 +71,15 @@ export interface RaiderProgress {
   done?: string
 }
 
+/** A courtier as it stood when the order came: its gear in words, its health and food. */
+export interface Muster {
+  name: string
+  role: string
+  gear: string
+  health?: number
+  food?: number
+}
+
 export interface WarState {
   side: string
   series?: number
@@ -79,6 +88,8 @@ export interface WarState {
   enemy?: Enemy
   orderedAt?: number
   plan?: Plan
+  /** The side as it stood when the order came (the lessons see both sides' musters). */
+  muster?: Muster[]
   startedAt?: number
   endedAt?: number
   raiders: Record<string, RaiderProgress>
@@ -199,6 +210,12 @@ export class WarBook {
       },
       now
     )
+    this.save()
+  }
+
+  /** The side as it stood when the order came. */
+  muster(members: Muster[]): void {
+    this.state.muster = members
     this.save()
   }
 

@@ -67,17 +67,20 @@ Everyone must be a raider or a defender; name each courtier exactly once. A dead
 Things to weigh: swords and armour on both sides, health and hunger, how far it is, how much is in our chest worth defending, and above all what the playbook says happened before.
 Answer with JSON only: {"raiders": [...], "defenders": [...], "tactic": "...", "when": "...", "trips": n, "words": "one short rousing line to your side, naming who goes and who stays", "reason": "two sentences on why this plan"}.`
 
+/** A courtier's arms in words: its sword, its armour, a shield. */
+export function gearWords(m: Member): string {
+  const g = m.gear
+  if (!g) return 'out of sight'
+  const armour = [g.head, g.chest, g.legs, g.feet].filter(Boolean)
+  return (
+    `${g.sword ? `${g.sword} sword` : 'no sword'}, ` +
+    (armour.length ? `${armour.length} piece(s) of ${armour[0]} armour` : 'no armour') +
+    (g.shield ? ', a shield' : '')
+  )
+}
+
 export function briefWords(b: Brief): string {
-  const gear = (m: Member) => {
-    const g = m.gear
-    if (!g) return 'out of sight'
-    const armour = [g.head, g.chest, g.legs, g.feet].filter(Boolean)
-    return (
-      `${g.sword ? `${g.sword} sword` : 'no sword'}, ` +
-      (armour.length ? `${armour.length} piece(s) of ${armour[0]} armour` : 'no armour') +
-      (g.shield ? ', a shield' : '')
-    )
-  }
+  const gear = gearWords
   const members = b.members.map(
     (m) =>
       `- ${m.name}${m.name === b.captain ? ' (you, the captain)' : ''}, ${m.role}: ${gear(m)}; ` +

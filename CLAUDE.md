@@ -200,7 +200,10 @@ run with `run-bds.sh` so its `console.in` takes the referee's commands) for ten 
 then both are ordered at once to raid each other's storehouse chest, no rules. The side that
 brings more of the other's items home and into its own chest wins; kills break a tie. Three
 rounds make a series; after each round each side draws lessons (`src/war/lessons.ts`, the 31b
-model, from that side's own account only) into its playbook (`.state/playbook.json`,
+model, from the whole round: both sides' plans and reasons, both musters as recorded at the
+order (`WarBook.muster`: every courtier's gear, health and food), both chests at the order and
+both accounts; the King's wish, 2026-11-03: with the full picture, the side that makes the right
+deductions does better) into its playbook (`.state/playbook.json`,
 `src/war/playbook.ts`), which its captain reads when planning; after a series the referee writes
 a report (`.war/series-N.md`) and the next series begins. Both sides run identical code and
 model: what sets them apart over a season is only what they have been through, so the season's
