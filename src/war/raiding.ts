@@ -66,6 +66,12 @@ export interface RaidBody {
    * (bot/escape.ts). The steps climbed, or -1 when there is no way.
    */
   climbOut?: (toward: Point, goal: goals.Goal) => Promise<number>
+  /**
+   * When it last died (ms). A Bedrock courtier wakes at home within a fifth of a second of
+   * dying, so `alive()` alone misses most deaths: the raider went on as if it still carried the
+   * loot, and nothing was ever booked as lost (series 1 and 2, 2026-11-03).
+   */
+  lastDeath?: () => number
   /** The chest at a spot, or the nearest one this close by; none seen: undefined. */
   findChest?: (near: Point, radius: number) => Point | undefined
 }
@@ -198,14 +204,23 @@ export class Raider {
         for (const [n, k] of Object.entries(taken)) carrying[n] = (carrying[n] ?? 0) + k
         log.info(`took ${total(taken)} things from their chest (trip ${trips})`)
         o.onGrab(taken)
+        const tookAt = Date.now()
+        const killed = () => (this.body.lastDeath?.() ?? 0) > tookAt
         // Home with it: struck on the way, strike back.
         this.aggression = 'near'
         for (let attempt = 0; attempt < STUCK_LEGS && !this.stop; attempt++) {
           if (await this.walk(o.store, 3)) break
-          if (!this.body.alive()) break
+          if (!this.body.alive() || killed()) break
           await sleep(5_000)
         }
         if (!this.body.alive()) continue
+        // Killed on the way, and awake at home already: the loot lies where it fell.
+        if (killed()) {
+          log.info('killed on the way home: the loot is lost')
+          if (total(carrying) > 0) o.onLost()
+          carrying = {}
+          continue
+        }
         const ours = this.body.findChest?.(o.store, CHEST_SEARCH) ?? o.store
         // Only what the chest took counts: pockets emptied by a death on the way are loot lost,
         // not loot brought (on 2026-11-03 a raider killed by the enemy chest was credited with
