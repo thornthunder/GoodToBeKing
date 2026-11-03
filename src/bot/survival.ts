@@ -54,8 +54,11 @@ const STRIKE = 3
 /** The longest one fight may last. */
 const FIGHT_MS = 30_000
 /** A creeper this close is walked away from, till it is this far. */
-const CREEPER_NEAR = 6
-const CREEPER_SAFE = 10
+const CREEPER_NEAR = 9
+const CREEPER_SAFE = 12
+/** The first thing on sight of one at arm's length: a dash straight away from it, before any path is thought out. */
+const DASH_WITHIN = 5
+const DASH_MS = 700
 /** A monster it has not got any closer to for this long is out of reach (in a pit, behind a wall). */
 const OUT_OF_REACH_MS = 6_000
 /** Enemies this close to the spot a defender holds are fought (the war game). */
@@ -338,6 +341,22 @@ export class Survival {
     })
     if (!creeper) return false
     this.fleeing = true
+    // At arm's length already: run first, straight away from it, and think after (a creeper
+    // blows up three blocks off after a second and a half; the pathfinder takes its time).
+    if (creeper.position.distanceTo(me) <= DASH_WITHIN) {
+      const dx = me.x - creeper.position.x
+      const dz = me.z - creeper.position.z
+      const k = 6 / Math.max(Math.hypot(dx, dz), 0.5)
+      try {
+        await this.bot.lookAt(me.offset(dx * k, 1.6, dz * k), true)
+        this.bot.setControlState('sprint', true)
+        this.bot.setControlState('forward', true)
+        await sleep(DASH_MS)
+      } finally {
+        this.bot.setControlState('forward', false)
+        this.bot.setControlState('sprint', false)
+      }
+    }
     const alive = () =>
       this.bot.entities[creeper.id] !== undefined &&
       creeper.isValid !== false &&
