@@ -268,11 +268,12 @@ export class Survival {
     this.fleeing = true
     try {
       this.log.info(`luring the creeper at ${creeper.position.floored()} away from the hall`)
-      // To it first, so it takes notice: it chases a player it sees within sixteen blocks.
-      if (creeper.position.distanceTo(me()) > 7) {
-        this.bot.pathfinder.setGoal(new goals.GoalFollow(creeper, 5), true)
+      // Towards it, so it takes notice (it chases a player it sees within sixteen blocks), but
+      // never within its fuse: it blows up three blocks off, a second and a half after it starts.
+      if (creeper.position.distanceTo(me()) > 9) {
+        this.bot.pathfinder.setGoal(new goals.GoalFollow(creeper, 8), true)
         const t0 = Date.now()
-        while (Date.now() - t0 < 10_000 && !gone() && creeper.position.distanceTo(me()) > 7)
+        while (Date.now() - t0 < 10_000 && !gone() && creeper.position.distanceTo(me()) > 9)
           await sleep(250)
         this.bot.pathfinder.setGoal(null)
       }
@@ -286,12 +287,12 @@ export class Survival {
         const c = this.bot.entities[id]
         const gap = c.position.distanceTo(me())
         if (fromHome(c.position) >= LURE_FAR - 4 && gap > 6) break
-        if (gap > 10) {
+        if (gap > 12) {
           // It wandered off far enough by itself.
           if (fromHome(c.position) > CREEPER_WATCH + 6) break
-          this.bot.pathfinder.setGoal(new goals.GoalFollow(c, 4), true)
+          this.bot.pathfinder.setGoal(new goals.GoalFollow(c, 7), true)
           const t2 = Date.now()
-          while (Date.now() - t2 < 8_000 && !gone() && c.position.distanceTo(me()) > 6)
+          while (Date.now() - t2 < 8_000 && !gone() && c.position.distanceTo(me()) > 8)
             await sleep(250)
           if (gone()) break
           to = lurePoint(home, c.position, this.opts.doorway?.())
