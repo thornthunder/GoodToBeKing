@@ -211,7 +211,10 @@ leagues improve through a season and has a hypothesis he keeps to himself till t
   its bots file) are never spoken to (`Bot` `enemies`) and are foes when at war (`Survival`:
   `enemies`, `aggression` none/near/range, `defend`). `compose.war.yaml` runs `blue`, `green` and
   `referee` from the court's image with `war.env` (`war.env.example`), each side's `.state` in
-  `.war/<side>`, no database.
+  `.war/<side>`, no database. Only `blue` carries the build section: to put new code into the
+  referee alone, `docker compose -f compose.war.yaml --env-file war.env build blue` and then
+  `up -d --no-deps referee` (`up -d --build referee` builds nothing, and without `--no-deps` it
+  restarts both sides).
 - The side's account is `.state/war.json` (`src/war/War.ts`, `WarBook`: phase peace/raid/ended,
   the enemy, the plan, each raider's trips and what it carries, what was brought home, lost and
   recovered, kills and deaths from the death notices every bot hears (counted once), every event).
