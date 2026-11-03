@@ -244,7 +244,10 @@ leagues improve through a season and has a hypothesis he keeps to himself till t
 - The first season runs in the Dev world (the King's wish after the trial, 2026-11-02: so he can
   come and watch while the kids play), 390 blocks south of the court's home: `arena.json`
   `shared: true` makes the referee touch only the two bases (no `time set`, no `weather`, no
-  killing of drops), `war.env` points at the Dev server and `~/testserver`, both courts ignore
+  killing of drops; the ground is levelled 4 blocks beyond the walls too (`APRON`) and the
+  doorstep is stone: on 2026-11-02 the craters creepers left at both doorsteps, a drop of four
+  the court never takes, sealed both halls for the pathfinder, and the referee's 11-by-11 fill
+  had left last round's craters standing), `war.env` points at the Dev server and `~/testserver`, both courts ignore
   each other's bots (`IGNORE_PLAYERS` on each side: what befalls an ignored player is not written
   in the history either), and the Dev army is stopped meanwhile (CPU, and `max-players` 25). The
   war's own server (`~/warserver`, seed 1234567) stays for a season of its own.

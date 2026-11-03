@@ -219,9 +219,12 @@ describe('the referee', () => {
     expect(cmds.indexOf('setblock 0 70 -3 air')).toBeLessThan(
       cmds.indexOf('setblock 0 70 -3 chest')
     )
-    expect(cmds.find((c) => c.endsWith(' air') && c.startsWith('fill -5 70'))).toBe(
-      'fill -5 70 -5 5 80 5 air'
+    // The apron round the hall is levelled too (last round's craters), the doorstep is stone.
+    expect(cmds.find((c) => c.endsWith(' air') && c.startsWith('fill -8 70'))).toBe(
+      'fill -8 70 -8 8 80 8 air'
     )
+    expect(cmds).toContain('fill -8 65 -8 8 68 8 dirt')
+    expect(cmds).toContain('fill -2 69 5 2 69 8 stone')
     expect(musterCommands(arena.bases.green, ['Gareth'])).toEqual([
       'clear Gareth',
       'tp Gareth 200 70 0',

@@ -35,8 +35,17 @@ export const HALL_HALF = 4
 export const HALL_HEIGHT = 3
 /** Cleared above the floor, so last round's roof goes. */
 const CLEAR_ABOVE = 10
-/** The floor is made good this deep below. */
-const FLOOR_DEPTH = 3
+/** The ground is made good this deep below (a creeper's crater goes four deep). */
+const FLOOR_DEPTH = 5
+/**
+ * Level ground this far beyond the walls too. On 2026-11-02 the craters creepers left at both
+ * doorsteps (a drop of four, which the court never takes) sealed both halls for the pathfinder,
+ * and the last round's craters outlived the next round's making of the hall.
+ */
+export const APRON = 4
+/** The doorstep, this wide and this long, is stone: creepers leave no crater at the door. */
+const STEP_HALF = 2
+const STEP_LENGTH = 4
 
 /** Where a base's chest stands: inside, by the north wall. */
 export function chestOf(base: Base): Point {
@@ -58,11 +67,15 @@ export function hallCommands(base: Base): string[] {
   const top = y + HALL_HEIGHT - 1
   const chest = chestOf(base)
   const door = doorwayOf(base)
+  const [ax1, ax2, az1, az2] = [x1 - APRON, x2 + APRON, z1 - APRON, z2 + APRON]
   return [
-    // The ground: dirt with grass on top, and air above (a roof, trees, a hill).
-    `fill ${x1 - 1} ${y - FLOOR_DEPTH} ${z1 - 1} ${x2 + 1} ${y - 2} ${z2 + 1} dirt`,
-    `fill ${x1 - 1} ${y - 1} ${z1 - 1} ${x2 + 1} ${y - 1} ${z2 + 1} grass_block`,
-    `fill ${x1 - 1} ${y} ${z1 - 1} ${x2 + 1} ${y + CLEAR_ABOVE} ${z2 + 1} air`,
+    // The ground, the apron round the hall included: dirt with grass on top, and air above (a
+    // roof, trees, a hill, last round's craters).
+    `fill ${ax1} ${y - FLOOR_DEPTH} ${az1} ${ax2} ${y - 2} ${az2} dirt`,
+    `fill ${ax1} ${y - 1} ${az1} ${ax2} ${y - 1} ${az2} grass_block`,
+    `fill ${ax1} ${y} ${az1} ${ax2} ${y + CLEAR_ABOVE} ${az2} air`,
+    // A stone doorstep outside the doorway.
+    `fill ${door.x - STEP_HALF} ${y - 1} ${door.z + 1} ${door.x + STEP_HALF} ${y - 1} ${door.z + STEP_LENGTH} stone`,
     // Four walls.
     `fill ${x1} ${y} ${z1} ${x2} ${top} ${z1} cobblestone`,
     `fill ${x1} ${y} ${z2} ${x2} ${top} ${z2} cobblestone`,
