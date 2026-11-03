@@ -3,6 +3,7 @@ import { detectHallWork } from '../ai/abilities'
 import {
   bedCells,
   doorCells,
+  doorstepColumns,
   floorCells,
   reinforceCells,
   repairCells,
@@ -210,6 +211,27 @@ describe('repairs', () => {
     expect(repairCells(h, crater)).toEqual([
       { x: 2, y: 62, z: 2, block: 'earth' },
       { x: 2, y: 63, z: 2, block: 'filler' },
+    ])
+  })
+})
+
+describe('the doorstep', () => {
+  it('lies outside the doorway, three wide and four long, and its craters are repaired', () => {
+    const first = surveyHall(hall(), { x: 2, y: 64, z: 2 })
+    if (typeof first === 'string') throw new Error(first)
+    // The doorway is in the north wall (z -1): the doorstep runs north from it.
+    const columns = doorstepColumns(first)
+    expect(columns).toHaveLength(12)
+    expect(columns).toContainEqual([2, -2])
+    expect(columns).toContainEqual([1, -5])
+    expect(columns).toContainEqual([3, -3])
+    expect(columns).not.toContainEqual([2, -1])
+    // A hole two deep on the doorstep is filled with earth.
+    const cratered = hall({ '2,63,-3': 'air', '2,62,-3': 'air' })
+    const fill = repairCells(first, cratered).filter((c) => c.x === 2 && c.z === -3)
+    expect(fill.map((c) => [c.y, c.block])).toEqual([
+      [62, 'earth'],
+      [63, 'earth'],
     ])
   })
 })

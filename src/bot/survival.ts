@@ -365,7 +365,19 @@ export class Survival {
             await sleep(250)
         }
       } else this.log.info(`backing away from a creeper at ${creeper.position.floored()}`)
-      const away = new goals.GoalInvert(new goals.GoalFollow(creeper, CREEPER_SAFE))
+      // Clear of every creeper in sight, not only this one: on 2026-11-03 three courtiers
+      // fleeing one creeper ran out of the doorway into another.
+      const all = Object.values(this.bot.entities).filter(
+        (e) =>
+          e.name === 'creeper' &&
+          e.isValid !== false &&
+          e.position.distanceTo(this.bot.entity.position) <= CREEPER_WATCH
+      )
+      const away = new goals.GoalCompositeAll(
+        (all.length ? all : [creeper]).map(
+          (c) => new goals.GoalInvert(new goals.GoalFollow(c, CREEPER_SAFE))
+        )
+      )
       this.bot.pathfinder.setGoal(away, true)
       const start = Date.now()
       while (Date.now() - start < 8_000 && alive()) await sleep(250)

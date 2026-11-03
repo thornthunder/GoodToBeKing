@@ -300,6 +300,15 @@ export function repairCells(hall: Hall, names: BlockNames): HandCell[] {
       if (doorway.has(`${x},${z}`) && y <= hall.floorY + 1) continue
       if (open(names(x, y, z))) cells.push({ x, y, z, block: 'filler' })
     }
+  // The doorstep too: a crater just outside the doorway (creepers sit in it, and whoever runs
+  // out falls in; on 2026-11-03 three courtiers fleeing one creeper ran into another there).
+  for (const [x, z] of doorstepColumns(hall)) {
+    const top = hall.floorY - 1
+    if (!open(names(x, top, z))) continue
+    let bottom = top
+    while (bottom > top - 6 && open(names(x, bottom - 1, z))) bottom--
+    for (let y = bottom; y <= top; y++) cells.push({ x, y, z, block: 'earth' })
+  }
   const roofY = hall.wallTop + 1
   const roof = [...hall.ring, ...hall.inside]
   const covered = roof.filter(([x, z]) => !open(names(x, roofY, z))).length
@@ -308,6 +317,25 @@ export function repairCells(hall: Hall, names: BlockNames): HandCell[] {
     for (const [x, z] of roof)
       if (open(names(x, roofY, z))) cells.push({ x, y: roofY, z, block: 'filler' })
   return cells
+}
+
+/** How far out, and how wide, the doorstep in front of a doorway reaches. */
+const DOORSTEP_LENGTH = 4
+const DOORSTEP_HALF = 1
+
+/** The columns of the doorstep outside each doorway: three wide, four long, away from the room. */
+export function doorstepColumns(hall: Hall): Array<[number, number]> {
+  const out: Array<[number, number]> = []
+  const cx = hall.inside.reduce((s, [x]) => s + x, 0) / Math.max(hall.inside.length, 1)
+  const cz = hall.inside.reduce((s, [, z]) => s + z, 0) / Math.max(hall.inside.length, 1)
+  for (const [x, z] of hall.openings) {
+    const dx = Math.abs(x - cx) >= Math.abs(z - cz) ? Math.sign(x - cx) : 0
+    const dz = dx === 0 ? Math.sign(z - cz) || 1 : 0
+    for (let t = 1; t <= DOORSTEP_LENGTH; t++)
+      for (let w = -DOORSTEP_HALF; w <= DOORSTEP_HALF; w++)
+        out.push([x + dx * t + dz * w, z + dz * t + dx * w])
+  }
+  return out
 }
 
 /** Earth a monster can carry off or blow away easily: the hall's dirt, turned to stone. */
