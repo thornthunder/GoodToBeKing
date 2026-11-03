@@ -278,14 +278,27 @@ export class Survival {
       }
       if (gone()) return true
       // Then away: out past it, far from home; and on, away from it, if it is still at heel.
-      const to = lurePoint(home, creeper.position, this.opts.doorway?.())
+      // One that does not follow is gone back to, close enough to take notice, and led again.
+      let to = lurePoint(home, creeper.position, this.opts.doorway?.())
       this.bot.pathfinder.setGoal(new goals.GoalNear(to.x, to.y, to.z, 2))
       const t1 = Date.now()
       let fleeingIt = false
-      while (Date.now() - t1 < 45_000 && !gone()) {
+      while (Date.now() - t1 < 75_000 && !gone()) {
         const c = this.bot.entities[id]
         if (fromHome(c.position) >= LURE_FAR - 4) break
-        if (c.position.distanceTo(me()) > 12 && fromHome(c.position) > CREEPER_WATCH) break
+        if (c.position.distanceTo(me()) > 10) {
+          // It wandered off far enough by itself.
+          if (fromHome(c.position) > CREEPER_WATCH + 6) break
+          this.bot.pathfinder.setGoal(new goals.GoalFollow(c, 4), true)
+          const t2 = Date.now()
+          while (Date.now() - t2 < 8_000 && !gone() && c.position.distanceTo(me()) > 6)
+            await sleep(250)
+          if (gone()) break
+          to = lurePoint(home, c.position, this.opts.doorway?.())
+          this.bot.pathfinder.setGoal(new goals.GoalNear(to.x, to.y, to.z, 2))
+          fleeingIt = false
+          continue
+        }
         if (!fleeingIt && me().distanceTo(new Vec3(to.x, to.y, to.z)) < 3) {
           fleeingIt = true
           this.bot.pathfinder.setGoal(new goals.GoalInvert(new goals.GoalFollow(c, 14)), true)
