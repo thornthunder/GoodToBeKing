@@ -303,6 +303,8 @@ export class Bot extends EventEmitter {
   /** Digging steps out of a hole (bot/escape.ts), and when it last looked whether it is in one. */
   private climbing = false
   private lastClimb = 0
+  /** The creeper (entity id) this courtier is to lure away from the hall (bot/creepers.ts). */
+  private lureTarget?: number
   private lastDeathWords = 0
   private surviving = false
   /** The court's home and storehouse (survival). */
@@ -1115,6 +1117,19 @@ export class Bot extends EventEmitter {
       },
       fetchFood: () => this.fetchFood(),
       speak: (instruction, fallback) => this.speak(instruction, fallback),
+      // Creepers near the hall: the manager names who lures one away (bot/creepers.ts).
+      lure: () => this.lureTarget,
+      lured: (id) => {
+        if (this.lureTarget === id) this.lureTarget = undefined
+      },
+      home: () => {
+        const h = this.household?.home
+        return h ? new WorldVec(h.x, h.y, h.z) : undefined
+      },
+      doorway: () => {
+        const d = this.household?.hall?.openings[0]
+        return d ? { x: d[0], z: d[1] } : undefined
+      },
     })
     // The bed it respawned at was gone: it woke at the world spawn, and must tap a bed again.
     ;(body as unknown as NodeJS.EventEmitter).on('spawnReset', () => {
@@ -2375,6 +2390,30 @@ export class Bot extends EventEmitter {
   }
 
   /** What a raider or defender works with (see src/war/raiding.ts). */
+  /** Lure this creeper (entity id) away from the hall; undefined: no longer. */
+  lureCreeper(id: number | undefined): void {
+    this.lureTarget = id
+  }
+
+  /** The creeper this courtier is luring away, if any. */
+  get luring(): number | undefined {
+    return this.lureTarget
+  }
+
+  /** Creepers this courtier sees within `radius` of a spot (in the flat), by entity id. */
+  creepersNear(spot: Point, radius: number): Array<[number, Point]> {
+    const body = this.body
+    if (!body || this.state.status !== 'spawned') return []
+    return Object.values(body.entities)
+      .filter(
+        (e) =>
+          e.name === 'creeper' &&
+          e.isValid !== false &&
+          Math.hypot(e.position.x - spot.x, e.position.z - spot.z) <= radius
+      )
+      .map((e) => [e.id, { x: e.position.x, y: e.position.y, z: e.position.z }])
+  }
+
   private raidBody(): RaidBody | undefined {
     const body = this.body
     const gatherer = this.gatherer

@@ -1,4 +1,5 @@
 import type { Bot as MineflayerBot } from 'mineflayer-bedrock'
+import { CREEPER_WATCH, LURE_FAR, lurePoint } from './creepers'
 import { goals, type Pathfinder } from 'mineflayer-pathfinder'
 import { Vec3 } from 'vec3'
 import type { Logger } from '../logger'
@@ -78,6 +79,13 @@ export interface SurvivalOptions {
   aggression?: () => Aggression
   /** A spot held (the side's chest): enemies within DEFEND_RANGE of it are fought too. */
   defend?: () => Vec3 | undefined
+  /** The creeper (by entity id) this courtier is to lure away from the hall; the manager chooses. */
+  lure?: () => number | undefined
+  /** Done with that creeper: gone, far off, or it blew up. */
+  lured?: (id: number) => void
+  /** The home spot, and the hall's doorway (its column), for leading a creeper out and away. */
+  home?: () => Vec3 | undefined
+  doorway?: () => { x: number; z: number } | undefined
   /** Take food out of the storehouse: how many it took; undefined when it cannot go now (busy). */
   fetchFood: () => Promise<number | undefined>
   /** Say something in character (the brain words it). */
@@ -113,6 +121,7 @@ export class Survival {
 
   async tick(): Promise<void> {
     if (!this.bot.entity) return
+    if (!this.fighting && (await this.lureCreeper())) return
     if (!this.fighting && (await this.awayFromCreepers())) return
     if (!this.fighting) {
       const foe = (this.opts.guard ? this.foe() : undefined) ?? this.enemy()
@@ -236,8 +245,71 @@ export class Survival {
   }
 
   /**
+   * The lure: go to meet the creeper the manager named, so it takes notice, then lead it out
+   * past where it stood and far from home, till it is far off or has lost interest. At the
+   * courtier's own risk (the King's rule, 2026-11-03: a creeper in the hall is a serious
+   * matter, worth a courtier). Returns whether it is at it.
+   */
+  private async lureCreeper(): Promise<boolean> {
+    const id = this.opts.lure?.()
+    if (id === undefined) return false
+    const creeper = this.bot.entities[id]
+    const home = this.opts.home?.()
+    const gone = () => {
+      const c = this.bot.entities[id]
+      return !c || c.isValid === false
+    }
+    if (gone() || !home) {
+      this.opts.lured?.(id)
+      return false
+    }
+    const me = () => this.bot.entity.position
+    const fromHome = (p: Vec3) => Math.hypot(p.x - home.x, p.z - home.z)
+    this.fleeing = true
+    try {
+      this.log.info(`luring the creeper at ${creeper.position.floored()} away from the hall`)
+      // To it first, so it takes notice: it chases a player it sees within sixteen blocks.
+      if (creeper.position.distanceTo(me()) > 7) {
+        this.bot.pathfinder.setGoal(new goals.GoalFollow(creeper, 5), true)
+        const t0 = Date.now()
+        while (Date.now() - t0 < 10_000 && !gone() && creeper.position.distanceTo(me()) > 7)
+          await sleep(250)
+        this.bot.pathfinder.setGoal(null)
+      }
+      if (gone()) return true
+      // Then away: out past it, far from home; and on, away from it, if it is still at heel.
+      const to = lurePoint(home, creeper.position, this.opts.doorway?.())
+      this.bot.pathfinder.setGoal(new goals.GoalNear(to.x, to.y, to.z, 2))
+      const t1 = Date.now()
+      let fleeingIt = false
+      while (Date.now() - t1 < 45_000 && !gone()) {
+        const c = this.bot.entities[id]
+        if (fromHome(c.position) >= LURE_FAR - 4) break
+        if (c.position.distanceTo(me()) > 12 && fromHome(c.position) > CREEPER_WATCH) break
+        if (!fleeingIt && me().distanceTo(new Vec3(to.x, to.y, to.z)) < 3) {
+          fleeingIt = true
+          this.bot.pathfinder.setGoal(new goals.GoalInvert(new goals.GoalFollow(c, 14)), true)
+        }
+        await sleep(250)
+      }
+      const c = this.bot.entities[id]
+      this.log.info(
+        gone() || !c
+          ? 'the creeper is gone'
+          : `the creeper is ${Math.round(fromHome(c.position))} blocks from home now`
+      )
+      return true
+    } finally {
+      this.bot.pathfinder.setGoal(null)
+      this.fleeing = false
+      this.opts.lured?.(id)
+    }
+  }
+
+  /**
    * Out of a creeper's way: it blows up three blocks off, and nobody fights one. Not inside the
-   * hall, whose walls take the blast. Returns whether it had to back away.
+   * hall, whose walls take the blast, unless one got in: then everyone leaves by the doorway,
+   * so it follows them out instead of blowing up the chest. Returns whether it had to move.
    */
   private async awayFromCreepers(): Promise<boolean> {
     const me = this.bot.entity.position
@@ -252,18 +324,30 @@ export class Survival {
     })
     if (!creeper) return false
     this.fleeing = true
-    this.log.info(`backing away from a creeper at ${creeper.position.floored()}`)
+    const alive = () =>
+      this.bot.entities[creeper.id] !== undefined &&
+      creeper.isValid !== false &&
+      creeper.position.distanceTo(this.bot.entity.position) < CREEPER_SAFE
     try {
+      const door = this.opts.doorway?.()
+      const home = this.opts.home?.()
+      const got_in = indoors && inside!(creeper.position.floored())
+      if (got_in && door && home) {
+        const doorCell = new Vec3(door.x, home.y, door.z)
+        if (creeper.position.distanceTo(doorCell) > 2.5) {
+          // Out by the doorway, then on away from it.
+          this.log.info(`a creeper in the hall at ${creeper.position.floored()}: leaving it`)
+          const out = doorCell.offset(Math.sign(door.x - home.x), 0, Math.sign(door.z - home.z))
+          this.bot.pathfinder.setGoal(new goals.GoalBlock(out.x, out.y, out.z))
+          const t0 = Date.now()
+          while (Date.now() - t0 < 8_000 && alive() && inside!(this.bot.entity.position.floored()))
+            await sleep(250)
+        }
+      } else this.log.info(`backing away from a creeper at ${creeper.position.floored()}`)
       const away = new goals.GoalInvert(new goals.GoalFollow(creeper, CREEPER_SAFE))
       this.bot.pathfinder.setGoal(away, true)
       const start = Date.now()
-      while (
-        Date.now() - start < 8_000 &&
-        this.bot.entities[creeper.id] &&
-        creeper.isValid !== false &&
-        creeper.position.distanceTo(this.bot.entity.position) < CREEPER_SAFE
-      )
-        await sleep(250)
+      while (Date.now() - start < 8_000 && alive()) await sleep(250)
     } finally {
       this.bot.pathfinder.setGoal(null)
       this.fleeing = false

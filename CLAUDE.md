@@ -293,7 +293,13 @@ Windows, killing a background `npx` shell does not kill its node children at all
   `bot/survival.ts`: eating when hungry (food from the storehouse), guards fighting monsters near
   royals (not creepers or endermen; in the hall with no royal near, only what got in or comes
   within reach; a monster they get no closer to is let go), everyone backing away from a
-  creeper (inside the hall only from one that got in or stands by the doorway), doors closed
+  creeper (inside the hall only from one that got in or stands by the doorway). Creepers near
+  the hall (the King's rule, 2026-11-03: a creeper in the hall is a serious matter, worth a
+  courtier; `bot/creepers.ts`): one within 16 of home is lured away by one courtier the manager
+  names every 5 s (`watchCreepers`: a fit soldier, the nearest, else anyone fit but the
+  Castellan; never a raider), who goes to meet it and leads it out past where it stood, 30 blocks
+  from home, at its own risk (`Survival.lureCreeper`); one that got into the hall has everyone
+  leave by the doorway so it follows them out, unless it stands in the doorway. Doors closed
   behind; dying is said lightly and the bot comes home. A courtier down a hole at home with no
   way up (a creeper's crater under the spawn point: on 2026-11-02 a whole war side woke in one
   for three hours, killed over and over by the zombie villager in it) digs steps out towards

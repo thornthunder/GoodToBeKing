@@ -73,6 +73,7 @@ import { sideTitle, warSide } from '../war/side'
 import { WarBook } from '../war/War'
 import { Playbook } from '../war/playbook'
 import { gearWords, planRaid, type Brief } from '../war/plan'
+import { chooseLure, CREEPER_WATCH, LURE_MS } from './creepers'
 
 /** Runtime state that should survive restarts (git-ignored). */
 const STATE_DIR = '.state'
@@ -151,6 +152,8 @@ const ROYAL_QUIET_MS = 90_000
 /** Creates and supervises every configured bot. */
 export class BotManager {
   readonly bots: Bot[] = []
+  /** Creepers near home being lured away: entity id → who lures it and since when. */
+  private readonly lures = new Map<number, { name: string; since: number }>()
   works?: Works
   private worksTimer?: NodeJS.Timeout
   /** Writes this process's status for the admin (see status.ts). */
@@ -1955,6 +1958,7 @@ export class BotManager {
         // Whoever is still free afterwards goes home.
         this.sendHome()
         this.keepBeds()
+        this.watchCreepers()
         if (HOUSEHOLD) this.noteRoyals()
         if (HOUSEHOLD) this.watchPortals()
       } catch (err) {
@@ -2197,6 +2201,53 @@ export class BotManager {
           }
         }, true)
         return
+    }
+  }
+
+  /**
+   * A creeper near home is lured away by one courtier (the King's rule, 2026-11-03: a creeper
+   * in the hall is a serious matter, worth a courtier): a fit soldier, the nearest, else anyone
+   * fit but the Castellan. Every five seconds; a lure is released when its creeper is gone, it
+   * has finished, or it has been at it long enough for another to take over.
+   */
+  private watchCreepers(): void {
+    const home = this.household.home
+    if (!home) return
+    const seen = new Map<number, Point>()
+    for (const b of this.bots)
+      for (const [id, p] of b.creepersNear(home, CREEPER_WATCH)) seen.set(id, p)
+    for (const [id, lure] of this.lures) {
+      const bot = this.find(lure.name)
+      if (!seen.has(id) || !bot || bot.luring !== id || Date.now() - lure.since > LURE_MS) {
+        if (bot?.luring === id) bot.lureCreeper(undefined)
+        this.lures.delete(id)
+      }
+    }
+    const captain = this.castellan()
+    for (const [id, at] of seen) {
+      if (this.lures.has(id)) continue
+      const name = chooseLure(
+        this.bots.map((b) => {
+          const s = b.snapshot()
+          const p = b.position()
+          return {
+            name: b.cfg.name,
+            soldier: b.cfg.duty?.kind === 'escort',
+            captain: b === captain,
+            health: s.health,
+            distance: p ? Math.hypot(p.x - at.x, p.z - at.z) : 99,
+            unavailable: s.status !== 'spawned' || s.doing === 'raiding' || b.luring !== undefined,
+          }
+        })
+      )
+      const bot = name ? this.find(name) : undefined
+      if (!bot) continue
+      bot.lureCreeper(id)
+      this.lures.set(id, { name: bot.cfg.name, since: Date.now() })
+      this.work(
+        'housekeeping',
+        `${bot.cfg.name} lures the creeper at ${Math.round(at.x)},${Math.round(at.y)},${Math.round(at.z)} away from the hall`
+      )
     }
   }
 
