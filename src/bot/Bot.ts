@@ -2400,7 +2400,10 @@ export class Bot extends EventEmitter {
     return this.lureTarget
   }
 
-  /** Creepers this courtier sees within `radius` of a spot (in the flat), by entity id. */
+  /**
+   * Creepers this courtier sees within `radius` of a spot (in the flat) and near its level
+   * (one in a cave far below the hall is no threat to it, and no lure can reach it), by entity id.
+   */
   creepersNear(spot: Point, radius: number): Array<[number, Point]> {
     const body = this.body
     if (!body || this.state.status !== 'spawned') return []
@@ -2409,6 +2412,7 @@ export class Bot extends EventEmitter {
         (e) =>
           e.name === 'creeper' &&
           e.isValid !== false &&
+          Math.abs(e.position.y - spot.y) <= 6 &&
           Math.hypot(e.position.x - spot.x, e.position.z - spot.z) <= radius
       )
       .map((e) => [e.id, { x: e.position.x, y: e.position.y, z: e.position.z }])
