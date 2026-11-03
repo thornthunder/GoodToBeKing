@@ -1,5 +1,5 @@
 import type { Bot as MineflayerBot } from 'mineflayer-bedrock'
-import { CREEPER_WATCH, LURE_FAR, leadPoint } from './creepers'
+import { CREEPER_WATCH, leadPoint } from './creepers'
 import { goals, type Pathfinder } from 'mineflayer-pathfinder'
 import { Vec3 } from 'vec3'
 import type { Logger } from '../logger'
