@@ -514,6 +514,18 @@ export const SECTIONS: SettingSection[] = [
         type: 'number',
         help: 'How many series the referee plays; empty: the arena file’s (3).',
       },
+      {
+        key: 'WAR_COUNCIL_MS',
+        label: 'Council every (ms)',
+        type: 'number',
+        help: 'A metals round: how often the captain holds a council; empty: once a Minecraft day (1200000).',
+      },
+      {
+        key: 'WAR_MINE_DEPTH',
+        label: 'Mine depth in a metals round',
+        type: 'number',
+        help: 'How deep a new mine’s stairs go in a metals round, for gold; empty: 64.',
+      },
     ],
   },
 ]

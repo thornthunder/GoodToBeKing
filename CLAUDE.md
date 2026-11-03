@@ -247,6 +247,20 @@ leagues improve through a season and has a hypothesis he keeps to himself till t
   lessons, and writes `.war/rounds/series-N-round-M.json` with both accounts. `WAR_BUILD_CYCLES`,
   `WAR_RAID_CYCLES`, `WAR_ROUNDS`, `WAR_SERIES` override `config/war/arena.json` (trial rounds
   are run with one day of peace). The war needs about four of the VM's eight cores.
+- The metals rounds (the King's rules for series 3, 2026-11-03: "they can mine, they can steal,
+  they can buy, whatever"; `arena.json` `metals.fromSeries`): ten days, no raid order; the
+  side with the most bars in its own chest at the end wins (gold 100, iron 25, copper 10; only
+  bars in the chest count), kills break a tie. The referee sends `war open <enemy chest>
+  <enemy home> <days>` right after the reset and at the end `war end` then `war count` (a
+  courtier opens the chest, `Bot.countStorehouse`, `WarBook.count`; the chest as last seen if
+  no count comes within 3 min), scored by `referee.scoreMetals`. Once a day (`WAR_COUNCIL_MS`)
+  the captain holds a council (`src/war/council.ts`, the order model): raiders now (bars
+  first, `raiding.byValue`; what they see in the enemy chest goes into the next brief),
+  defenders till the next council, and whether bars may be spent on arms (`Household.metal`
+  gates `Bot.outfitWanted`) or tools (an iron pickaxe for gold, made on the mine trip once
+  gold has been seen; a bucket). Everyone else works for the steward as usual. The mine goes
+  `WAR_MINE_DEPTH` (64) deep in a metals round; gold ore needs an iron pickaxe and is left
+  (`Household.goldSeen`) without one. Buying is not possible: the court has no trading.
 - The first season runs in the Dev world (the King's wish after the trial, 2026-11-02: so he can
   come and watch while the kids play), 390 blocks south of the court's home: `arena.json`
   `shared: true` makes the referee touch only the two bases (no `time set`, no `weather`, no

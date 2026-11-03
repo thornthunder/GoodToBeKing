@@ -69,6 +69,16 @@ export class Household {
   private saved: Saved = {}
   private mtime = 0
   private checked = 0
+  /**
+   * The war game's metals round (src/war/council.ts): may bars from the chest be spent on arms
+   * (swords, armour), and on tools (an iron pickaxe, a bucket)? The captain decides each day.
+   * Undefined: no such limit (the court everywhere else).
+   */
+  metal?: { arms: boolean; tools: boolean }
+  /** How deep a new mine's stairs go (a metals round digs deeper, for gold); undefined: the usual. */
+  mineDepth?: number
+  /** Gold ore the miner saw and left, for want of an iron pickaxe (this round). */
+  goldSeen = 0
 
   /**
    * @param follow read only, as another mind keeps it (the army follows the household's): read
@@ -362,6 +372,9 @@ export class Household {
   /** Everything forgotten (a new round of the war game): no home, no stores, nothing seen. */
   forgetAll(): void {
     this.data = {}
+    this.metal = undefined
+    this.mineDepth = undefined
+    this.goldSeen = 0
     this.save()
   }
 

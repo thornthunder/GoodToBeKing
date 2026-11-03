@@ -49,9 +49,10 @@ export interface MineRecord {
 /** Stone that gives cobblestone, and the ores worth taking on the way. */
 export const STONE =
   /^(stone|cobblestone|andesite|diorite|granite|tuff|deepslate|cobbled_deepslate)$/
-export const ORE = /^(deepslate_)?(coal|iron|copper)_ore$/
-/** Iron and copper need a stone pickaxe at least. */
+export const ORE = /^(deepslate_)?(coal|iron|copper|gold)_ore$/
+/** Iron and copper need a stone pickaxe at least; gold an iron one (else it drops nothing). */
 const NEEDS_STONE_PICK = /(iron|copper)_ore$/
+const NEEDS_IRON_PICK = /gold_ore$/
 const DANGER = /^(flowing_)?(water|lava)$/
 /** Older mines' stairs go this deep. */
 export const MAX_STEPS = 18
@@ -132,6 +133,8 @@ export interface MineResult {
   cobblestone: number
   ores: number
   ended?: string
+  /** Gold ore seen in the walls and left, for want of an iron pickaxe. */
+  goldSeen?: number
 }
 
 /**
@@ -240,6 +243,7 @@ export class Miner {
     }
     const before = this.count('cobblestone')
     this.oresTaken = 0
+    this.goldLeft.clear()
     const until = Date.now() + 6 * 60_000
     // The level tunnel done: on to the branches (walked to straight, not to the tunnel's end).
     if (mine.branch === undefined && mine.steps >= lengthOf(mine)) {
@@ -287,6 +291,7 @@ export class Miner {
     }
     result.cobblestone = Math.max(0, this.count('cobblestone') - before)
     result.ores = this.oresTaken
+    result.goldSeen = this.goldLeft.size
     result.ended = mine.ended
     // Back up the stairs.
     try {
@@ -308,6 +313,8 @@ export class Miner {
   }
 
   private oresTaken = 0
+  /** Gold ore left in the walls this trip (by position), for want of an iron pickaxe. */
+  private readonly goldLeft = new Set<string>()
 
   /** One more step of the stairs or the level tunnel. False when it cannot go on now. */
   private async stepOn(mine: Mine): Promise<boolean> {
@@ -454,6 +461,12 @@ export class Miner {
       const name = this.names(p)
       if (!name || !ORE.test(name)) continue
       if (NEEDS_STONE_PICK.test(name) && this.count(/^(stone|iron)_pickaxe$/) === 0) continue
+      if (NEEDS_IRON_PICK.test(name) && this.count(/^iron_pickaxe$/) === 0) {
+        if (!this.goldLeft.has(key))
+          this.log.info(`gold ore at ${p}: left, for want of an iron pickaxe`)
+        this.goldLeft.add(key)
+        continue
+      }
       if (eyes().distanceTo(p.offset(0.5, 0.5, 0.5)) > REACH) continue
       await this.digAt(p)
       if (this.names(p) === name) continue
@@ -503,7 +516,8 @@ export class Miner {
 export function chooseMine(
   names: (x: number, y: number, z: number) => string | undefined,
   home: { x: number; y: number; z: number },
-  clear: Array<[number, number]>
+  clear: Array<[number, number]>,
+  depth = NEW_DEPTH
 ): Mine | undefined {
   const SOIL = /^(grass_block|dirt|coarse_dirt|podzol|stone|andesite|diorite|granite)$/
   const OPEN = /^(air|short_grass|tall_grass|fern|large_fern|[a-z_]*flower|poppy|dandelion)$/
@@ -521,7 +535,7 @@ export function chooseMine(
         if (!SOIL.test(names(x, y - 1, z) ?? '') || !OPEN.test(names(x, y, z) ?? '')) continue
         if (!OPEN.test(names(x, y + 1, z) ?? '')) break
         // Going on outward, away from home.
-        return { x, y, z, dx, dz, steps: 0, depth: NEW_DEPTH }
+        return { x, y, z, dx, dz, steps: 0, depth }
       }
     }
   return undefined

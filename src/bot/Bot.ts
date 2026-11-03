@@ -1810,7 +1810,9 @@ export class Bot extends EventEmitter {
             }
           }
           if (bucket) await withTimeout(window.withdraw(bucket.type, bucket.metadata, 1), 5_000)
-          else {
+          else if (this.household?.metal && !this.household.metal.tools) {
+            // A metals round: no bars into a bucket unless the captain allows tools.
+          } else {
             await take(/^iron_ingot$/, 3)
             await take(/^crafting_table$/, 1)
             if (this.carries(/^crafting_table$/) === 0) await take(/_planks$/, 4)
@@ -2027,7 +2029,7 @@ export class Bot extends EventEmitter {
         ...record.oldMines,
         ...(this.otherMines?.() ?? []),
       ]
-      mine = chooseMine(names, home, clear)
+      mine = chooseMine(names, home, clear, this.household?.mineDepth)
       if (!mine) {
         this.log.info('found no place near home to start a mine')
         return 0
@@ -2045,10 +2047,24 @@ export class Bot extends EventEmitter {
       // A pickaxe, sticks, some wood (for a pickaxe and a crafting table) and torches. Without a
       // pickaxe (the other mind's miner may have the storehouse's): wood enough to make one, and
       // the storehouse's crafting table if it has one (a pickaxe wants the big grid).
+      // A metals round with gold seen and tools allowed: three iron bars for an iron pickaxe.
+      const metal = this.household?.metal
+      let ironPick = false
       await gatherer?.withChest(chest, async (window) => {
         const items = window.containerItems()
         const pickInStore = items.some((i) => /_pickaxe$/.test(i.name))
         const noPick = () => this.carries(/_pickaxe$/) === 0 && !pickInStore
+        ironPick =
+          Boolean(metal?.tools) &&
+          (this.household?.goldSeen ?? 0) > 0 &&
+          !items.some((i) => i.name === 'iron_pickaxe') &&
+          this.carries(/^iron_pickaxe$/) === 0 &&
+          items.filter((i) => i.name === 'iron_ingot').reduce((n, i) => n + i.count, 0) >= 3
+        if (ironPick)
+          for (const item of items.filter((i) => i.name === 'iron_ingot')) {
+            const n = Math.min(3 - this.carries(/^iron_ingot$/), item.count)
+            if (n > 0) await withTimeout(window.withdraw(item.type, item.metadata, n), 5_000)
+          }
         for (const item of items) {
           // Cobblestone for a stone pickaxe, which lasts far longer than a wooden one.
           const stonePick = this.carries(/^stone_pickaxe$/) > 0
@@ -2075,16 +2091,26 @@ export class Bot extends EventEmitter {
         }
         return 0
       })
+      if (ironPick && this.carries(/^iron_ingot$/) >= 3) {
+        const mlog = this.log.child('mine')
+        if (this.carries(/^stick$/) < 2) {
+          if (this.carries(/_planks$/) < 2) await makePlanks(body, mlog, 2)
+          await craft(body, mlog, 'stick', 1)
+        }
+        await craft(body, mlog, 'iron_pickaxe', 1)
+        if (this.carries(/^iron_pickaxe$/) > 0) this.log.info('made an iron pickaxe, for the gold')
+      }
       if (this.carries(/_pickaxe$/) === 0 && this.carries(/_log$|_planks$/) === 0) {
         this.log.info('no pickaxe, and no wood in the storehouse to make one: no mining')
         return 0
       }
       const result = await miner.dig(mine, want)
       record.setMine(mine)
+      if (result.goldSeen && this.household) this.household.goldSeen += result.goldSeen
       await gatherer?.withChest(chest, async (window) => {
         for (const item of this.body?.inventory.items() ?? [])
           if (
-            /^(cobblestone|cobbled_deepslate|coal|raw_iron|raw_copper|dirt|andesite|diorite|granite|tuff|torch|crafting_table)$|_pickaxe$/.test(
+            /^(cobblestone|cobbled_deepslate|coal|raw_iron|raw_copper|raw_gold|iron_ingot|copper_ingot|gold_ingot|dirt|andesite|diorite|granite|tuff|torch|crafting_table)$|_pickaxe$/.test(
               item.name
             )
           )
@@ -2217,6 +2243,11 @@ export class Bot extends EventEmitter {
     const keep = this.household?.farm && !this.household.farm.watered && !bucket ? 3 : 0
     let iron = Math.max(0, (stock.iron_ingot ?? 0) - keep)
     let copper = stock.copper_ingot ?? 0
+    // A metals round: bars are points, spent on arms only when the captain says so.
+    if (this.household?.metal && !this.household.metal.arms) {
+      iron = 0
+      copper = 0
+    }
     const has = swordTier(bestSword(body?.inventory.items().map((i) => i.name) ?? []))
     const swordMetal =
       iron >= 2 && has < swordTier('iron')
@@ -2393,6 +2424,32 @@ export class Bot extends EventEmitter {
   }
 
   /** What a raider or defender works with (see src/war/raiding.ts). */
+  /** Out on a raid of the other side's chest (the war game). */
+  get isRaiding(): boolean {
+    return this.raider !== undefined
+  }
+
+  /** Holding our chest (the war game). */
+  get isDefending(): boolean {
+    return this.defender !== undefined
+  }
+
+  /** Open the storehouse and say what is in it, by item (the war game's count). */
+  async countStorehouse(): Promise<Record<string, number> | undefined> {
+    const chest = this.household?.storehouse
+    const gatherer = this.gatherer
+    if (!chest || !gatherer || this.state.status !== 'spawned') return undefined
+    let items: Record<string, number> | undefined
+    await gatherer.withChest(chest, async (window) => {
+      const seen: Record<string, number> = {}
+      for (const i of window.containerItems()) seen[i.name] = (seen[i.name] ?? 0) + i.count
+      items = seen
+      return 0
+    })
+    this.noteStock()
+    return items
+  }
+
   /** Lure this creeper (entity id) away from the hall; undefined: no longer. */
   lureCreeper(id: number | undefined): void {
     this.lureTarget = id

@@ -90,6 +90,12 @@ export interface WarState {
   plan?: Plan
   /** The side as it stood when the order came (the lessons see both sides' musters). */
   muster?: Muster[]
+  /** What the round is won by (src/war/referee.ts): the raid's loot, or metal in our chest. */
+  objective?: 'raid' | 'metals'
+  /** Our chest as counted at the referee's word (a metals round). */
+  counted?: { items: Record<string, number>; at: number }
+  /** A metals round: the captain's councils held so far. */
+  councils?: number
   startedAt?: number
   endedAt?: number
   raiders: Record<string, RaiderProgress>
@@ -177,9 +183,13 @@ export class WarBook {
     this.save()
   }
 
-  /** The referee's order: raid the enemy's chest. */
-  order(enemy: Enemy, now = Date.now()): void {
+  /**
+   * The referee's order: raid the enemy's chest (a raid round), or from now on anything goes,
+   * and the metal in our own chest wins (a metals round: the captain holds a council a day).
+   */
+  order(enemy: Enemy, now = Date.now(), objective: 'raid' | 'metals' = 'raid'): void {
     this.state.phase = 'raid'
+    this.state.objective = objective
     this.state.enemy = enemy
     this.state.orderedAt = now
     this.state.plan = undefined
@@ -190,7 +200,10 @@ export class WarBook {
     this.note(
       {
         kind: 'order',
-        text: `raid the ${enemy.side} chest at ${enemy.chest.x},${enemy.chest.y},${enemy.chest.z}`,
+        text:
+          objective === 'metals'
+            ? `anything goes: the most metal in our own chest wins; the ${enemy.side} chest is at ${enemy.chest.x},${enemy.chest.y},${enemy.chest.z}`
+            : `raid the ${enemy.side} chest at ${enemy.chest.x},${enemy.chest.y},${enemy.chest.z}`,
       },
       now
     )
@@ -210,6 +223,29 @@ export class WarBook {
       },
       now
     )
+    this.save()
+  }
+
+  /**
+   * A metals round's council: the day's plan. Raiders out on a raid keep what they carry; the
+   * rest are ready to go again (a raider done yesterday may raid today).
+   */
+  council(plan: Plan, day: number, words: string, now = Date.now()): void {
+    this.state.plan = plan
+    this.state.councils = (this.state.councils ?? 0) + 1
+    for (const name of plan.raiders) {
+      const r = this.state.raiders[name]
+      this.state.raiders[name] = { trips: r?.trips ?? 0, carrying: r?.carrying ?? {} }
+    }
+    this.state.done = false
+    this.note({ kind: 'plan', text: `day ${day}: ${words}` }, now)
+    this.save()
+  }
+
+  /** Our chest counted at the referee's word. */
+  count(items: Record<string, number>, words: string, now = Date.now()): void {
+    this.state.counted = { items, at: now }
+    this.note({ kind: 'note', text: `our chest counted: ${words}` }, now)
     this.save()
   }
 

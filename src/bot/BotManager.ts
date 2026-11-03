@@ -73,6 +73,8 @@ import { sideTitle, warSide } from '../war/side'
 import { WarBook } from '../war/War'
 import { Playbook } from '../war/playbook'
 import { gearWords, planRaid, type Brief } from '../war/plan'
+import { councilLine, holdCouncil, type CouncilBrief } from '../war/council'
+import { metalWords, timeline } from '../war/referee'
 import { chooseLure, CREEPER_WATCH, LURE_MS } from './creepers'
 
 /** Runtime state that should survive restarts (git-ignored). */
@@ -105,6 +107,9 @@ const IGNORED = new Set(
 )
 /** A raid planned for day or night sets out then, or after this long anyway (a day is 20 min). */
 const WHEN_WAIT_MS = 25 * 60_000
+/** A metals round: the captain's council once a Minecraft day; the mine goes this deep (gold). */
+const COUNCIL_MS = Number(process.env.WAR_COUNCIL_MS) || 20 * 60_000
+const METALS_MINE_DEPTH = Number(process.env.WAR_MINE_DEPTH) || 64
 
 /** How often this process writes its status for the admin. */
 const STATUS_MS = 5_000
@@ -175,6 +180,16 @@ export class BotManager {
   private readonly playbook?: Playbook
   /** A raid waiting for its hour (day or night); cancelled when the raid is called off. */
   private raidWait?: { cancel: boolean }
+  /** A metals round (src/war/council.ts): when it opened, its days, the next council, the last. */
+  private metals?: {
+    openedAt: number
+    days: number
+    timer?: NodeJS.Timeout
+    lastCouncil: number
+    holding: boolean
+  }
+  /** What a raider of ours last saw in the other side's chest. */
+  private enemySeen?: { items: Record<string, number>; at: number }
 
   constructor(
     cfg: AppConfig,
@@ -2282,6 +2297,7 @@ export class BotManager {
       if ([series, round, hx, hy, hz, cx, cy, cz].some((v) => !Number.isFinite(v)))
         return this.log.warn('usage: war reset <series> <round> <home x y z> <chest x y z>')
       this.endRaid('a new round begins')
+      this.enemySeen = undefined
       this.household.forgetAll()
       this.estate.clear()
       this.resting.clear()
@@ -2310,12 +2326,208 @@ export class BotManager {
       void this.orderRaid().catch((err) => this.log.warn(`the raid failed: ${errMsg(err)}`))
       return
     }
+    if (verb === 'open') {
+      // war open <enemy chest x y z> <enemy home x y z> [days]: a metals round from now on.
+      const [cx, cy, cz, hx, hy, hz, days] = nums(1, 7)
+      if ([cx, cy, cz, hx, hy, hz].some((v) => !Number.isFinite(v)))
+        return this.log.warn('usage: war open <enemy chest x y z> <enemy home x y z> [days]')
+      this.endRaid('a new order')
+      war.order(
+        {
+          side: SIDE.enemy.name,
+          names: SIDE.enemy.names,
+          chest: { x: cx, y: cy, z: cz },
+          home: { x: hx, y: hy, z: hz },
+        },
+        Date.now(),
+        'metals'
+      )
+      // No bars spent till the captain says so; the mine deep enough for gold (a mine begun in
+      // the moment since the reset goes deeper too).
+      this.household.metal = { arms: false, tools: false }
+      this.household.mineDepth = METALS_MINE_DEPTH
+      const mine = this.household.mine
+      if (mine && mine.steps < 3 && (mine.depth ?? 0) < METALS_MINE_DEPTH) {
+        mine.depth = METALS_MINE_DEPTH
+        this.household.setMine(mine)
+      }
+      this.enemySeen = undefined
+      const m = {
+        openedAt: Date.now(),
+        days: Number.isFinite(days) && days > 0 ? days : 10,
+        lastCouncil: 0,
+        holding: false,
+        timer: undefined as NodeJS.Timeout | undefined,
+      }
+      this.metals = m
+      this.work(
+        'the war',
+        `anything goes now: the most metal in our own chest after ${m.days} days wins`
+      )
+      const run = () =>
+        void this.council().catch((err) => this.log.warn(`the council failed: ${errMsg(err)}`))
+      run()
+      m.timer = setInterval(run, COUNCIL_MS)
+      return
+    }
+    if (verb === 'count') {
+      void this.countChest().catch((err) => this.log.warn(`the count failed: ${errMsg(err)}`))
+      return
+    }
     if (verb === 'end') return this.endRaid('the referee ended it')
     if (verb === 'status') {
       const { events, ...rest } = war.data
       return this.log.info(`war: ${JSON.stringify({ ...rest, events: events.length })}`)
     }
-    this.log.warn('usage: war reset|raid|end|status')
+    this.log.warn('usage: war reset|raid|open|count|end|status')
+  }
+
+  /**
+   * A metals round's council (src/war/council.ts): the captain decides who raids, who guards
+   * the chest and whether bars may be spent; the rest go about the court's work.
+   */
+  private async council(): Promise<void> {
+    const war = this.war
+    const m = this.metals
+    const enemy = war?.enemy
+    const captain = this.castellan() ?? this.bots[0]
+    if (!war || !m || !enemy || !SIDE || !captain || m.holding) return
+    const store = this.household.storehouse
+    const home = this.household.home
+    if (!store || !home) return war.remark('no storehouse: no council')
+    m.holding = true
+    try {
+      const day = Math.min(m.days, 1 + Math.floor((Date.now() - m.openedAt) / COUNCIL_MS))
+      const onRaid = this.bots.filter((b) => b.isRaiding).map((b) => b.cfg.name)
+      const soldiers = this.bots.filter((b) => b.isGuard()).map((b) => b.cfg.name)
+      const book = this.playbook?.forPlanning() ?? { lessons: [], record: [] }
+      const stock = this.household.stock.items
+      const since = m.lastCouncil || m.openedAt
+      const recent = timeline(
+        {
+          ...war.data,
+          orderedAt: m.openedAt,
+          events: war.data.events.filter((e) => e.at >= since && e.kind !== 'plan'),
+        },
+        15
+      )
+      const members: CouncilBrief['members'] = this.bots.map((b) => {
+        const s = b.snapshot()
+        const p = b.position()
+        return {
+          name: b.cfg.name,
+          role: b.cfg.role,
+          gear: s.gear,
+          health: s.health,
+          food: s.food,
+          home: Boolean(p && Math.hypot(p.x - home.x, p.z - home.z) < 24),
+          doing: s.doing,
+        }
+      })
+      if (!war.data.muster)
+        war.muster(
+          members.map((x) => ({
+            name: x.name,
+            role: x.role,
+            gear: gearWords(x),
+            health: x.health,
+            food: x.food,
+          }))
+        )
+      const seen = this.enemySeen
+      const brief: CouncilBrief = {
+        side: sideTitle(SIDE.name),
+        captain: captain.cfg.name,
+        enemySide: sideTitle(enemy.side),
+        day,
+        days: m.days,
+        members,
+        stock,
+        home,
+        enemyChest: enemy.chest,
+        night: captain.isNight(),
+        enemySeen: seen
+          ? { items: seen.items, minutesAgo: Math.round((Date.now() - seen.at) / 60_000) }
+          : undefined,
+        goldSeen: this.household.goldSeen,
+        ironPickaxe:
+          (stock.iron_pickaxe ?? 0) > 0 || this.bots.some((b) => b.carries(/^iron_pickaxe$/) > 0),
+        onRaid,
+        recent,
+        playbook: book.lessons,
+        record: book.record,
+      }
+      const log = this.log.child('war')
+      const ai = new OllamaClient(captain.cfg.ai, log)
+      const c = await holdCouncil(ai, brief, soldiers, log, {
+        model: captain.cfg.ai.orderModel,
+        timeoutMs: 180_000,
+      })
+      if (this.metals !== m || war.phase !== 'raid') return // the round ended meanwhile
+      m.lastCouncil = Date.now()
+      const line = councilLine(c)
+      war.council(c, day, `${line} (${c.by})${c.reason ? `: ${c.reason}` : ''}`)
+      war.remark(`day ${day}: our chest holds ${metalWords(stock)}`)
+      this.household.metal = { arms: c.arms, tools: c.tools }
+      this.work('the war', `day ${day} of ${m.days}, the council (${c.by}): ${line}`)
+      if (c.words) captain.chat(c.words)
+      // Defenders: those named hold the chest; those no longer named go back to work.
+      for (const b of this.bots) if (b.isDefending && !c.defenders.includes(b.cfg.name)) b.stopWar()
+      for (const name of c.defenders) {
+        const b = this.find(name)
+        if (b && !b.isDefending && !b.isRaiding)
+          void b.startDefence({ chest: store, onRecovered: (items) => war.recovered(name, items) })
+      }
+      if (c.raiders.length) war.start()
+      for (const name of c.raiders) {
+        const b = this.find(name)
+        if (!b || b.isRaiding) continue
+        if (b.isDefending) b.stopWar()
+        void b
+          .startRaid({
+            chest: enemy.chest,
+            store,
+            tactic: c.tactic,
+            trips: c.trips,
+            onGrab: (items) => war.grab(name, items),
+            onDeposit: (items) => war.deposit(name, items),
+            onLost: () => war.lost(name),
+            onDone: (why) => war.raiderDone(name, why),
+            onSeen: (items) => {
+              this.enemySeen = { items, at: Date.now() }
+              war.remark(`their chest held ${metalWords(items)}`, name)
+            },
+          })
+          .finally(() => {
+            if (!war.data.raiders[name]?.done) war.raiderDone(name, 'could not go')
+          })
+      }
+    } finally {
+      m.holding = false
+    }
+  }
+
+  /** The referee's count at a metals round's end: a courtier opens our chest and says what is in it. */
+  private async countChest(): Promise<void> {
+    const war = this.war
+    const home = this.household.home
+    if (!war || !home) return
+    const gap = (b: Bot) => {
+      const p = b.position()
+      return p ? Math.hypot(p.x - home.x, p.z - home.z) : Infinity
+    }
+    const candidates = this.bots
+      .filter((b) => b.snapshot().status === 'spawned')
+      .sort((a, b) => Number(b.isFree()) - Number(a.isFree()) || gap(a) - gap(b))
+    for (const b of candidates) {
+      const items = await b.countStorehouse().catch(() => undefined)
+      if (!items) continue
+      war.count(items, metalWords(items))
+      this.work('the war', `${b.cfg.name} counted our chest: ${metalWords(items)}`)
+      return
+    }
+    war.remark('our chest could not be counted')
+    this.log.warn('the war: nobody could count our chest')
   }
 
   /** The captain plans the raid (the model, with the playbook), and the side carries it out. */
@@ -2416,6 +2628,8 @@ export class BotManager {
   /** The raid is over (the referee's word, or a new round): everyone stops. */
   private endRaid(why: string): void {
     if (this.raidWait) this.raidWait.cancel = true
+    if (this.metals?.timer) clearInterval(this.metals.timer)
+    this.metals = undefined
     for (const b of this.bots) b.stopWar()
     if (this.war && this.war.phase === 'raid') {
       this.war.end()

@@ -85,9 +85,30 @@ export interface RaidOrders {
   onDeposit: (items: Record<string, number>) => void
   onLost: () => void
   onDone: (why: string) => void
+  /** What was in their chest when it was opened, by item (before anything was taken). */
+  onSeen?: (items: Record<string, number>) => void
 }
 
 const fmt = (p: Point) => `(${p.x}, ${p.y}, ${p.z})`
+
+/** Worth taking first: bars, best first, then the ore they come from, then the rest as it lies. */
+const WORTH = [
+  /^gold_ingot$/,
+  /^iron_ingot$/,
+  /^copper_ingot$/,
+  /^(raw_gold|gold_block|raw_gold_block|(deepslate_)?gold_ore)$/,
+  /^(raw_iron|iron_block|raw_iron_block|(deepslate_)?iron_ore)$/,
+  /^(raw_copper|copper_block|raw_copper_block|(deepslate_)?copper_ore)$/,
+]
+
+/** A chest's stacks, the most worth taking first (in a metals round bars are the points). */
+export function byValue<T extends { name: string }>(items: T[]): T[] {
+  const rank = (name: string) => {
+    const i = WORTH.findIndex((re) => re.test(name))
+    return i < 0 ? WORTH.length : i
+  }
+  return [...items].sort((a, b) => rank(a.name) - rank(b.name))
+}
 
 /** What the courtier carries that is not gear, by item. */
 export function pockets(bot: MineflayerBot): Record<string, number> {
@@ -176,7 +197,11 @@ export class Raider {
           log.info(`their chest is not where it was said: one at ${fmt(theirs)}`)
         await this.body.withChest(theirs, async (window) => {
           opened = true
-          for (const item of window.containerItems()) {
+          const inside = window.containerItems()
+          const seen: Record<string, number> = {}
+          for (const i of inside) seen[i.name] = (seen[i.name] ?? 0) + i.count
+          o.onSeen?.(seen)
+          for (const item of byValue(inside)) {
             if (this.stop || bot.inventory.emptySlotCount() < 1) break
             await withTimeout(window.withdraw(item.type, item.metadata, item.count), 5_000).catch(
               () => {}

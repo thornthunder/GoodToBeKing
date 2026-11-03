@@ -28,6 +28,45 @@ export interface Arena {
    * weather or what lies about.
    */
   shared?: boolean
+  /**
+   * From this series on, a round is won by the metal in one's own chest after the days of peace
+   * (the King's rule for series 3, 2026-11-03: "they can mine, they can steal, they can buy,
+   * whatever"): points per bar; no raid order, as either side may raid when it likes.
+   */
+  metals?: { fromSeries: number; points: Record<string, number> }
+}
+
+/** What a round is won by: items brought home in the raid, or metal in one's own chest. */
+export type Objective = 'raid' | 'metals'
+
+export function objectiveOf(arena: Pick<Arena, 'metals'>, series: number): Objective {
+  return arena.metals && series >= arena.metals.fromSeries ? 'metals' : 'raid'
+}
+
+/** The bars that score, best first. */
+export const METAL_POINTS: Record<string, number> = {
+  gold_ingot: 100,
+  iron_ingot: 25,
+  copper_ingot: 10,
+}
+
+/** The points a chest's bars are worth. */
+export function metalPoints(
+  items: Record<string, number>,
+  points: Record<string, number> = METAL_POINTS
+): number {
+  return Object.entries(points).reduce((n, [bar, p]) => n + (items[bar] ?? 0) * p, 0)
+}
+
+/** "2 gold, 6 iron, 11 copper (370 points)". */
+export function metalWords(
+  items: Record<string, number>,
+  points: Record<string, number> = METAL_POINTS
+): string {
+  const bars = Object.keys(points)
+    .filter((bar) => (items[bar] ?? 0) > 0)
+    .map((bar) => `${items[bar]} ${bar.replace(/_ingot$/, '')}`)
+  return `${bars.length ? bars.join(', ') : 'no bars'} (${metalPoints(items, points)} points)`
 }
 
 /** The hall: this many blocks from the home to each wall; walls this high; the chest's place. */
@@ -130,6 +169,9 @@ export interface SideScore {
   firstGrabMin?: number
   firstDepositMin?: number
   plan?: string
+  /** The metals objective: the points in its chest at the count, and the bars there. */
+  points?: number
+  metals?: Record<string, number>
 }
 
 export interface Score {
@@ -216,6 +258,51 @@ export function score(states: WarState[], sides: Record<string, string[]>): Scor
     decidedBy: 'tie',
     sides: scores,
     why: `both brought ${first.brought} items home and killed ${first.kills}`,
+  }
+}
+
+/**
+ * The score of a metals round: the points of the bars in each side's own chest at the count,
+ * then kills (the raids' bookkeeping, deaths and trips as in a raid round, for the record).
+ */
+export function scoreMetals(
+  states: WarState[],
+  sides: Record<string, string[]>,
+  chests: Record<string, Record<string, number>>,
+  points: Record<string, number> = METAL_POINTS
+): Score {
+  const base = score(states, sides)
+  const scores: SideScore[] = base.sides.map((s) => {
+    const items = chests[s.side] ?? {}
+    const metals = Object.fromEntries(
+      Object.keys(points)
+        .filter((bar) => (items[bar] ?? 0) > 0)
+        .map((bar) => [bar, items[bar]])
+    )
+    return { ...s, points: metalPoints(items, points), metals }
+  })
+  const ranked = [...scores].sort((a, b) => (b.points ?? 0) - (a.points ?? 0) || b.kills - a.kills)
+  const [first, second] = ranked
+  if (!first || !second) return { decidedBy: 'tie', sides: scores, why: 'no sides' }
+  const has = (s: SideScore) => `${s.side} has ${metalWords(s.metals ?? {}, points)}`
+  if (first.points !== second.points)
+    return {
+      winner: first.side,
+      decidedBy: 'metals',
+      sides: scores,
+      why: `${has(first)} in its chest to ${has(second).replace(/ has /, "'s ")}`,
+    }
+  if (first.kills !== second.kills)
+    return {
+      winner: first.side,
+      decidedBy: 'kills',
+      sides: scores,
+      why: `both have ${first.points} points; ${first.side} killed ${first.kills} to ${second.side}'s ${second.kills}`,
+    }
+  return {
+    decidedBy: 'tie',
+    sides: scores,
+    why: `both have ${first.points} points and killed ${first.kills}`,
   }
 }
 

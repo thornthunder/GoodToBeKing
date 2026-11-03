@@ -7,7 +7,17 @@ import type { CourtStatus } from '../status'
 import { errMsg, sleep } from '../util'
 import { drawLessons, writeReport, type SeriesFacts } from './lessons'
 import { Playbook } from './playbook'
-import { chestOf, prepareCommands, resultOf, score, type Arena, type Score } from './referee'
+import {
+  chestOf,
+  objectiveOf,
+  prepareCommands,
+  resultOf,
+  score,
+  scoreMetals,
+  type Arena,
+  type Objective,
+  type Score,
+} from './referee'
 import { botNames, SIDES } from './side'
 import { readWar, total, type WarState } from './War'
 
@@ -39,6 +49,9 @@ interface RoundFile {
   score?: Score
   lessons?: Record<string, string[]>
   states?: Record<string, WarState>
+  /** What the round was won by, and (a metals round) each side's chest at the count. */
+  objective?: Objective
+  chests?: Record<string, Record<string, number>>
 }
 
 const WAR_DIR = path.resolve(process.env.WAR_DIR || '.war')
@@ -49,6 +62,8 @@ const WAR_MODEL = process.env.OLLAMA_WAR_MODEL || 'gemma4:31b'
 const MUSTER_MS = 10 * 60_000
 /** A side's status older than this: its process is gone. */
 const STALE_MS = 30_000
+/** At a metals round's end each side has this long to count its chest. */
+const COUNT_MS = 3 * 60_000
 
 function readJson<T>(file: string): T | undefined {
   try {
@@ -86,6 +101,7 @@ function loadArena(): Arena {
     bases: raw.bases,
     sides,
     ...(raw.shared ? { shared: true } : {}),
+    ...(raw.metals ? { metals: raw.metals } : {}),
   }
 }
 
@@ -203,7 +219,10 @@ class Referee {
             break
           case 'build':
             await this.waitUntil(this.state.phaseAt + a.buildCycles * a.cycleMs)
-            if (!this.stopping) await this.orderRaid()
+            if (this.stopping) break
+            // A metals round ends here, with the count; a raid round goes on to the raid.
+            if (this.objective() === 'metals') await this.endMetals()
+            else await this.orderRaid()
             break
           case 'raid':
             await this.waitUntil(this.state.phaseAt + a.raidCycles * a.cycleMs, 15_000, () =>
@@ -258,8 +277,51 @@ class Referee {
       round: this.state.round,
       startedAt: Date.now(),
     }
+    // A metals round: anything goes from now on, both sides told at once.
+    if (this.objective() === 'metals') {
+      round.orderedAt = Date.now()
+      await Promise.all(
+        SIDES.map((side) => {
+          const enemy = SIDES.find((s) => s !== side)!
+          const base = a.bases[enemy]
+          const chest = chestOf(base)
+          return this.order(
+            side,
+            `war open ${chest.x} ${chest.y} ${chest.z} ${base.home.x} ${base.home.y} ${base.home.z} ${a.buildCycles}`
+          )
+        })
+      )
+    }
     writeJson(this.roundFile(), round)
     this.phase('build')
+  }
+
+  /** What this series' rounds are won by. */
+  private objective(): Objective {
+    return objectiveOf(this.arena, this.state.series)
+  }
+
+  /**
+   * A metals round's end: everyone called off, then each side counts its own chest (a courtier
+   * opens it); the count is waited for a few minutes, else the chest as last seen stands.
+   */
+  private async endMetals(): Promise<void> {
+    await Promise.all(SIDES.map((side) => this.order(side, 'war end')))
+    await sleep(15_000)
+    const asked = Date.now()
+    await Promise.all(SIDES.map((side) => this.order(side, 'war count')))
+    await this.waitUntil(asked + COUNT_MS, 5_000, () =>
+      SIDES.every((s) => (this.war(s)?.counted?.at ?? 0) >= asked)
+    )
+    for (const s of SIDES)
+      if ((this.war(s)?.counted?.at ?? 0) < asked)
+        this.log.warn(`${s} did not count its chest in time: the chest as last seen stands`)
+    this.phase('score')
+  }
+
+  /** Each side's chest at the end of a metals round: its count, else as its bots last saw it. */
+  private chests(states: WarState[]): Record<string, Record<string, number>> {
+    return Object.fromEntries(states.map((s) => [s.side, s.counted?.items ?? this.stock(s.side)]))
   }
 
   /** Peace is over: both sides get the order at once. */
@@ -303,7 +365,11 @@ class Referee {
       await sleep(30_000)
       return
     }
-    const result = score(states, a.sides)
+    const metals = this.objective() === 'metals'
+    const chests = metals ? this.chests(states) : undefined
+    const result = chests
+      ? scoreMetals(states, a.sides, chests, a.metals?.points)
+      : score(states, a.sides)
     this.log.info(
       `round ${this.state.round} of series ${this.state.series}: ` +
         (result.winner ? `${result.winner} won by ${result.decidedBy}` : 'a tie') +
@@ -316,6 +382,8 @@ class Referee {
     }
     round.endedAt = Date.now()
     round.score = result
+    round.objective = metals ? 'metals' : 'raid'
+    if (chests) round.chests = chests
     round.states = Object.fromEntries(states.map((s) => [s.side, s]))
     round.lessons = {}
     for (const state of states) {
@@ -332,6 +400,11 @@ class Referee {
           other,
           score: result,
           stock: other ? { mine: chest(state.side), theirs: chest(other.side) } : undefined,
+          objective: metals ? 'metals' : 'raid',
+          chests:
+            chests && other
+              ? { mine: chests[state.side] ?? {}, theirs: chests[other.side] ?? {} }
+              : undefined,
           playbook: before,
         },
         this.log,
@@ -372,19 +445,24 @@ class Referee {
       const cells = SIDES.flatMap((s): string[] => {
         const x = by(s)
         return x
-          ? [x.brought, x.lost, x.kills, x.deaths, x.trips].map(String)
-          : ['', '', '', '', '']
+          ? [
+              x.points === undefined ? '' : String(x.points),
+              ...[x.brought, x.lost, x.kills, x.deaths, x.trips].map(String),
+            ]
+          : ['', '', '', '', '', '']
       })
       return `| ${r.series} | ${r.round} | ${r.score.winner ?? 'tie'} | ${r.score.decidedBy} | ${cells.join(' | ')} |`
     })
     const head = SIDES.map(
-      (s) => `${s} brought | ${s} lost | ${s} kills | ${s} deaths | ${s} trips`
+      (s) => `${s} points | ${s} brought | ${s} lost | ${s} kills | ${s} deaths | ${s} trips`
     ).join(' | ')
     const text = [
       '# The war game, so far',
       '',
+      "(points: the metal in the side's own chest, from series 3: gold bar 100, iron 25, copper 10)",
+      '',
       `| series | round | winner | by | ${head} |`,
-      `|---|---|---|---|${SIDES.map(() => '---|---|---|---|---').join('|')}|`,
+      `|---|---|---|---|${SIDES.map(() => '---|---|---|---|---|---').join('|')}|`,
       ...rows,
       '',
     ].join('\n')

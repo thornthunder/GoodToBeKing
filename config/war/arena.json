@@ -5,6 +5,10 @@
   "rounds": 3,
   "series": 3,
   "shared": true,
+  "metals": {
+    "fromSeries": 3,
+    "points": { "gold_ingot": 100, "iron_ingot": 25, "copper_ingot": 10 }
+  },
   "bases": {
     "blue": { "home": { "x": -6, "y": 64, "z": 398 } },
     "green": { "home": { "x": 178, "y": 64, "z": 454 } }
