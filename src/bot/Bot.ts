@@ -305,6 +305,8 @@ export class Bot extends EventEmitter {
   private lastClimb = 0
   /** The creeper (entity id) this courtier is to lure away from the hall (bot/creepers.ts). */
   private lureTarget?: number
+  /** When it last died: one just back from the dead is not sent out as a lure again at once. */
+  private diedAt = 0
   private lastDeathWords = 0
   private surviving = false
   /** The court's home and storehouse (survival). */
@@ -1138,6 +1140,7 @@ export class Bot extends EventEmitter {
     })
     body.on('death', () => {
       const at = this.position()
+      this.diedAt = Date.now()
       this.log.info(`died${at ? ` at ${fmtVec(at)}` : ''}`)
       // Where (the court counts deaths at home: an overrun home is no place to send anyone).
       this.emit('died', this.position())
@@ -2398,6 +2401,11 @@ export class Bot extends EventEmitter {
   /** The creeper this courtier is luring away, if any. */
   get luring(): number | undefined {
     return this.lureTarget
+  }
+
+  /** Died within the last `ms`? (On 2026-11-03 a soldier was sent out as a lure thrice in fifty seconds, dying each time.) */
+  diedWithin(ms: number): boolean {
+    return Date.now() - this.diedAt < ms
   }
 
   /**

@@ -2236,7 +2236,11 @@ export class BotManager {
             captain: b === captain,
             health: s.health,
             distance: p ? Math.hypot(p.x - at.x, p.z - at.z) : 99,
-            unavailable: s.status !== 'spawned' || s.doing === 'raiding' || b.luring !== undefined,
+            unavailable:
+              s.status !== 'spawned' ||
+              s.doing === 'raiding' ||
+              b.luring !== undefined ||
+              b.diedWithin(2 * 60_000),
           }
         })
       )
