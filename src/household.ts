@@ -126,7 +126,8 @@ export class Household {
   /** Is this spot inside the hall (as last seen whole)? */
   inHall(p: { x: number; y: number; z: number }): boolean {
     const hall = this.hall
-    if (!hall || p.y < hall.floorY - 1 || p.y > hall.wallTop) return false
+    // Down to a crater's depth: a creeper (or a courtier) in a hole in the floor is in the hall.
+    if (!hall || p.y < hall.floorY - 5 || p.y > hall.wallTop) return false
     const [x, z] = [Math.floor(p.x), Math.floor(p.z)]
     return hall.inside.some(([ix, iz]) => ix === x && iz === z)
   }
