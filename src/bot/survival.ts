@@ -282,11 +282,11 @@ export class Survival {
       let to = lurePoint(home, creeper.position, this.opts.doorway?.())
       this.bot.pathfinder.setGoal(new goals.GoalNear(to.x, to.y, to.z, 2))
       const t1 = Date.now()
-      let fleeingIt = false
-      while (Date.now() - t1 < 75_000 && !gone()) {
+      while (Date.now() - t1 < 150_000 && !gone()) {
         const c = this.bot.entities[id]
-        if (fromHome(c.position) >= LURE_FAR - 4) break
-        if (c.position.distanceTo(me()) > 10) {
+        const gap = c.position.distanceTo(me())
+        if (fromHome(c.position) >= LURE_FAR - 4 && gap > 6) break
+        if (gap > 10) {
           // It wandered off far enough by itself.
           if (fromHome(c.position) > CREEPER_WATCH + 6) break
           this.bot.pathfinder.setGoal(new goals.GoalFollow(c, 4), true)
@@ -296,12 +296,19 @@ export class Survival {
           if (gone()) break
           to = lurePoint(home, c.position, this.opts.doorway?.())
           this.bot.pathfinder.setGoal(new goals.GoalNear(to.x, to.y, to.z, 2))
-          fleeingIt = false
           continue
         }
-        if (!fleeingIt && me().distanceTo(new Vec3(to.x, to.y, to.z)) < 3) {
-          fleeingIt = true
-          this.bot.pathfinder.setGoal(new goals.GoalInvert(new goals.GoalFollow(c, 14)), true)
+        // At the point with it at heel: further out still, never back towards home.
+        if (me().distanceTo(new Vec3(to.x, to.y, to.z)) < 3) {
+          const d = Math.max(fromHome(me()), 1)
+          const ux = (me().x - home.x) / d
+          const uz = (me().z - home.z) / d
+          to = {
+            x: Math.round(home.x + ux * (d + 15)),
+            y: home.y,
+            z: Math.round(home.z + uz * (d + 15)),
+          }
+          this.bot.pathfinder.setGoal(new goals.GoalNear(to.x, to.y, to.z, 2))
         }
         await sleep(250)
       }
