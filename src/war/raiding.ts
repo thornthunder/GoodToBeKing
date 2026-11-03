@@ -204,17 +204,19 @@ export class Raider {
           await sleep(5_000)
         }
         if (!this.body.alive()) continue
-        const had = pockets(bot)
         const ours = this.body.findChest?.(o.store, CHEST_SEARCH) ?? o.store
+        // Only what the chest took counts: pockets emptied by a death on the way are loot lost,
+        // not loot brought (on 2026-11-03 a raider killed by the enemy chest was credited with
+        // all it carried, a second after taking it, 190 blocks from home).
+        const put: Record<string, number> = {}
         await this.body.withChest(ours, async (window) => {
           for (const item of bot.inventory.items())
             if (!GEAR.test(item.name))
-              await withTimeout(window.deposit(item.type, item.metadata, item.count), 5_000).catch(
-                () => {}
-              )
+              await withTimeout(window.deposit(item.type, item.metadata, item.count), 5_000)
+                .then(() => (put[item.name] = (put[item.name] ?? 0) + item.count))
+                .catch(() => {})
           return 0
         })
-        const put = shrank(had, pockets(bot))
         if (total(put) > 0) {
           log.info(`put ${total(put)} things in our chest`)
           o.onDeposit(put)
@@ -389,17 +391,15 @@ export class Defender {
           await sleep(500)
           const found = grew(before, pockets(bot))
           if (total(found) > 0) {
-            const had = pockets(bot)
+            const put: Record<string, number> = {}
             await this.body.withChest(this.orders.chest, async (window) => {
               for (const item of bot.inventory.items())
                 if (found[item.name])
-                  await withTimeout(
-                    window.deposit(item.type, item.metadata, item.count),
-                    5_000
-                  ).catch(() => {})
+                  await withTimeout(window.deposit(item.type, item.metadata, item.count), 5_000)
+                    .then(() => (put[item.name] = (put[item.name] ?? 0) + item.count))
+                    .catch(() => {})
               return 0
             })
-            const put = shrank(had, pockets(bot))
             if (total(put) > 0) {
               log.info(`put ${total(put)} things found by the chest back`)
               this.orders.onRecovered(put)
