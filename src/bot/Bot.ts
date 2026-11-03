@@ -2428,6 +2428,7 @@ export class Bot extends EventEmitter {
       withChest: (chest, work) => gatherer.withChest(chest, work),
       alive: () => this.state.status === 'spawned' && !this.died && Boolean(this.body?.entity),
       busy: () => this.survival?.busy ?? false,
+      busyWith: () => this.survival?.busyWith,
       enemies: () =>
         Object.values(body.entities)
           .filter((e) => e.type === 'player' && this.enemies.has((e.username ?? '').toLowerCase()))

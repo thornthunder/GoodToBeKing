@@ -122,6 +122,14 @@ export class Survival {
     return this.fighting || this.eating || this.fleeing
   }
 
+  /** What it is busy with, for whoever waits on it. */
+  get busyWith(): string | undefined {
+    if (this.fighting) return 'fighting'
+    if (this.eating) return 'eating'
+    if (this.fleeing) return "out of a creeper's way"
+    return undefined
+  }
+
   async tick(): Promise<void> {
     if (!this.bot.entity) return
     if (!this.fighting && (await this.lureCreeper())) return

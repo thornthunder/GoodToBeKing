@@ -57,6 +57,8 @@ export interface RaidBody {
   alive: () => boolean
   /** Fighting or eating: the body is taken. */
   busy: () => boolean
+  /** What with (for the log, when the wait drags on). */
+  busyWith?: () => string | undefined
   /** Enemies in sight, by name. */
   enemies: () => Array<{ name: string; position: Vec3 }>
   /**
@@ -264,7 +266,17 @@ export class Raider {
     const target = new Vec3(to.x, to.y, to.z)
     let stuck = 0
     while (!this.stop && this.body.alive()) {
-      while (this.body.busy() && !this.stop) await sleep(1_000)
+      // Fighting, eating or fleeing: wait, saying so now and then; a body busy for minutes on
+      // end is stuck (on 2026-11-03 a raider stood "raiding" at home for half an hour): go on.
+      for (let waited = 0; this.body.busy() && !this.stop; waited++) {
+        if (waited >= 120) {
+          log.warn(`busy (${this.body.busyWith?.() ?? '?'}) for two minutes: going on regardless`)
+          break
+        }
+        if (waited > 0 && waited % 30 === 0)
+          log.info(`waiting to walk on: busy ${this.body.busyWith?.() ?? '?'} (${waited} s)`)
+        await sleep(1_000)
+      }
       const me = bot.entity.position
       const gap = me.distanceTo(target)
       if (gap <= reach) return true
