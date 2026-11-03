@@ -113,11 +113,47 @@ export function directions(
 
 type Walker = MineflayerBot & { pathfinder: Pathfinder }
 
-/** Is there no way at all from here to the goal (the search runs out within one think)? */
+/** The search for a way is given this long; a sealed room runs out of nodes well within it. */
+const NO_WAY_MS = 600
+
+/**
+ * Is there no way at all from here to the goal: the search runs out of nodes within a short
+ * while? The pathfinder searches a tick (40 ms) at a time and answers "partial" between ticks,
+ * so the ticks are run on until it is sure or the time is up (on 2026-11-03 one tick was not
+ * always enough for a hall of seven by seven, and raiders stood in a crater without climbing).
+ */
 export function noWay(bot: MineflayerBot, goal: goals.Goal): boolean {
-  const walker = bot as Walker
+  const walker = bot as Walker & {
+    pathfinder: {
+      getPathFromTo?: (
+        movements: unknown,
+        from: Vec3,
+        goal: goals.Goal,
+        options: { timeout: number }
+      ) => Iterable<{ result: { status: string } }>
+    }
+  }
   try {
-    return walker.pathfinder.getPathTo(walker.pathfinder.movements, goal, 500).status === 'noPath'
+    const search = walker.pathfinder.getPathFromTo
+    if (!search) {
+      return (
+        walker.pathfinder.getPathTo(walker.pathfinder.movements, goal, NO_WAY_MS).status ===
+        'noPath'
+      )
+    }
+    const started = Date.now()
+    let status = 'partial'
+    for (const step of search.call(
+      walker.pathfinder,
+      walker.pathfinder.movements,
+      bot.entity.position,
+      goal,
+      { timeout: NO_WAY_MS }
+    )) {
+      status = step.result.status
+      if (status !== 'partial' || Date.now() - started > NO_WAY_MS) break
+    }
+    return status === 'noPath'
   } catch {
     return false
   }
