@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { chooseLure, leadPoint, lurePoint, LEAD_STEP, LURE_FAR } from './creepers'
 
 describe('luring a creeper away from the hall', () => {
-  it('sends the nearest fit soldier, else anyone fit but the captain, else whoever is best off', () => {
+  it('sends the nearest fit courtier but the captain, else the captain, else whoever is best off', () => {
     expect(
       chooseLure([
         { name: 'Bram', soldier: false, captain: true, health: 20, distance: 3 },
@@ -10,7 +10,7 @@ describe('luring a creeper away from the hall', () => {
         { name: 'Brock', soldier: true, captain: false, health: 12, distance: 9 },
         { name: 'Barnaby', soldier: true, captain: false, health: 5, distance: 2 },
       ])
-    ).toBe('Brock')
+    ).toBe('Bevis')
     expect(
       chooseLure([
         { name: 'Bram', soldier: false, captain: true, health: 20, distance: 3 },

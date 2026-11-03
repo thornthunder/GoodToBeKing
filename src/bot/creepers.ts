@@ -36,16 +36,18 @@ export interface LureCandidate {
 const FIT = 8
 
 /**
- * Who goes to meet the creeper: a fit soldier, the nearest first; else anyone fit but the
- * captain; else whoever is best off. Nobody when everyone is unavailable.
+ * Who goes to meet the creeper: the nearest fit courtier but the captain (a creeper goes for the
+ * nearest player it sees, so the nearest is the one it will follow; on 2026-11-03 it ignored a
+ * soldier sent from further off and blew up the worker beside it); else the captain if fit;
+ * else whoever is best off. Nobody when everyone is unavailable.
  */
 export function chooseLure(candidates: LureCandidate[]): string | undefined {
   const free = candidates.filter((c) => !c.unavailable)
   const fit = (c: LureCandidate) => (c.health ?? 20) >= FIT
   const nearest = (cs: LureCandidate[]) => [...cs].sort((a, b) => a.distance - b.distance)[0]
   return (
-    nearest(free.filter((c) => c.soldier && fit(c)))?.name ??
     nearest(free.filter((c) => !c.captain && fit(c)))?.name ??
+    nearest(free.filter((c) => fit(c)))?.name ??
     [...free].sort((a, b) => (b.health ?? 20) - (a.health ?? 20))[0]?.name
   )
 }
