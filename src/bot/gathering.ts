@@ -333,14 +333,35 @@ export class Gatherer {
   private search(material: Material): Vec3[] {
     const info = MATERIAL_INFO[material]
     const players = this.players()
-    const found = this.bot.findBlocks({
+    // Without dirt for a pillar, only logs to be had from the ground count: round the war
+    // game's halls the trees were felled from the bottom up, round after round, and the 80
+    // nearest logs were all left high in the air (2026-11-04: "no dirt to climb to the log").
+    const noPillar = info.tree && this.carried('dirt') < 4
+    const found: Vec3[] = this.bot.findBlocks({
       matching: (block: { name: string }) => info.blocks.test(block.name),
       useExtraInfo: (block: { position: Vec3 }) => this.allowed(material, block.position, players),
       maxDistance: material === 'wood' ? SEARCH_WOOD : SEARCH,
-      count: CANDIDATES,
+      count: noPillar ? CANDIDATES * 5 : CANDIDATES,
     } as never)
-    this.log.info(`found ${found.length} places with untouched ${material} nearby`)
-    return found
+    const usable = noPillar
+      ? found.filter((p) => this.fromTheGround(p)).slice(0, CANDIDATES)
+      : found
+    this.log.info(
+      `found ${usable.length} places with untouched ${material} nearby` +
+        (noPillar && usable.length < found.length ? ' (to be had from the ground)' : '')
+    )
+    return usable
+  }
+
+  /** Can this log be reached standing on the ground (or is there a trunk under it to fell first)? */
+  private fromTheGround(p: Vec3): boolean {
+    for (let dy = 1; dy <= 6; dy++) {
+      const b = this.bot.blockAt(p.offset(0, -dy, 0))
+      if (!b) return false
+      if (/_log$|_wood$/.test(b.name)) return true
+      if (b.boundingBox === 'block' && !/leaves/.test(b.name)) return dy <= 5
+    }
+    return false
   }
 
   /** The nearest place not tried yet that may still be dug (players move, holes appear). */
