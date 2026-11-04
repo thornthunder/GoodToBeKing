@@ -429,6 +429,15 @@ describe("the Castellan's account", () => {
     )
   })
 
+  it('keeps the mine dug day and night in a metals round, one courtier at a time', () => {
+    const metals = { ...base, metals: true, night: true }
+    expect(plan(metals)).toContainEqual({ kind: 'mine', by: 'Henry', want: 64 })
+    expect(kinds({ ...metals, underway: ['mine'] })).not.toContain('mine:Henry')
+    expect(kinds({ ...metals, resting: ['mine'] })).not.toContain('mine:Henry')
+    // Not in an ordinary court by night.
+    expect(kinds({ ...base, night: true })).not.toContain('mine:Henry')
+  })
+
   it('has free hands gather the basics by day when nothing else wants them', () => {
     const idle = { ...base, basics: true }
     // One down the mine, one for wood (the store has some, not plenty); the rest stay free.

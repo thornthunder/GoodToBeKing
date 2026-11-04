@@ -980,6 +980,7 @@ export class BotManager {
       resting: [...this.resting].filter(([, until]) => until > Date.now()).map(([kind]) => kind),
       underway: [...this.underway],
       basics: true,
+      metals: Boolean(this.household.metal),
       waterField: Boolean(
         this.household.farm &&
         !this.household.farm.watered &&

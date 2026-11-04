@@ -112,6 +112,12 @@ export interface CourtState {
    * the mine for coal, iron, copper and stone, then wood for the store.
    */
   basics?: boolean
+  /**
+   * The war game's metals round: bars are the score, so the mine is dug day and night, by one
+   * courtier, before the court's other chores (the steward's "day" is the outdoor hours, a
+   * third of each Minecraft day: the mine stood idle two thirds of the time).
+   */
+  metals?: boolean
 }
 
 /** Something Merlin may conjure for the court. */
@@ -283,6 +289,13 @@ export function plan(s: CourtState): StewardAction[] {
     const by = anyone()
     if (by) out.push({ kind: 'mine', by, want: 16 })
   }
+  // A metals round: the mine, day and night, deep, whenever no one is down it.
+  let metalMine = false
+  if (s.metals && !stoneFirst && s.storehouse && !s.mineEnded && !rests('mine')) {
+    const by = anyone()
+    if (by) out.push({ kind: 'mine', by, want: 64 })
+    metalMine = Boolean(by)
+  }
   // Water for a dry field, by day (a walk to the lake and back).
   if (s.waterField && s.storehouse && !s.night && !rests('water')) {
     const by = fitOne([], s.guards ?? [])
@@ -444,9 +457,9 @@ export function plan(s: CourtState): StewardAction[] {
   }
 
   // Stone: the mine, by day.
-  let mining = stoneFirst
+  let mining = stoneFirst || metalMine
   if (
-    !stoneFirst &&
+    !mining &&
     s.storehouse &&
     !s.night &&
     !s.mineEnded &&
