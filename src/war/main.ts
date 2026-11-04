@@ -285,6 +285,25 @@ class Referee {
   }
 
   /**
+   * A side benched or called in, and seen to be: an order written as the side's process starts
+   * is lost (it clears its command file at start; on 2026-11-04 White missed its first bench
+   * so, and the Dev world stood at its 25-player cap), so it goes again till the side's account
+   * says it took it.
+   */
+  private async bench(side: string, on: boolean): Promise<void> {
+    const line = on ? 'war bench' : 'war join'
+    for (let i = 0; i < 6 && !this.stopping; i++) {
+      await this.order(side, line)
+      await sleep(3_000)
+      // A side never benched has no say in it yet (a new side: no war file at all).
+      if ((this.war(side)?.benched === true) === on) return
+      this.log.info(`${side} has not taken "${line}" yet: again`)
+      await sleep(10_000)
+    }
+    if (!this.stopping) this.log.warn(`${side} did not take "${line}": the round goes on anyway`)
+  }
+
+  /**
    * A new round: the side sitting it out benched (its bots leave the server), the two that play
    * called in, mustered home into new halls, and told.
    */
@@ -295,8 +314,8 @@ class Referee {
       `series ${this.state.series}, round ${this.state.round}: ${playing.join(' against ')}` +
         (this.sitting().length ? `; ${this.sitting().join(' and ')} sits it out` : '')
     )
-    for (const side of this.sitting()) await this.order(side, 'war bench')
-    for (const side of playing) await this.order(side, 'war join')
+    for (const side of this.sitting()) await this.bench(side, true)
+    for (const side of playing) await this.bench(side, false)
     // The sides' bots in the world first (a teleport finds nobody otherwise).
     const start = Date.now()
     while (!this.stopping && Date.now() - start < MUSTER_MS) {
