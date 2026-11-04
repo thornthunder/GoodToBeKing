@@ -73,7 +73,7 @@ import { sideTitle, warSide } from '../war/side'
 import { WarBook } from '../war/War'
 import { Playbook } from '../war/playbook'
 import { gearWords, planRaid, type Brief } from '../war/plan'
-import { councilLine, holdCouncil, type CouncilBrief } from '../war/council'
+import { councilLine, holdCouncil, type Council, type CouncilBrief } from '../war/council'
 import { metalWords, timeline } from '../war/referee'
 import { chooseLure, CREEPER_WATCH, LURE_MS } from './creepers'
 
@@ -2332,6 +2332,7 @@ export class BotManager {
       if ([cx, cy, cz, hx, hy, hz].some((v) => !Number.isFinite(v)))
         return this.log.warn('usage: war open <enemy chest x y z> <enemy home x y z> [days]')
       this.endRaid('a new order')
+      const roundDays = Number.isFinite(days) && days > 0 ? days : 10
       war.order(
         {
           side: SIDE.enemy.name,
@@ -2340,7 +2341,8 @@ export class BotManager {
           home: { x: hx, y: hy, z: hz },
         },
         Date.now(),
-        'metals'
+        'metals',
+        roundDays
       )
       // No bars spent till the captain says so; the mine deep enough for gold (a mine begun in
       // the moment since the reset goes deeper too).
@@ -2354,7 +2356,7 @@ export class BotManager {
       this.enemySeen = undefined
       const m = {
         openedAt: Date.now(),
-        days: Number.isFinite(days) && days > 0 ? days : 10,
+        days: roundDays,
         lastCouncil: 0,
         holding: false,
         timer: undefined as NodeJS.Timeout | undefined,
@@ -2472,7 +2474,8 @@ export class BotManager {
       this.work('the war', `day ${day} of ${m.days}, the council (${c.by}): ${line}`)
       if (c.words) captain.chat(c.words)
       // Defenders: those named hold the chest; those no longer named go back to work.
-      for (const b of this.bots) if (b.isDefending && !c.defenders.includes(b.cfg.name)) b.stopWar()
+      for (const b of this.bots)
+        if (b.isDefending && !c.defenders.includes(b.cfg.name)) void b.stopWar()
       for (const name of c.defenders) {
         const b = this.find(name)
         if (b && !b.isDefending && !b.isRaiding)
@@ -2482,7 +2485,8 @@ export class BotManager {
       for (const name of c.raiders) {
         const b = this.find(name)
         if (!b || b.isRaiding) continue
-        if (b.isDefending) b.stopWar()
+        // Guarding till now: let go first (a defender stops within a few seconds).
+        if (b.isDefending) await b.stopWar()
         void b
           .startRaid({
             chest: enemy.chest,
@@ -2505,6 +2509,40 @@ export class BotManager {
     } finally {
       m.holding = false
     }
+  }
+
+  /**
+   * A restart in the middle of a metals round: the councils carry on where they were, under
+   * the last council's limits, and new mines go deep (a restart once ended the councils).
+   */
+  private resumeMetals(): void {
+    const war = this.war
+    const d = war?.data
+    if (!war || !d || this.metals || d.phase !== 'raid' || d.objective !== 'metals') return
+    if (!d.orderedAt || !d.enemy) return
+    const lastCouncil = d.events.filter((e) => e.kind === 'plan').at(-1)?.at ?? 0
+    const last = d.plan as Partial<Council> | undefined
+    this.household.metal = { arms: Boolean(last?.arms), tools: Boolean(last?.tools) }
+    this.household.mineDepth = METALS_MINE_DEPTH
+    const m = {
+      openedAt: d.orderedAt,
+      days: d.days ?? 10,
+      lastCouncil,
+      holding: false,
+      timer: undefined as NodeJS.Timeout | undefined,
+    }
+    this.metals = m
+    const run = () =>
+      void this.council().catch((err) => this.log.warn(`the council failed: ${errMsg(err)}`))
+    const due = Math.max(30_000, (lastCouncil || m.openedAt) + COUNCIL_MS - Date.now())
+    this.log.info(
+      `the war: the metals round goes on; the next council in ${Math.round(due / 60_000)} min`
+    )
+    m.timer = setTimeout(() => {
+      if (this.metals !== m) return
+      run()
+      m.timer = setInterval(run, COUNCIL_MS)
+    }, due)
   }
 
   /** The referee's count at a metals round's end: a courtier opens our chest and says what is in it. */
@@ -2630,7 +2668,7 @@ export class BotManager {
     if (this.raidWait) this.raidWait.cancel = true
     if (this.metals?.timer) clearInterval(this.metals.timer)
     this.metals = undefined
-    for (const b of this.bots) b.stopWar()
+    for (const b of this.bots) void b.stopWar()
     if (this.war && this.war.phase === 'raid') {
       this.war.end()
       this.work('the war', `the raid is over: ${why}`)
@@ -2828,6 +2866,7 @@ export class BotManager {
       }
     }
     this.ready = true
+    this.resumeMetals()
     this.runWorks()
     // A palace a royal ordered and the crew free: its plans are drawn now.
     const ordered = this.courtWorks().ordered

@@ -96,6 +96,8 @@ export interface WarState {
   counted?: { items: Record<string, number>; at: number }
   /** A metals round: the captain's councils held so far. */
   councils?: number
+  /** A metals round: how many days it lasts (a restart carries the councils on). */
+  days?: number
   startedAt?: number
   endedAt?: number
   raiders: Record<string, RaiderProgress>
@@ -187,9 +189,15 @@ export class WarBook {
    * The referee's order: raid the enemy's chest (a raid round), or from now on anything goes,
    * and the metal in our own chest wins (a metals round: the captain holds a council a day).
    */
-  order(enemy: Enemy, now = Date.now(), objective: 'raid' | 'metals' = 'raid'): void {
+  order(
+    enemy: Enemy,
+    now = Date.now(),
+    objective: 'raid' | 'metals' = 'raid',
+    days?: number
+  ): void {
     this.state.phase = 'raid'
     this.state.objective = objective
+    this.state.days = days
     this.state.enemy = enemy
     this.state.orderedAt = now
     this.state.plan = undefined

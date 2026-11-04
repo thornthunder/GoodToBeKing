@@ -2538,7 +2538,8 @@ export class Bot extends EventEmitter {
       `off to raid the chest at ${fmtVec(orders.chest)} (${orders.tactic}, ${orders.trips} trips)`
     )
     try {
-      await raider.run()
+      this.warRun = raider.run()
+      await this.warRun
     } finally {
       if (this.raider === raider) this.raider = undefined
     }
@@ -2555,16 +2556,28 @@ export class Bot extends EventEmitter {
     const defender = new Defender(rb, orders)
     this.defender = defender
     try {
-      await defender.run()
+      this.warRun = defender.run()
+      await this.warRun
     } finally {
       if (this.defender === defender) this.defender = undefined
     }
   }
 
-  /** The raid is over: whatever this courtier does in it stops. */
-  stopWar(): void {
-    this.raider?.cancel()
-    this.defender?.cancel()
+  /** The raider's or defender's run, while one goes on. */
+  private warRun?: Promise<void>
+
+  /**
+   * Whatever this courtier does in the war stops; resolves once it has (a defender lets go
+   * within a few seconds). On 2026-11-04 a council's "stop guarding, now raid" found the
+   * defender still there, and the raid never started.
+   */
+  async stopWar(): Promise<void> {
+    const [raider, defender, run] = [this.raider, this.defender, this.warRun]
+    raider?.cancel()
+    defender?.cancel()
+    if (run && (raider || defender)) await withTimeout(run, 15_000).catch(() => {})
+    if (this.raider === raider) this.raider = undefined
+    if (this.defender === defender) this.defender = undefined
   }
 
   /** At war: raiding or holding the chest. */

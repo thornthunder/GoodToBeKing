@@ -28,6 +28,10 @@ interface Saved {
   home?: Spot
   storehouse?: Spot
   hall?: SavedHall
+  /** The war game's metals round: the captain's limits, the mine's depth, gold left in the walls. */
+  metal?: { arms: boolean; tools: boolean }
+  mineDepth?: number
+  goldSeen?: number
   /** The court's wheat field (see build/farm.ts). */
   farm?: Farm
   /** The court's mine (see bot/mining.ts). */
@@ -72,13 +76,37 @@ export class Household {
   /**
    * The war game's metals round (src/war/council.ts): may bars from the chest be spent on arms
    * (swords, armour), and on tools (an iron pickaxe, a bucket)? The captain decides each day.
-   * Undefined: no such limit (the court everywhere else).
+   * Undefined: no such limit (the court everywhere else). Kept in the file: a restart mid-round
+   * must not lift the captain's limits.
    */
-  metal?: { arms: boolean; tools: boolean }
+  get metal(): { arms: boolean; tools: boolean } | undefined {
+    return this.data.metal
+  }
+
+  set metal(value: { arms: boolean; tools: boolean } | undefined) {
+    this.data.metal = value
+    this.save()
+  }
+
   /** How deep a new mine's stairs go (a metals round digs deeper, for gold); undefined: the usual. */
-  mineDepth?: number
+  get mineDepth(): number | undefined {
+    return this.data.mineDepth
+  }
+
+  set mineDepth(value: number | undefined) {
+    this.data.mineDepth = value
+    this.save()
+  }
+
   /** Gold ore the miner saw and left, for want of an iron pickaxe (this round). */
-  goldSeen = 0
+  get goldSeen(): number {
+    return this.data.goldSeen ?? 0
+  }
+
+  set goldSeen(value: number) {
+    this.data.goldSeen = value
+    this.save()
+  }
 
   /**
    * @param follow read only, as another mind keeps it (the army follows the household's): read
@@ -372,9 +400,6 @@ export class Household {
   /** Everything forgotten (a new round of the war game): no home, no stores, nothing seen. */
   forgetAll(): void {
     this.data = {}
-    this.metal = undefined
-    this.mineDepth = undefined
-    this.goldSeen = 0
     this.save()
   }
 
