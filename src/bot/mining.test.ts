@@ -58,4 +58,21 @@ describe("the court's mine", () => {
     expect(start).toMatchObject({ y: 65, steps: 0, depth: NEW_DEPTH })
     expect(Math.hypot(start!.x, start!.z)).toBeGreaterThanOrEqual(10)
   })
+
+  it('starts on a forest floor too, and looks further out and to the sides when it must', () => {
+    // Leaf litter on the grass everywhere; the four ways out to 24 blocks are all kept clear.
+    const forest = (x: number, y: number) =>
+      y < 64 ? 'dirt' : y === 64 ? 'grass_block' : y === 65 ? 'leaf_litter' : 'air'
+    const home = { x: 0, y: 65, z: 0 }
+    expect(chooseMine((x, y) => forest(x, y), home, [[0, 0]])).toMatchObject({ y: 65 })
+    const ways: Array<[number, number]> = []
+    for (let r = 10; r <= 24; r += 2) ways.push([r, 0], [-r, 0], [0, r], [0, -r])
+    const far = chooseMine((x, y) => forest(x, y), home, ways)
+    expect(far).toBeDefined()
+    expect(Math.hypot(far!.x, far!.z)).toBeGreaterThan(10)
+    // Off to the side of a way kept clear, never on it.
+    expect(ways.some(([x, z]) => Math.abs(x - far!.x) <= 5 && Math.abs(z - far!.z) <= 5)).toBe(
+      false
+    )
+  })
 })

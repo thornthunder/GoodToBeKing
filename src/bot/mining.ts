@@ -320,15 +320,21 @@ export class Miner {
   private async stepOn(mine: Mine): Promise<boolean> {
     const n = mine.steps + 1
     const danger = this.danger(stepCells(mine, n), stepAt(mine, n))
-    if (danger) {
-      this.log.info(`the mine's tunnel stops at step ${n}: ${danger}`)
+    const stop = (why: string) => {
+      this.log.info(`the mine's tunnel stops at step ${n}: ${why}`)
       // Far enough along the level to branch off what there is; else it is no mine at all.
       if (mine.steps >= depthOf(mine) + SHORT_LEVEL) mine.length = mine.steps
-      else mine.ended = danger
+      else mine.ended = why
       return true
     }
+    // A hollow under the next step is bridged with a block carried (dug out of the stair above);
+    // water and lava end the tunnel. (Ended at every hollow, two shafts in a row gave out at
+    // their first step in the war game's oak wood, 2026-11-04.)
+    const hollow = danger === 'a cave below'
+    if (danger && !hollow) return stop(danger)
     for (const cell of stepCells(mine, n)) await this.digAt(cell)
     const f = stepAt(mine, n)
+    if (hollow && !(await this.floorUnder(f))) return stop('a cave below')
     try {
       await withTimeout(this.bot.pathfinder.goto(new goals.GoalBlock(f.x, f.y, f.z)), 15_000)
     } catch (err) {
@@ -408,6 +414,42 @@ export class Miner {
     const below = this.names(feet.offset(0, -1, 0))
     if (below === 'air' || below === 'cave_air') return 'a cave below'
     return undefined
+  }
+
+  /**
+   * A block put where the feet's floor should be (the step's own cells dug, so the hollow below
+   * is in sight): stone or earth from the pockets. Whether the step has a floor now.
+   */
+  private async floorUnder(f: Vec3): Promise<boolean> {
+    const floor = f.offset(0, -1, 0)
+    const solid = (p: Vec3) => this.bot.blockAt(p)?.boundingBox === 'block'
+    if (solid(floor)) return true
+    const item = this.bot.inventory
+      .items()
+      .find((i) =>
+        /^(cobblestone|cobbled_deepslate|dirt|stone|andesite|diorite|granite|tuff)$/.test(i.name)
+      )
+    if (!item) return false
+    const against = [
+      floor.offset(0, -1, 0),
+      floor.offset(1, 0, 0),
+      floor.offset(-1, 0, 0),
+      floor.offset(0, 0, 1),
+      floor.offset(0, 0, -1),
+    ]
+      .map((p) => this.bot.blockAt(p))
+      .find((b) => b && b.boundingBox === 'block')
+    if (!against) return false
+    try {
+      await this.bot.equip(item, 'hand')
+      await withTimeout(this.bot.placeBlock(against, floor.minus(against.position)), 8_000)
+    } catch (err) {
+      this.log.info(`could not bridge the hollow under step ${f}: ${errMsg(err)}`)
+    }
+    await sleep(300)
+    if (!solid(floor)) return false
+    this.log.info(`bridged a hollow under the stair at ${floor} with ${item.name}`)
+    return true
   }
 
   private async digAt(p: Vec3): Promise<void> {
@@ -519,25 +561,34 @@ export function chooseMine(
   clear: Array<[number, number]>,
   depth = NEW_DEPTH
 ): Mine | undefined {
-  const SOIL = /^(grass_block|dirt|coarse_dirt|podzol|stone|andesite|diorite|granite)$/
-  const OPEN = /^(air|short_grass|tall_grass|fern|large_fern|[a-z_]*flower|poppy|dandelion)$/
-  for (let r = 10; r <= 24; r += 2)
-    for (const [dx, dz] of [
-      [1, 0],
-      [0, 1],
-      [-1, 0],
-      [0, -1],
-    ]) {
-      const x = home.x + dx * r
-      const z = home.z + dz * r
-      if (clear.some(([cx, cz]) => Math.abs(cx - x) <= 5 && Math.abs(cz - z) <= 5)) continue
-      for (let y = home.y + 3; y >= home.y - 4; y--) {
-        if (!SOIL.test(names(x, y - 1, z) ?? '') || !OPEN.test(names(x, y, z) ?? '')) continue
-        if (!OPEN.test(names(x, y + 1, z) ?? '')) break
-        // Going on outward, away from home.
-        return { x, y, z, dx, dz, steps: 0, depth }
-      }
+  const SOIL = /^(grass_block|dirt|coarse_dirt|podzol|rooted_dirt|stone|andesite|diorite|granite)$/
+  // The forest floor too: leaf litter, bushes and the like (an oak wood's floor is all of
+  // them: on 2026-11-04 a side found "no place near home" for a third mine).
+  const OPEN =
+    /^(air|short_grass|tall_grass|fern|large_fern|[a-z_]*flower|poppy|dandelion|leaf_litter|wildflowers|pink_petals|bush|firefly_bush|short_dry_grass|tall_dry_grass|dead_bush|deadbush|snow_layer|[a-z_]*_tulip|allium|azure_bluet|oxeye_daisy|cornflower|lily_of_the_valley)$/
+  // Out from home along the four ways, then to either side of each, further out as need be.
+  const candidates: Array<[number, number, number, number]> = []
+  for (let r = 10; r <= 40; r += 2)
+    for (const side of [0, 4, -4, 8, -8])
+      for (const [dx, dz] of [
+        [1, 0],
+        [0, 1],
+        [-1, 0],
+        [0, -1],
+      ])
+        if (r <= 24 || side === 0 || r % 4 === 0) candidates.push([r, side, dx, dz])
+  candidates.sort((a, b) => Math.hypot(a[0], a[1]) - Math.hypot(b[0], b[1]))
+  for (const [r, side, dx, dz] of candidates) {
+    const x = home.x + dx * r - dz * side
+    const z = home.z + dz * r + dx * side
+    if (clear.some(([cx, cz]) => Math.abs(cx - x) <= 5 && Math.abs(cz - z) <= 5)) continue
+    for (let y = home.y + 3; y >= home.y - 4; y--) {
+      if (!SOIL.test(names(x, y - 1, z) ?? '') || !OPEN.test(names(x, y, z) ?? '')) continue
+      if (!OPEN.test(names(x, y + 1, z) ?? '')) break
+      // Going on outward, away from home.
+      return { x, y, z, dx, dz, steps: 0, depth }
     }
+  }
   return undefined
 }
 
