@@ -198,6 +198,11 @@ export class Gatherer {
   portalHome?: () => Promise<boolean>
   /** Merlin's portal to the storehouse, when there is no way there on foot. */
   portalStore?: () => Promise<boolean>
+  /**
+   * Fighting, eating or out of a creeper's way (the courtier's survival has the body): a walk
+   * broken off then is waited out and walked again, not counted as a try.
+   */
+  busy?: () => boolean
   /** What the court last saw in the storehouse (shared), for what it keeps (STORE_CAPS). */
   storeHolds?: () => Record<string, number>
   /** When this bot was last portalled to the storehouse for want of a way. */
@@ -535,7 +540,12 @@ export class Gatherer {
     }
     // A chest opens from four blocks: the hall is crowded (beds, bots), so do not insist on two.
     let noWay = false
-    for (const range of [3, 4]) {
+    // (On 2026-11-04 creepers, a drowned and a creeper lure broke the walk to the chest twice
+    // in a row, the chest was "out of reach", and the miner went off saying there was no wood.)
+    const ranges = [3, 4]
+    let interrupted = 0
+    for (let i = 0; i < ranges.length;) {
+      const range = ranges[i]
       const eyes = this.bot.entity.position.offset(0, 1.62, 0)
       if (eyes.distanceTo(pos.offset(0.5, 0.5, 0.5)) <= 4.5) break
       try {
@@ -546,12 +556,18 @@ export class Gatherer {
         noWay = false
         break
       } catch (err) {
+        this.bot.pathfinder.setGoal(null)
+        if (this.busy?.() && interrupted++ < 5 && !this.cancelled) {
+          const until = Date.now() + 60_000
+          while (this.busy() && Date.now() < until && !this.cancelled) await sleep(1_000)
+          continue
+        }
         const at = this.bot.entity.position.floored()
         this.log.info(
           `could not walk to the storehouse (within ${range}) from ${at}: ${errMsg(err)}`
         )
-        this.bot.pathfinder.setGoal(null)
         noWay = /no path/i.test(errMsg(err))
+        i++
       }
     }
     // No way there on foot (a hall up in the air, a pit): Merlin's portal, travel being free.

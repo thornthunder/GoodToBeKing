@@ -1093,6 +1093,7 @@ export class Bot extends EventEmitter {
     )
     this.gatherer.portalHome = () => this.portalHome?.() ?? Promise.resolve(false)
     this.gatherer.portalStore = () => this.portalTo?.('the storehouse') ?? Promise.resolve(false)
+    this.gatherer.busy = () => this.survival?.busy ?? false
     this.gatherer.storeHolds = () => this.household?.stock.items ?? {}
     this.hunter = new Hunter(body, this.log.child('hunt'), (name) => this.isBot(name))
     this.cook = new Cook(body, this.log.child('cook'), this.gatherer)
