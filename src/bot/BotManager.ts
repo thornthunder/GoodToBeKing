@@ -798,7 +798,9 @@ export class BotManager {
   private rest(kind: string, ok: boolean): void {
     if (ok) this.resting.delete(kind)
     else {
-      this.resting.set(kind, Date.now() + REST_MS)
+      // A metals round: the mine is the score, tried again soon (a third of a day lost each time).
+      const ms = kind === 'mine' && this.household.metal ? 3 * 60_000 : REST_MS
+      this.resting.set(kind, Date.now() + ms)
       this.work('housekeeping', `${kind} came to nothing; it rests a while`)
     }
   }

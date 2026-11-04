@@ -1099,7 +1099,7 @@ export class Bot extends EventEmitter {
     this.farmer = new Farmer(body, this.log.child('farm'), this.gatherer)
     this.forester = new Forester(body, this.log.child('grove'), this.gatherer)
     this.fisher = new Fisher(body, this.log.child('fish'), this.gatherer)
-    this.miner = new Miner(body, this.log.child('mine'))
+    this.miner = new Miner(body, this.log.child('mine'), () => this.survival?.busy ?? false)
     this.handbuilder = new Handbuilder(body, this.log.child('hands'), this.gatherer, () =>
       this.movement?.configure()
     )

@@ -148,9 +148,19 @@ export class Miner {
 
   constructor(
     bot: MineflayerBot,
-    private readonly log: Logger
+    private readonly log: Logger,
+    /** Fighting, eating or out of a creeper's way: the body is taken (bot/survival.ts). */
+    private readonly busy: () => boolean = () => false
   ) {
     this.bot = bot as MineBot
+  }
+
+  /** Wait while the body is taken (a fight on the way to the mine), a minute at most. */
+  private async whileBusy(): Promise<boolean> {
+    if (!this.busy()) return false
+    const until = Date.now() + 60_000
+    while (this.busy() && Date.now() < until && !this.cancelled) await sleep(1_000)
+    return true
   }
 
   cancel(): void {
@@ -192,18 +202,25 @@ export class Miner {
 
   /** Walk to a spot in the mine: exactly, then once more, then near enough. */
   private async walkTo(p: Vec3, what: string): Promise<boolean> {
-    for (const goal of [
+    const tries = [
       new goals.GoalBlock(p.x, p.y, p.z),
       new goals.GoalBlock(p.x, p.y, p.z),
       new goals.GoalNear(p.x, p.y, p.z, 1),
-    ]) {
+    ]
+    // A walk broken off by a fight or a flight is waited out and walked again, not counted
+    // (on 2026-11-04 the night's monsters broke three walks to the mine's mouth in a row, and
+    // the mine was given up for ten minutes).
+    let interrupted = 0
+    for (let i = 0; i < tries.length && !this.cancelled;) {
       try {
-        await withTimeout(this.bot.pathfinder.goto(goal), 40_000)
+        await withTimeout(this.bot.pathfinder.goto(tries[i]), 40_000)
         return true
       } catch (err) {
-        this.log.info(`could not walk to ${what}: ${errMsg(err)}`)
         this.bot.pathfinder.setGoal(null)
+        if ((await this.whileBusy()) && ++interrupted <= 5) continue
+        this.log.info(`could not walk to ${what}: ${errMsg(err)}`)
         await sleep(2_000)
+        i++
       }
     }
     return false
