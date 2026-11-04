@@ -2091,6 +2091,13 @@ export class Bot extends EventEmitter {
         }
         return 0
       })
+      // Nothing to make a pickaxe of (a new round's empty chest, or the hall's work took the
+      // wood): fell a tree for one first. In the war game's first metals rounds the miner was
+      // sent down a dozen times with nothing to dig with, while the hall took every log.
+      if (this.carries(/_pickaxe$/) === 0 && this.carries(/_log$|_planks$/) === 0 && gatherer) {
+        this.log.info('no pickaxe and no wood: felling a tree for one first')
+        await gatherer.collect('wood', 3).catch(() => undefined)
+      }
       if (ironPick && this.carries(/^iron_ingot$/) >= 3) {
         const mlog = this.log.child('mine')
         if (this.carries(/^stick$/) < 2) {
