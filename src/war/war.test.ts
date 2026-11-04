@@ -17,11 +17,12 @@ import {
   type Arena,
 } from './referee'
 import { grew, pockets, shrank } from './raiding'
-import { botNames, sideTitle, warSide } from './side'
+import { botNames, opponent, sideTitle, warSide } from './side'
 import { WarBook, readWar, total, type WarState } from './War'
 
 const BLUE = ['Bram', 'Baldwin', 'Bevis', 'Brock', 'Barnaby', 'Bertram']
 const GREEN = ['Gareth', 'Gilbert', 'Godwin', 'Gregor', 'Gawain', 'Giles']
+const WHITE = ['Walter', 'Wilfred', 'Warin', 'Wystan', 'Wulfric', 'Wymond']
 
 let dir: string
 beforeEach(() => {
@@ -202,6 +203,7 @@ describe('the plan', () => {
 
 describe('the referee', () => {
   const arena: Arena = {
+    season: 1,
     cycleMs: 1000,
     buildCycles: 1,
     raidCycles: 1,
@@ -385,16 +387,42 @@ describe('the playbook', () => {
 })
 
 describe('the sides', () => {
-  it('knows its side and the enemy from the bots files', () => {
+  it('knows its side and the others from the bots files', () => {
     expect(warSide({})).toBeUndefined()
-    expect(() => warSide({ COURT_SIDE: 'red' })).toThrow(/blue or green/)
+    expect(() => warSide({ COURT_SIDE: 'red' })).toThrow(/blue, green, white/)
     const blue = warSide({ COURT_SIDE: 'Blue' })!
     expect(blue.name).toBe('blue')
-    expect(blue.enemy.name).toBe('green')
-    expect(blue.enemy.names).toEqual(GREEN)
-    expect(warSide({ COURT_SIDE: 'green' })!.enemy.names).toEqual(BLUE)
+    expect(blue.others).toEqual({ green: GREEN, white: WHITE })
+    expect(blue.enemies).toEqual([...GREEN, ...WHITE])
+    expect(warSide({ COURT_SIDE: 'white' })!.enemies).toEqual([...BLUE, ...GREEN])
     expect(botNames(path.resolve('config/war/blue.json'))).toEqual(BLUE)
+    expect(botNames(path.resolve('config/war/white.json'))).toEqual(WHITE)
     expect(sideTitle('green')).toBe('Green')
+  })
+
+  it('plays the side an order names, or the only other one', () => {
+    const blue = warSide({ COURT_SIDE: 'blue' })!
+    expect(opponent(blue, 'White')).toEqual({ name: 'white', names: WHITE })
+    expect(opponent(blue, 'blue')).toBeUndefined()
+    expect(opponent(blue, 'red')).toBeUndefined()
+    // Two others: which one must be said.
+    expect(opponent(blue)).toBeUndefined()
+    expect(opponent({ name: 'blue', others: { green: GREEN }, enemies: GREEN })).toEqual({
+      name: 'green',
+      names: GREEN,
+    })
+  })
+
+  it('gives every side the same court but for the names', () => {
+    const plain = (side: string, names: string[]) =>
+      names
+        .reduce(
+          (text, n, i) => text.split(n).join(`N${i}`),
+          fs.readFileSync(path.resolve(`config/war/${side}.json`), 'utf8')
+        )
+        .replace(new RegExp(sideTitle(side), 'g'), 'S')
+    expect(plain('white', WHITE)).toBe(plain('blue', BLUE))
+    expect(plain('green', GREEN)).toBe(plain('blue', BLUE))
   })
 
   it('tells loot from gear in the pockets', () => {
@@ -418,6 +446,7 @@ describe('the sides', () => {
 describe('a shared world', () => {
   it('leaves the time, the weather and what lies about alone', () => {
     const arena: Arena = {
+      season: 1,
       cycleMs: 1,
       buildCycles: 1,
       raidCycles: 1,

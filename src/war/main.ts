@@ -9,7 +9,9 @@ import { drawLessons, writeReport, type SeriesFacts } from './lessons'
 import { Playbook } from './playbook'
 import {
   chestOf,
+  league,
   objectiveOf,
+  pairing,
   prepareCommands,
   resultOf,
   score,
@@ -17,20 +19,24 @@ import {
   type Arena,
   type Objective,
   type Score,
+  type SideScore,
 } from './referee'
 import { botNames, SIDES } from './side'
 import { readWar, total, type WarState } from './War'
 
 /**
  * The referee of the war game (the King's experiment, 2026-11-02): runs the season round by
- * round. A round: both bases made anew and both sides mustered home (server commands on the
- * war server's console), `war reset` to both sides, peace for some days, then `war raid` to both
- * at once, the raid till both are done or time is up, `war end`, the score, each side's lessons
- * into its playbook; after a series of rounds, a report. State in <WAR_DIR>/season.json, so a
- * restart carries on. Needs: the war server's folder (its console.in, see server/run-bds.sh)
- * and both sides' state folders (their command and war files).
+ * round. A round: two sides play (every pair in turn, the third side benched: its bots leave the
+ * server), both their bases made anew and both mustered home (server commands on the war
+ * server's console), `war reset` to both, peace for some days, then `war raid` to both at once,
+ * the raid till both are done or time is up, `war end`, the score, each side's lessons into its
+ * playbook; after a series of rounds, a report. State in <WAR_DIR>/season.json, so a restart
+ * carries on. Needs: the war server's folder (its console.in, see server/run-bds.sh) and every
+ * side's state folder (their command and war files).
  */
 interface SeasonState {
+  /** The season (arena.json), so a playbook tells this season's rounds from the last one's. */
+  season?: number
   series: number
   round: number
   phase: 'prepare' | 'build' | 'raid' | 'score' | 'done'
@@ -39,8 +45,11 @@ interface SeasonState {
 }
 
 interface RoundFile {
+  season?: number
   series: number
   round: number
+  /** The two sides that played it. */
+  sides?: string[]
   startedAt: number
   orderedAt?: number
   endedAt?: number
@@ -87,12 +96,16 @@ function loadArena(): Arena {
     const v = Number(process.env[key])
     return Number.isFinite(v) && v > 0 ? v : fallback
   }
+  // The sides are those with a base, in the arena's order (which sets the fixtures).
   const sides: Record<string, string[]> = {}
-  for (const side of SIDES) {
-    if (!raw.bases[side]) throw new Error(`${ARENA_FILE}: no base for ${side}`)
+  for (const side of Object.keys(raw.bases)) {
+    if (!SIDES.includes(side))
+      throw new Error(`${ARENA_FILE}: ${side} is no side (the sides: ${SIDES.join(', ')})`)
     sides[side] = botNames(path.resolve(`config/war/${side}.json`))
   }
+  if (Object.keys(sides).length < 2) throw new Error(`${ARENA_FILE}: a war needs two sides`)
   return {
+    season: num('WAR_SEASON', raw.season ?? 1),
     cycleMs: num('WAR_CYCLE_MS', raw.cycleMs ?? 20 * 60_000),
     buildCycles: num('WAR_BUILD_CYCLES', raw.buildCycles ?? 10),
     raidCycles: num('WAR_RAID_CYCLES', raw.raidCycles ?? 2),
@@ -114,6 +127,7 @@ class Referee {
 
   constructor(private readonly arena: Arena) {
     this.state = readJson<SeasonState>(this.seasonFile) ?? {
+      season: arena.season,
       series: 1,
       round: 1,
       phase: 'prepare',
@@ -134,6 +148,26 @@ class Referee {
 
   stop(): void {
     this.stopping = true
+  }
+
+  /** Every side, in the arena's order. */
+  private get sides(): string[] {
+    return Object.keys(this.arena.bases)
+  }
+
+  /** The two sides that play this round. */
+  private playing(round = this.state.round): [string, string] {
+    return pairing(this.sides, round)
+  }
+
+  /** The sides that sit this round out. */
+  private sitting(): string[] {
+    const playing = this.playing()
+    return this.sides.filter((s) => !playing.includes(s))
+  }
+
+  private get season(): number {
+    return this.state.season ?? this.arena.season
   }
 
   private save(): void {
@@ -201,11 +235,14 @@ class Referee {
   async run(): Promise<void> {
     const a = this.arena
     this.log.info(
-      `the war game: ${a.series} series of ${a.rounds} rounds; ${a.buildCycles} days of peace, ` +
-        `${a.raidCycles} of raid, a day being ${Math.round(a.cycleMs / 60_000)} min; ` +
+      `the war game, season ${this.season}: ${a.series} series of ${a.rounds} rounds; ` +
+        `${a.buildCycles} days of peace, ${a.raidCycles} of raid, a day being ` +
+        `${Math.round(a.cycleMs / 60_000)} min; ` +
         Object.entries(a.bases)
           .map(([s, b]) => `${s} at ${b.home.x},${b.home.y},${b.home.z}`)
-          .join(', ')
+          .join(', ') +
+        `; the rounds of a series: ` +
+        Array.from({ length: a.rounds }, (_, i) => this.playing(i + 1).join(' v ')).join(', ')
     )
     while (!this.stopping && this.state.phase !== 'done') {
       try {
@@ -226,7 +263,7 @@ class Referee {
             break
           case 'raid':
             await this.waitUntil(this.state.phaseAt + a.raidCycles * a.cycleMs, 15_000, () =>
-              SIDES.every((s) => this.war(s)?.done)
+              this.playing().every((s) => this.war(s)?.done)
             )
             if (!this.stopping) await this.endRaid()
             break
@@ -242,29 +279,44 @@ class Referee {
     if (this.state.phase === 'done') this.log.info('the season is over')
   }
 
-  /** A new round: both sides mustered home into new halls, and told. */
+  /** The side a playing side plays this round. */
+  private enemyOf(side: string): string {
+    return this.playing().find((s) => s !== side)!
+  }
+
+  /**
+   * A new round: the side sitting it out benched (its bots leave the server), the two that play
+   * called in, mustered home into new halls, and told.
+   */
   private async prepare(): Promise<void> {
     const a = this.arena
+    const playing = this.playing()
+    this.log.info(
+      `series ${this.state.series}, round ${this.state.round}: ${playing.join(' against ')}` +
+        (this.sitting().length ? `; ${this.sitting().join(' and ')} sits it out` : '')
+    )
+    for (const side of this.sitting()) await this.order(side, 'war bench')
+    for (const side of playing) await this.order(side, 'war join')
     // The sides' bots in the world first (a teleport finds nobody otherwise).
     const start = Date.now()
     while (!this.stopping && Date.now() - start < MUSTER_MS) {
       // A status written since this began: after a restart the old files say everyone is in.
-      const spawned = SIDES.map((s) => {
+      const spawned = playing.map((s) => {
         const status = this.status(s)
         if (!status || status.at < start) return 0
         return status.bots.filter((b) => b.status === 'spawned').length
       })
-      if (SIDES.every((s, i) => spawned[i] >= (a.sides[s]?.length ?? 0))) break
+      if (playing.every((s, i) => spawned[i] >= (a.sides[s]?.length ?? 0))) break
       this.log.info(`waiting for the sides to be in the world (${spawned.join(' and ')} spawned)`)
       await sleep(20_000)
     }
     if (this.stopping) return
-    for (const cmd of prepareCommands(a)) {
+    for (const cmd of prepareCommands(a, playing)) {
       this.console(cmd)
       await sleep(250)
     }
     await sleep(5_000)
-    for (const side of SIDES) {
+    for (const side of playing) {
       const base = a.bases[side]
       const chest = chestOf(base)
       await this.order(
@@ -273,21 +325,23 @@ class Referee {
       )
     }
     const round: RoundFile = {
+      season: this.season,
       series: this.state.series,
       round: this.state.round,
+      sides: [...playing],
       startedAt: Date.now(),
     }
     // A metals round: anything goes from now on, both sides told at once.
     if (this.objective() === 'metals') {
       round.orderedAt = Date.now()
       await Promise.all(
-        SIDES.map((side) => {
-          const enemy = SIDES.find((s) => s !== side)!
+        playing.map((side) => {
+          const enemy = this.enemyOf(side)
           const base = a.bases[enemy]
           const chest = chestOf(base)
           return this.order(
             side,
-            `war open ${chest.x} ${chest.y} ${chest.z} ${base.home.x} ${base.home.y} ${base.home.z} ${a.buildCycles}`
+            `war open ${chest.x} ${chest.y} ${chest.z} ${base.home.x} ${base.home.y} ${base.home.z} ${a.buildCycles} vs ${enemy}`
           )
         })
       )
@@ -306,14 +360,14 @@ class Referee {
    * opens it); the count is waited for a few minutes, else the chest as last seen stands.
    */
   private async endMetals(): Promise<void> {
-    await Promise.all(SIDES.map((side) => this.order(side, 'war end')))
+    await Promise.all(this.playing().map((side) => this.order(side, 'war end')))
     await sleep(15_000)
     const asked = Date.now()
-    await Promise.all(SIDES.map((side) => this.order(side, 'war count')))
+    await Promise.all(this.playing().map((side) => this.order(side, 'war count')))
     await this.waitUntil(asked + COUNT_MS, 5_000, () =>
-      SIDES.every((s) => (this.war(s)?.counted?.at ?? 0) >= asked)
+      this.playing().every((s) => (this.war(s)?.counted?.at ?? 0) >= asked)
     )
-    for (const s of SIDES)
+    for (const s of this.playing())
       if ((this.war(s)?.counted?.at ?? 0) < asked)
         this.log.warn(`${s} did not count its chest in time: the chest as last seen stands`)
     this.phase('score')
@@ -333,16 +387,16 @@ class Referee {
       startedAt: this.state.phaseAt,
     }
     round.orderedAt = Date.now()
-    round.stockAtOrder = Object.fromEntries(SIDES.map((s) => [s, this.stock(s)]))
+    round.stockAtOrder = Object.fromEntries(this.playing().map((s) => [s, this.stock(s)]))
     writeJson(this.roundFile(), round)
     await Promise.all(
-      SIDES.map((side) => {
-        const enemy = SIDES.find((s) => s !== side)!
+      this.playing().map((side) => {
+        const enemy = this.enemyOf(side)
         const base = a.bases[enemy]
         const chest = chestOf(base)
         return this.order(
           side,
-          `war raid ${chest.x} ${chest.y} ${chest.z} ${base.home.x} ${base.home.y} ${base.home.z}`
+          `war raid ${chest.x} ${chest.y} ${chest.z} ${base.home.x} ${base.home.y} ${base.home.z} vs ${enemy}`
         )
       })
     )
@@ -350,7 +404,7 @@ class Referee {
   }
 
   private async endRaid(): Promise<void> {
-    await Promise.all(SIDES.map((side) => this.order(side, 'war end')))
+    await Promise.all(this.playing().map((side) => this.order(side, 'war end')))
     // Their files settle.
     await sleep(15_000)
     this.phase('score')
@@ -359,9 +413,17 @@ class Referee {
   /** The score, each side's lessons, and after the last round of a series the report. */
   private async score(): Promise<void> {
     const a = this.arena
-    const states = SIDES.map((s) => this.war(s)).filter((s): s is WarState => s !== undefined)
-    if (states.length < SIDES.length) {
-      this.log.warn('a side has no war file; the round cannot be scored yet')
+    // This round's accounts only: a side that missed its reset still has its last round's.
+    const states = this.playing()
+      .map((s) => this.war(s))
+      .filter(
+        (s): s is WarState =>
+          s !== undefined && s.series === this.state.series && s.round === this.state.round
+      )
+    if (states.length < 2) {
+      this.log.warn(
+        'a side has no war file of this round; the round cannot be scored yet (did it miss its reset?)'
+      )
       await sleep(30_000)
       return
     }
@@ -376,8 +438,10 @@ class Referee {
         ` (${result.why})`
     )
     const round = readJson<RoundFile>(this.roundFile()) ?? {
+      season: this.season,
       series: this.state.series,
       round: this.state.round,
+      sides: [...this.playing()],
       startedAt: this.state.phaseAt,
     }
     round.endedAt = Date.now()
@@ -413,6 +477,7 @@ class Referee {
       round.lessons[state.side] = lessons
       playbook.learn(
         {
+          season: this.season,
           series: this.state.series,
           round: this.state.round,
           result: resultOf(result, state.side),
@@ -438,32 +503,51 @@ class Referee {
     this.phase('prepare')
   }
 
-  /** The season so far as one table (season.md), for a look at the curve. */
+  /**
+   * The season so far (season.md), for a look at the curve: every game, the two sides' figures
+   * side by side (the first named first), and the league table.
+   */
   private writeTable(): void {
-    const rows = this.state.results.map((r) => {
-      const by = (side: string) => r.score.sides.find((s) => s.side === side)
-      const cells = SIDES.flatMap((s): string[] => {
-        const x = by(s)
-        return x
-          ? [
-              x.points === undefined ? '' : String(x.points),
-              ...[x.brought, x.lost, x.kills, x.deaths, x.trips].map(String),
-            ]
-          : ['', '', '', '', '', '']
-      })
-      return `| ${r.series} | ${r.round} | ${r.score.winner ?? 'tie'} | ${r.score.decidedBy} | ${cells.join(' | ')} |`
+    const results = this.state.results
+    const metals = results.some((r) => r.score.sides.some((s) => s.points !== undefined))
+    const rows = results.map((r) => {
+      const [x, y] = r.score.sides
+      const both = (f: (s: SideScore) => number | undefined) =>
+        x && y ? `${f(x) ?? ''} – ${f(y) ?? ''}` : ''
+      const cells = [
+        `${x?.side ?? '?'} v ${y?.side ?? '?'}`,
+        r.score.winner ?? 'tie',
+        r.score.decidedBy,
+        ...(metals ? [both((s) => s.points)] : []),
+        both((s) => s.brought),
+        both((s) => s.lost),
+        both((s) => s.kills),
+        both((s) => s.deaths),
+        both((s) => s.trips),
+      ]
+      return `| ${r.series} | ${r.round} | ${cells.join(' | ')} |`
     })
-    const head = SIDES.map(
-      (s) => `${s} points | ${s} brought | ${s} lost | ${s} kills | ${s} deaths | ${s} trips`
-    ).join(' | ')
+    const standings = league(results, this.sides).map(
+      (s) =>
+        `| ${s.side} | ${s.played} | ${s.won} | ${s.lost} | ${s.tied} | ${s.itemsFor} | ${s.itemsAgainst} | ` +
+        `${s.itemsFor - s.itemsAgainst} | ${s.kills} | ${s.killed} | ${s.deaths} |`
+    )
     const text = [
-      '# The war game, so far',
+      `# The war game, season ${this.season}, so far`,
       '',
-      "(points: the metal in the side's own chest, from series 3: gold bar 100, iron 25, copper 10)",
+      '## The games',
       '',
-      `| series | round | winner | by | ${head} |`,
-      `|---|---|---|---|${SIDES.map(() => '---|---|---|---|---|---').join('|')}|`,
+      "(each pair of figures: the first side named, then the second; brought: items from the other's chest put in its own)",
+      '',
+      `| series | round | game | winner | by | ${metals ? 'points | ' : ''}brought | lost | kills | deaths | trips |`,
+      `|---|---|---|---|---|${metals ? '---|' : ''}---|---|---|---|---|`,
       ...rows,
+      '',
+      '## The league',
+      '',
+      '| side | played | won | lost | tied | items for | items against | difference | kills | killed by the other | deaths |',
+      '|---|---|---|---|---|---|---|---|---|---|---|',
+      ...standings,
       '',
     ].join('\n')
     fs.writeFileSync(path.join(WAR_DIR, 'season.md'), text)
@@ -485,13 +569,13 @@ class Referee {
         }
       })
     const lessons: Record<string, string[]> = {}
-    for (const side of SIDES) lessons[side] = rounds.flatMap((r) => r.lessons[side] ?? [])
+    for (const side of this.sides) lessons[side] = rounds.flatMap((r) => r.lessons[side] ?? [])
     const before = [
       ...new Set(this.state.results.filter((r) => r.series < series).map((r) => r.series)),
     ].map((s) => {
       const won = (side: string) =>
         this.state.results.filter((r) => r.series === s && r.score.winner === side).length
-      return `series ${s}: ${SIDES.map((side) => `${side} won ${won(side)}`).join(', ')}`
+      return `series ${s}: ${this.sides.map((side) => `${side} won ${won(side)}`).join(', ')}`
     })
     const facts: SeriesFacts = { series, rounds, lessons, before }
     const text = await writeReport(this.ai, facts, this.log, { model: WAR_MODEL })

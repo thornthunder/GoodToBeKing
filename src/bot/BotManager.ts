@@ -69,7 +69,7 @@ import type { HallWork } from '../ai/Brain'
 import { ChatFloor, FilePartners } from './ChatFloor'
 import { writeStatus } from '../status'
 import type { InDatabase, SharedState } from '../db/shared'
-import { sideTitle, warSide } from '../war/side'
+import { opponent, sideTitle, warSide } from '../war/side'
 import { WarBook } from '../war/War'
 import { Playbook } from '../war/playbook'
 import { gearWords, planRaid, type Brief } from '../war/plan'
@@ -190,6 +190,8 @@ export class BotManager {
   }
   /** What a raider of ours last saw in the other side's chest. */
   private enemySeen?: { items: Record<string, number>; at: number }
+  /** The bench's comings and goings, one after another (`war bench`, `war join`). */
+  private benching: Promise<void> = Promise.resolve()
 
   constructor(
     cfg: AppConfig,
@@ -203,7 +205,10 @@ export class BotManager {
       this.war.mine = new Set(cfg.bots.map((b) => b.name.toLowerCase()))
       this.playbook = new Playbook(path.resolve(STATE_DIR, 'playbook.json'))
       log.info(
-        `the war game: this is the ${SIDE.name} side; the enemy is ${SIDE.enemy.name} (${SIDE.enemy.names.join(', ')})`
+        `the war game: this is the ${SIDE.name} side; the others: ` +
+          Object.entries(SIDE.others)
+            .map(([s, names]) => `${s} (${names.join(', ')})`)
+            .join(', ')
       )
     }
     // Memories, orders, hails, rules and where the court is: in the database, else in files.
@@ -277,7 +282,7 @@ export class BotManager {
       const bot = new Bot(botCfg, brain, botLog, {
         // Our own helper scripts' players (the surveyor) are ignored like fellow bots.
         fellowBots: [...botNames, ...IGNORED],
-        enemies: SIDE?.enemy.names,
+        enemies: SIDE?.enemies,
         buildLog: builds,
         floor,
         court,
@@ -2288,13 +2293,37 @@ export class BotManager {
   /**
    * The referee's orders: `war reset <series> <round> <home x y z> <chest x y z>` (a new round:
    * everything forgotten, a home and a storehouse as given), `war raid <enemy chest x y z>
-   * <enemy home x y z>` (the captain plans and the side raids), `war end`, `war status`.
+   * <enemy home x y z> vs <side>` (the captain plans and the side raids), `war end`,
+   * `war status`; `war bench` (the side sits a round out: its bots leave the server) and
+   * `war join` (they come back). `vs <side>` names the side played (season 2: three sides).
    */
-  private warCommand(words: string[]): void {
+  private warCommand(given: string[]): void {
     const war = this.war
-    if (!war || !SIDE) return this.log.warn('not at war: COURT_SIDE is not set')
+    const side = SIDE
+    if (!war || !side) return this.log.warn('not at war: COURT_SIDE is not set')
+    const vsAt = given.findIndex((w) => w.toLowerCase() === 'vs')
+    const named = vsAt >= 0 ? given[vsAt + 1] : undefined
+    const words = vsAt >= 0 ? [...given.slice(0, vsAt), ...given.slice(vsAt + 2)] : given
     const [verb] = words
     const nums = (from: number, n: number) => words.slice(from, from + n).map(Number)
+    const foe = () => {
+      const enemy = opponent(side, named)
+      if (!enemy)
+        this.log.warn(
+          `war ${verb}: which side? "vs ${named ?? '<side>'}" must name one of ${Object.keys(side.others).join(', ')}`
+        )
+      return enemy
+    }
+    if (verb === 'bench' || verb === 'join') {
+      const on = verb === 'bench'
+      if (on) this.endRaid('the side sits this round out')
+      war.bench(on)
+      this.work('the war', on ? 'we sit this round out' : 'we are called in to play')
+      this.benching = this.benching
+        .then(() => this.benchBots(on))
+        .catch((err) => this.log.warn(`the bench failed: ${errMsg(err)}`))
+      return
+    }
     if (verb === 'reset') {
       const [series, round, hx, hy, hz, cx, cy, cz] = nums(1, 8)
       if ([series, round, hx, hy, hz, cx, cy, cz].some((v) => !Number.isFinite(v)))
@@ -2317,15 +2346,17 @@ export class BotManager {
     if (verb === 'raid') {
       const [cx, cy, cz, hx, hy, hz] = nums(1, 6)
       if ([cx, cy, cz, hx, hy, hz].some((v) => !Number.isFinite(v)))
-        return this.log.warn('usage: war raid <enemy chest x y z> <enemy home x y z>')
+        return this.log.warn('usage: war raid <enemy chest x y z> <enemy home x y z> vs <side>')
+      const enemy = foe()
+      if (!enemy) return
       this.endRaid('a new order')
       war.order({
-        side: SIDE.enemy.name,
-        names: SIDE.enemy.names,
+        side: enemy.name,
+        names: enemy.names,
         chest: { x: cx, y: cy, z: cz },
         home: { x: hx, y: hy, z: hz },
       })
-      this.work('the war', `the order: raid the ${SIDE.enemy.name} chest at ${cx},${cy},${cz}`)
+      this.work('the war', `the order: raid the ${enemy.name} chest at ${cx},${cy},${cz}`)
       void this.orderRaid().catch((err) => this.log.warn(`the raid failed: ${errMsg(err)}`))
       return
     }
@@ -2333,13 +2364,17 @@ export class BotManager {
       // war open <enemy chest x y z> <enemy home x y z> [days]: a metals round from now on.
       const [cx, cy, cz, hx, hy, hz, days] = nums(1, 7)
       if ([cx, cy, cz, hx, hy, hz].some((v) => !Number.isFinite(v)))
-        return this.log.warn('usage: war open <enemy chest x y z> <enemy home x y z> [days]')
+        return this.log.warn(
+          'usage: war open <enemy chest x y z> <enemy home x y z> [days] vs <side>'
+        )
+      const enemy = foe()
+      if (!enemy) return
       this.endRaid('a new order')
       const roundDays = Number.isFinite(days) && days > 0 ? days : 10
       war.order(
         {
-          side: SIDE.enemy.name,
-          names: SIDE.enemy.names,
+          side: enemy.name,
+          names: enemy.names,
           chest: { x: cx, y: cy, z: cz },
           home: { x: hx, y: hy, z: hz },
         },
@@ -2384,7 +2419,7 @@ export class BotManager {
       const { events, ...rest } = war.data
       return this.log.info(`war: ${JSON.stringify({ ...rest, events: events.length })}`)
     }
-    this.log.warn('usage: war reset|raid|open|count|end|status')
+    this.log.warn('usage: war reset|raid|open|count|end|status|bench|join')
   }
 
   /**
@@ -2860,8 +2895,15 @@ export class BotManager {
         `this is ${worldWords(this.presence.here)}; the court is in ${worldWords(this.presence.world)}` +
           (away.length ? ` (not here: ${away.map((b) => b.cfg.name).join(', ')})` : '')
       )
+    // A war side sitting this round out stays off the server till the referee calls it in.
+    if (this.war?.benched) {
+      for (const bot of this.bots) this.away.add(bot)
+      this.log.info('the war: this side sits the round out; its bots stay away till called in')
+    }
     for (const [i, bot] of this.bots.filter((b) => !this.away.has(b)).entries()) {
       if (i > 0) await sleep(staggerMs)
+      // Benched meanwhile (`war bench`): it stays away.
+      if (this.away.has(bot)) continue
       try {
         await bot.connect()
       } catch (err) {
@@ -2887,6 +2929,28 @@ export class BotManager {
   }
 
   /** Is this bot in this world: everywhere (Merlin), or where the court is. */
+  /**
+   * The war's bench (season 2: two of three sides play each round): a benched side's bots leave
+   * the server, so the round's two sides have it to themselves; called in, they come back.
+   */
+  private async benchBots(on: boolean): Promise<void> {
+    let joined = 0
+    for (const bot of this.bots) {
+      if (on && !this.away.has(bot)) {
+        this.away.add(bot)
+        this.log.info(`${bot.cfg.name} sits this round out`)
+        await bot.disconnect('Sitting this round out')
+      } else if (!on && this.away.has(bot)) {
+        this.away.delete(bot)
+        if (joined++ > 0) await sleep(2_000)
+        this.log.info(`${bot.cfg.name} is called in`)
+        await bot
+          .connect()
+          .catch((err) => this.log.warn(`${bot.cfg.name} failed to connect: ${errMsg(err)}`))
+      }
+    }
+  }
+
   private inThisWorld(bot: Bot): boolean {
     return !this.presence || bot.cfg.everywhere === true || this.presence.courtHere()
   }

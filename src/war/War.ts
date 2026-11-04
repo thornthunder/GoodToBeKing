@@ -3,11 +3,12 @@ import path from 'node:path'
 import type { Point } from '../build/site'
 
 /**
- * One side's account of the war game (the King's experiment, 2026-11-02): two courts, Blue and
- * Green, live their survival lives for some days, then each is ordered to raid the other's chest.
- * What a side brings back and puts in its own chest wins; kills decide a tie. This is the side's
- * own view, kept in `.state/war.json`: the referee (src/war/main.ts) reads both sides' files to
- * keep score, and the side's captain reads its playbook (the lessons of past rounds) to plan.
+ * One side's account of the war game (the King's experiment, 2026-11-02): two courts (from
+ * season 2 two of three: Blue, Green and White) live their survival lives for some days, then
+ * each is ordered to raid the other's chest. What a side brings back and puts in its own chest
+ * wins; kills decide a tie. This is the side's own view, kept in `.state/war.json`: the referee
+ * (src/war/main.ts) reads both sides' files to keep score, and the side's captain reads its
+ * playbook (the lessons of past rounds) to plan.
  */
 export type Phase = 'peace' | 'raid' | 'ended'
 
@@ -112,6 +113,11 @@ export interface WarState {
   deaths: number
   /** Every raider has stopped (its trips done, the chest found empty, or dead for good). */
   done: boolean
+  /**
+   * The side sits this round out (season 2: two of the three sides play each round): its bots
+   * stay off the server till the referee calls it in again, a restart included.
+   */
+  benched?: boolean
   events: WarEvent[]
 }
 
@@ -176,6 +182,22 @@ export class WarBook {
     this.state.events.push({ at: now, ...event })
     if (this.state.events.length > MAX_EVENTS)
       this.state.events.splice(0, this.state.events.length - MAX_EVENTS)
+  }
+
+  get benched(): boolean {
+    return this.state.benched === true
+  }
+
+  /** The referee benches the side for a round, or calls it in again. */
+  bench(on: boolean, now = Date.now()): void {
+    if (this.benched === on) return
+    if (on) this.state.benched = true
+    else delete this.state.benched
+    this.note(
+      { kind: 'note', text: on ? 'the side sits this round out' : 'the side is called in' },
+      now
+    )
+    this.save()
   }
 
   /** A new round: peace, and nothing counted. */

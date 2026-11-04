@@ -207,23 +207,41 @@ deductions does better) into its playbook (`.state/playbook.json`,
 `src/war/playbook.ts`), which its captain reads when planning; after a series the referee writes
 a report (`.war/series-N.md`) and the next series begins. Both sides run identical code and
 model: what sets them apart over a season is only what they have been through, so the season's
-table (`.war/season.md`) shows whether experience makes a side better. The King watches amateur
-leagues improve through a season and has a hypothesis he keeps to himself till the stats are in.
+table (`.war/season.md`) shows whether experience makes a side better. The King's hypothesis,
+told after season 1 (2026-11-04): in amateur leagues, as teams get better and used to each
+other, scores drop and get closer.
 
-- `COURT_SIDE=blue|green` makes a process one side (`src/war/side.ts`): the enemy's bots (from
-  its bots file) are never spoken to (`Bot` `enemies`) and are foes when at war (`Survival`:
-  `enemies`, `aggression` none/near/range, `defend`). `compose.war.yaml` runs `blue`, `green` and
-  `referee` from the court's image with `war.env` (`war.env.example`), each side's `.state` in
-  `.war/<side>`, no database. Only `blue` carries the build section: to put new code into the
-  referee alone, `docker compose -f compose.war.yaml --env-file war.env build blue` and then
-  `up -d --no-deps referee` (`up -d --build referee` builds nothing, and without `--no-deps` it
-  restarts both sides).
+Season 2 (the King's go, 2026-11-04) adds an expansion side: **White** (`config/war/white.json`,
+the same court as the others but for the names), with an empty playbook, against Blue and Green
+with season 1's playbooks. A round robin (`referee.pairing`): each round two sides play (blue v
+green, blue v white, green v white, then again), and the third is benched (`war bench`: its bots
+leave the server, so the Dev world's player cap and the VM's cores hold; `war join` calls it in;
+`WarBook.benched` survives a restart). Six a side as before (the veterans' lessons were learned
+with six), raid rules only (no `metals` in `arena.json`), and the code frozen for the season
+(crash fixes only, between full round robins): season 1's many mid-season fixes muddied whether
+learning or code improved the play. White's hall is at 135, 75, 275, about 185 blocks from each
+of the other two (192 between them), on open meadow by a river with fewer trees: the point the
+same distance south has a family treehouse in the birch trees by it (about 58, 80, 581), which
+the war keeps away from. `season.md` has every game and a league table (`referee.league`: won,
+lost, items and kills for and against); a playbook spanning seasons labels each line with its
+season. Season 1's files are in `.war/season-1/`.
+
+- `COURT_SIDE=blue|green|white` makes a process one side (`src/war/side.ts`): every other side's
+  bots (from their bots files) are never spoken to (`Bot` `enemies`) and are foes when at war
+  (`Survival`: `enemies`, `aggression` none/near/range, `defend`); which of them a round's order
+  is about comes with it (`vs <side>`, `opponent`). `compose.war.yaml` runs `blue`, `green`,
+  `white` and `referee` from the court's image with `war.env` (`war.env.example`), each side's
+  `.state` in `.war/<side>`, no database. Only `blue` carries the build section: to put new code
+  into the referee alone, `docker compose -f compose.war.yaml --env-file war.env build blue` and
+  then `up -d --no-deps referee` (`up -d --build referee` builds nothing, and without `--no-deps`
+  it restarts the sides).
 - The side's account is `.state/war.json` (`src/war/War.ts`, `WarBook`: phase peace/raid/ended,
   the enemy, the plan, each raider's trips and what it carries, what was brought home, lost and
   recovered, kills and deaths from the death notices every bot hears (counted once), every event).
   The referee's orders come through the command file: `war reset <series> <round> <home x y z>
   <chest x y z>` (everything forgotten: `Household.forgetAll`, the estate; a home and storehouse
-  as given), `war raid <enemy chest x y z> <enemy home x y z>`, `war end`, `war status`.
+  as given), `war raid <enemy chest x y z> <enemy home x y z> vs <side>`, `war end`,
+  `war status`, `war bench`, `war join`.
 - The plan (`src/war/plan.ts`): the captain asks the order model (gemma4:31b, else the default
   plan) for raiders, defenders, a tactic (rush: take and run; fight: the defenders first; wait:
   hold off till the chest is unguarded), when (now, day, night) and trips, given the side's gear,
@@ -238,15 +256,16 @@ leagues improve through a season and has a hypothesis he keeps to himself till t
   on a leg, it digs steps out of the hole it may be in (`bot/escape.ts`); a chest not where the
   referee said (the court remakes a lost one beside it) is looked for within 8 blocks.
 - The referee (`src/war/main.ts`, `node dist/war/main.js`; `src/war/referee.ts` is the pure part)
-  runs the season from `.war/season.json` (a restart carries on): it makes both halls anew and
+  runs the season from `.war/season.json` (a restart carries on): it benches the side sitting
+  the round out, makes the two playing sides' halls anew (the benched hall is left as it is) and
   musters each side home with empty pockets and its spawn point there (server commands on the
   console; a test tool outside the court, so the no-operator rule stands), sends `war reset`,
   waits the days of peace (wall clock, `WAR_CYCLE_MS` 20 min), sends both `war raid` at once,
   ends the raid when both sides are done or the raid's days are up, scores
   (`score`: items, then kills; deaths merged from both sides' accounts), has each side draw its
   lessons, and writes `.war/rounds/series-N-round-M.json` with both accounts. `WAR_BUILD_CYCLES`,
-  `WAR_RAID_CYCLES`, `WAR_ROUNDS`, `WAR_SERIES` override `config/war/arena.json` (trial rounds
-  are run with one day of peace). The war needs about four of the VM's eight cores.
+  `WAR_RAID_CYCLES`, `WAR_ROUNDS`, `WAR_SERIES`, `WAR_SEASON` override `config/war/arena.json`
+  (trial rounds are run with one day of peace). The war needs about four of the VM's eight cores.
 - The metals rounds (the King's rules for series 3, 2026-11-03: "they can mine, they can steal,
   they can buy, whatever"; `arena.json` `metals.fromSeries`): ten days, no raid order; the
   side with the most bars in its own chest at the end wins (gold 100, iron 25, copper 10; only

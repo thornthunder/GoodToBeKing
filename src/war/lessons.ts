@@ -15,16 +15,16 @@ const LESSONS_SCHEMA = {
   required: ['lessons'],
 }
 
-const LESSONS_GUIDE = `You are the captain of one side in a war game between two courts on a Minecraft survival server.
+const LESSONS_GUIDE = `You are the captain of one side in a war game between courts on a Minecraft survival server. The courts play a league: each round two of them play each other, so the side you face may change from round to round.
 Each round, both sides are ordered at once to raid each other's storehouse chest. The side that brings more of the other's items home and into its own chest wins; kills break a tie.
 A round has just ended. Below is the full picture of it, for both sides: each side's plan and the reason its captain gave, how each side stood when the order came (every courtier's weapons, armour, health and food), what each chest held, what each side did and what happened to it, in order, and the score.
-Draw one to three lessons for your next plan, from the whole picture: what won and what lost, for you and for them. Each lesson is one plain sentence, concrete and actionable (who should go or stay, which tactic, when, how many trips, what arms or armour to have, what to watch for), and must follow from what happened in this round. Do not repeat a lesson already in the playbook unless this round confirmed it strongly; then say so in it.
+Draw one to three lessons for your next plan, from the whole picture: what won and what lost, for you and for them. Each lesson is one plain sentence, concrete and actionable (who should go or stay, which tactic, when, how many trips, what arms or armour to have, what to watch for), and must follow from what happened in this round. When a lesson is about the side you faced, name that side. Do not repeat a lesson already in the playbook unless this round confirmed it strongly; then say so in it.
 Answer with JSON only: {"lessons": ["...", "..."]}`
 
-const METALS_GUIDE = `You are the captain of one side in a war game between two courts on a Minecraft survival server.
+const METALS_GUIDE = `You are the captain of one side in a war game between courts on a Minecraft survival server. The courts play a league: each round two of them play each other, so the side you face may change from round to round.
 In this round, after ten Minecraft days the side with the most metal bars in its own storehouse chest won: a gold bar 100 points, an iron bar 25, a copper bar 10; only bars in the chest counted; kills broke a tie. Anything went: mining and smelting, raiding the other side's chest, guarding one's own. Once a day each captain held a council: who raids, who guards the chest, whether bars may be spent on arms (swords, armour) or on tools (an iron pickaxe for gold ore, a bucket).
 The round has just ended. Below is the full picture of it, for both sides: each side's councils day by day, how each side stood at the start (every courtier's weapons, armour, health and food), each chest at the count, what each side did and saw, in order, and how often each side died and at whose hands.
-Draw one to three lessons for your next round, from the whole picture: what won and what lost, for you and for them. Each lesson is one plain sentence, concrete and actionable (how many to mine, raid or guard, when to raid, whether to spend bars on arms or a pickaxe, what to watch for), and must follow from what happened in this round. Do not repeat a lesson already in the playbook unless this round confirmed it strongly; then say so in it.
+Draw one to three lessons for your next round, from the whole picture: what won and what lost, for you and for them. Each lesson is one plain sentence, concrete and actionable (how many to mine, raid or guard, when to raid, whether to spend bars on arms or a pickaxe, what to watch for), and must follow from what happened in this round. When a lesson is about the side you faced, name that side. Do not repeat a lesson already in the playbook unless this round confirmed it strongly; then say so in it.
 Answer with JSON only: {"lessons": ["...", "..."]}`
 
 export interface RoundFacts {
@@ -202,9 +202,15 @@ export interface SeriesFacts {
   before: string[]
 }
 
-const REPORT_GUIDE = `You are the referee of a war game between two courts on a Minecraft survival server, Blue and Green.
-In series 1 and 2, both sides lived apart for some days, then were ordered at once to raid each other's storehouse chest; the side that brought more of the other's items home won, kills broke a tie. From series 3 the rules changed: after ten days the side with the most metal bars in its own chest wins (a gold bar 100 points, an iron bar 25, a copper bar 10), by any means (mining, smelting, raiding at any time, guarding), kills break a tie; each captain holds a council once a day. Each round's line says what decided it.
-Both sides run on identical code and the same model; after each round each side draws lessons from the whole round (both sides' accounts) into its playbook, which its captain reads when planning. So the only thing that sets the sides apart over time is what they have been through.
+/**
+ * The referee's guide. Season 2 (the King's wish, 2026-11-04): a league of three sides, Blue
+ * and Green with a season's playbooks behind them and White new, with an empty one; each round
+ * two play and the third sits it out, every pair in turn.
+ */
+const REPORT_GUIDE = `You are the referee of a war game between courts on a Minecraft survival server.
+This season three sides play a league: Blue and Green, who played a season against each other before and carry its lessons in their playbooks, and White, new this season with an empty playbook. Each round two of the sides play each other and the third sits it out, every pair in turn.
+In a round both sides live apart for some days, then are ordered at once to raid each other's storehouse chest; the side that brings more of the other's items home wins, kills break a tie. Each round's line says who played and what decided it.
+All sides run on identical code and the same model; after each round each side that played draws lessons from the whole round (both sides' accounts) into its playbook, which its captain reads when planning. So the only thing that sets the sides apart over time is what they have been through.
 A series of rounds has just ended. Write a short report for the King in Markdown: a few paragraphs on why the winners won and the losers lost, what each side learned and whether its lessons were sound, what changed from round to round, and what to watch in the next series. Be concrete; cite the rounds. Do not invent events not in the facts. No headings above level 3.`
 
 export function seriesBrief(f: SeriesFacts): string {
@@ -216,7 +222,8 @@ export function seriesBrief(f: SeriesFacts): string {
           (s.plan ? `; plan ${s.plan}` : '')
       )
       .join(' | ')
-    return `Round ${r.round}: ${r.score.winner ? `${r.score.winner} won by ${r.score.decidedBy}` : 'a tie'} (${r.score.why}). ${sides}`
+    const game = r.score.sides.map((s) => s.side).join(' against ')
+    return `Round ${r.round}, ${game}: ${r.score.winner ? `${r.score.winner} won by ${r.score.decidedBy}` : 'a tie'} (${r.score.why}). ${sides}`
   })
   const lessons = Object.entries(f.lessons).map(
     ([side, ls]) => `${side}:\n${ls.length ? ls.map((l) => `- ${l}`).join('\n') : '- (none)'}`

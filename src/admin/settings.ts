@@ -515,6 +515,12 @@ export const SECTIONS: SettingSection[] = [
         help: 'How many series the referee plays; empty: the arena file’s (3).',
       },
       {
+        key: 'WAR_SEASON',
+        label: 'Season',
+        type: 'number',
+        help: 'The season a new season file starts as (playbooks label their lessons with it); empty: the arena file’s (2).',
+      },
+      {
         key: 'WAR_COUNCIL_MS',
         label: 'Council every (ms)',
         type: 'number',

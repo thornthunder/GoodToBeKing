@@ -2,8 +2,9 @@ import type { Point } from '../build/site'
 import { total, type WarEvent, type WarState } from './War'
 
 /**
- * The referee's rules of the war game, pure: the arena (two identical halls), the server
- * commands that make it ready for a round, and the score. src/war/main.ts runs the season.
+ * The referee's rules of the war game, pure: the arena (identical halls, one a side), who plays
+ * whom, the server commands that make it ready for a round, and the score. src/war/main.ts runs
+ * the season.
  */
 export interface Base {
   /** The middle of the hall's floor (the first air block above the floor). */
@@ -11,6 +12,11 @@ export interface Base {
 }
 
 export interface Arena {
+  /**
+   * The season (season 2, the King's wish, 2026-11-04: White joined as an expansion side with
+   * no playbook; a round robin, two sides a round, the third sits it out).
+   */
+  season: number
   /** One Minecraft day, in real time (20 minutes). */
   cycleMs: number
   /** Days of peace before the raid, days the raid may last. */
@@ -19,6 +25,7 @@ export interface Arena {
   /** Rounds in a series (then the lessons are drawn and the next series begins), series to play. */
   rounds: number
   series: number
+  /** Each side's hall, in the order the sides are listed (which sets the fixtures). */
   bases: Record<string, Base>
   /** The bots of each side, by name. */
   sides: Record<string, string[]>
@@ -34,6 +41,19 @@ export interface Arena {
    * whatever"): points per bar; no raid order, as either side may raid when it likes.
    */
   metals?: { fromSeries: number; points: Record<string, number> }
+}
+
+/**
+ * The two sides that play round `round` of a series: every pair of sides in turn, a round robin
+ * (with three sides: first and second, first and third, second and third, so each side plays
+ * two rounds in a row and sits the next out); with two sides, both every round.
+ */
+export function pairing(sides: string[], round: number): [string, string] {
+  const pairs: Array<[string, string]> = []
+  for (let i = 0; i < sides.length; i++)
+    for (let j = i + 1; j < sides.length; j++) pairs.push([sides[i], sides[j]])
+  if (!pairs.length) throw new Error(`a round needs two sides, not ${sides.length}`)
+  return pairs[(((round - 1) % pairs.length) + pairs.length) % pairs.length]
 }
 
 /** What a round is won by: items brought home in the raid, or metal in one's own chest. */
@@ -138,14 +158,20 @@ export function musterCommands(base: Base, names: string[]): string[] {
 }
 
 /**
- * The round's start: both bases made and both sides mustered; in the war's own world also
- * morning, fair weather and nothing lying about.
+ * The round's start: the playing sides' bases made and those sides mustered (a side sitting the
+ * round out is left alone); in the war's own world also morning, fair weather and nothing lying
+ * about.
  */
-export function prepareCommands(arena: Arena): string[] {
+export function prepareCommands(
+  arena: Pick<Arena, 'bases' | 'sides' | 'shared'>,
+  playing: string[] = Object.keys(arena.bases)
+): string[] {
   const out = arena.shared
     ? []
     : ['time set 1000', 'weather clear', 'gamerule showcoordinates true']
-  for (const [side, base] of Object.entries(arena.bases)) {
+  for (const side of playing) {
+    const base = arena.bases[side]
+    if (!base) continue
     out.push(...musterCommands(base, arena.sides[side] ?? []))
     out.push(...hallCommands(base))
   }
@@ -310,6 +336,66 @@ export function scoreMetals(
 export function resultOf(s: Score, side: string): 'won' | 'lost' | 'tie' {
   if (!s.winner) return 'tie'
   return s.winner === side ? 'won' : 'lost'
+}
+
+/** A side's line in the league table: like goals for and against, items and kills. */
+export interface Standing {
+  side: string
+  played: number
+  won: number
+  lost: number
+  tied: number
+  /** Items it brought home from the other's chest, and the other brought home from its. */
+  itemsFor: number
+  itemsAgainst: number
+  kills: number
+  /** Its courtiers the other side killed, and its deaths of every kind. */
+  killed: number
+  deaths: number
+}
+
+/** The league table of the rounds played: most won first, then the better item difference. */
+export function league(results: Array<{ score: Score }>, sides: string[]): Standing[] {
+  const table = new Map<string, Standing>(
+    sides.map((side) => [
+      side,
+      {
+        side,
+        played: 0,
+        won: 0,
+        lost: 0,
+        tied: 0,
+        itemsFor: 0,
+        itemsAgainst: 0,
+        kills: 0,
+        killed: 0,
+        deaths: 0,
+      },
+    ])
+  )
+  for (const { score: s } of results) {
+    for (const me of s.sides) {
+      const row = table.get(me.side)
+      const other = s.sides.find((x) => x.side !== me.side)
+      if (!row || !other) continue
+      row.played++
+      const result = resultOf(s, me.side)
+      if (result === 'won') row.won++
+      else if (result === 'lost') row.lost++
+      else row.tied++
+      row.itemsFor += me.brought
+      row.itemsAgainst += other.brought
+      row.kills += me.kills
+      row.killed += other.kills
+      row.deaths += me.deaths
+    }
+  }
+  return [...table.values()].sort(
+    (a, b) =>
+      b.won - a.won ||
+      b.itemsFor - b.itemsAgainst - (a.itemsFor - a.itemsAgainst) ||
+      b.kills - a.kills
+  )
 }
 
 /** The round's events as a side saw them, a line each, for the lessons. */
