@@ -224,7 +224,9 @@ of the other two (192 between them), on open meadow by a river with fewer trees:
 same distance south has a family treehouse in the birch trees by it (about 58, 80, 581), which
 the war keeps away from. `season.md` has every game and a league table (`referee.league`: won,
 lost, items and kills for and against); a playbook spanning seasons labels each line with its
-season. Season 1's files are in `.war/season-1/`.
+season. Season 1's files are in `.war/season-1/`. From series 2 of season 2 (2026-11-05) every
+side's plans and lessons come from gemma4:31b-cloud (the King's choice, see the Ollama notes);
+series 1's came from the local gemma4:31b.
 
 - `COURT_SIDE=blue|green|white` makes a process one side (`src/war/side.ts`): every other side's
   bots (from their bots files) are never spoken to (`Bot` `enemies`) and are foes when at war
@@ -631,6 +633,15 @@ Windows, killing a background `npx` shell does not kill its node children at all
   it is loaded with (none when it is not loaded) and never shorten its keep-alive: another
   `num_ctx` reloads it (once half on the CPU at 5 tokens/s) and pushes the other's copy out.
   Never unload it, and do not add a third model.
+- Since 2026-11-05 (the King's choice) the big model's work (memory, orders, the overlord, the
+  war's plans, councils, lessons and reports) goes to **gemma4:31b-cloud**, Ollama's cloud copy,
+  through the same server (signed in to ollama.com): the local queue was full ("server busy,
+  maximum pending requests exceeded") and e4b chat replies were refused. Only gemma4:e4b runs on
+  Ava for the court now. The cloud ignores `format` (asked for a schema it answers in prose, for
+  JSON in a fence), so for a cloud model (`isCloudModel`) the client puts the schema in the
+  system prompt (`withFormatNote`) and cuts every answer asked as JSON down to its JSON
+  (`jsonContent`). A cloud model is not held on the server: no context or keep-alive is kept to.
+  When it fails, the configured chat model answers, as for any shared model.
 
 ## Protocol notes (bedrock-protocol 3.60, Bedrock 1.26.x)
 

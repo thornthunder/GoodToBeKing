@@ -9,7 +9,10 @@ export type ChatMessage = Message
 export interface ChatOptions {
   tools?: Tool[]
   think?: boolean
-  /** 'json' or a JSON schema object for structured output. */
+  /**
+   * 'json' or a JSON schema object for structured output. Ollama's cloud models ignore it, so for
+   * them the schema goes into the prompt as well, and any answer is cut down to its JSON.
+   */
   format?: string | object
   /** Overrides the configured temperature for this request. */
   temperature?: number
@@ -136,7 +139,8 @@ export class OllamaClient implements ChatModel {
   async chat(messages: ChatMessage[], opts: ChatOptions = {}): Promise<ChatResponse> {
     const model = opts.model ?? this.cfg.model
     if (!opts.shared) return this.send(messages, opts, model, this.cfg)
-    const load = await this.sharedLoad(model)
+    // A cloud model is not held on the server: no context or stay to keep to.
+    const load = isCloudModel(model) ? {} : await this.sharedLoad(model)
     if (model === this.cfg.model) return this.send(messages, opts, model, load)
     try {
       return await this.send(messages, opts, model, load)
@@ -180,7 +184,10 @@ export class OllamaClient implements ChatModel {
   ): Promise<ChatResponse> {
     const request: ChatRequest & { stream: false } = {
       model,
-      messages,
+      messages:
+        opts.format !== undefined && isCloudModel(model)
+          ? withFormatNote(messages, opts.format)
+          : messages,
       stream: false,
       options: {
         temperature: opts.temperature ?? this.cfg.temperature,
@@ -201,6 +208,7 @@ export class OllamaClient implements ChatModel {
     const response = opts.shared
       ? await queueFor(`${this.cfg.host}|${model}`).run(opts.priority ?? 'normal', attempt)
       : await attempt()
+    if (opts.format !== undefined) response.message.content = jsonContent(response.message.content)
     const ms = Date.now() - started
     this.log.debug(
       `chat(${model}) ${ms}ms, prompt=${response.prompt_eval_count ?? '?'} tokens, ` +
@@ -286,6 +294,44 @@ export class OllamaClient implements ChatModel {
     const hasModel = models.some((m) => m === wanted || m === `${wanted}:latest`)
     return { version, models, hasModel }
   }
+}
+
+/** Ollama's cloud models ("gemma4:31b-cloud", "beam:cloud"): run elsewhere, not loaded here. */
+export function isCloudModel(model: string): boolean {
+  return /(^|[-:])cloud$/.test(model)
+}
+
+/**
+ * The messages with the answer's form told in the system prompt, for a model that ignores
+ * `format` (asked for a schema, gemma4:31b-cloud answered in prose; asked for JSON, in a fence).
+ */
+export function withFormatNote(messages: ChatMessage[], format: string | object): ChatMessage[] {
+  const note =
+    'You MUST respond with valid JSON and nothing else. No markdown, no explanation, no code ' +
+    'blocks: just raw JSON, one object' +
+    (typeof format === 'object' ? `, matching this JSON schema:\n${JSON.stringify(format)}` : '.')
+  const i = messages.findIndex((m) => m.role === 'system')
+  if (i < 0) return [{ role: 'system', content: note }, ...messages]
+  return messages.map((m, j) => (j === i ? { ...m, content: `${m.content}\n\n${note}` } : m))
+}
+
+/** An answer meant to be JSON, without the fence or words a model may have put round it. */
+export function jsonContent(content: string): string {
+  const parses = (text: string) => {
+    try {
+      JSON.parse(text)
+      return true
+    } catch {
+      return false
+    }
+  }
+  if (parses(content)) return content
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(content)?.[1]?.trim()
+  if (fenced && parses(fenced)) return fenced
+  const from = content.indexOf('{')
+  const to = content.lastIndexOf('}')
+  const inner = from >= 0 && to > from ? content.slice(from, to + 1) : ''
+  return inner && parses(inner) ? inner : content
 }
 
 /** Seconds in an Ollama keep-alive ("24h", "90s", "1h30m", "300"); negative means forever. */

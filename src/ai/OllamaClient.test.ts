@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { OllamaConfig } from '../config'
-import { keepAliveSeconds, ModelQueue, OllamaClient } from './OllamaClient'
+import {
+  isCloudModel,
+  jsonContent,
+  keepAliveSeconds,
+  ModelQueue,
+  OllamaClient,
+  withFormatNote,
+} from './OllamaClient'
 
 const silent = {
   debug() {},
@@ -80,6 +87,71 @@ describe('a model shared with other programs on the server', () => {
       keep_alive: '24h',
       options: { num_ctx: 8192 },
     })
+  })
+})
+
+describe('a cloud model, which ignores the format asked for', () => {
+  const schema = { type: 'object', properties: { facts: { type: 'array' } } }
+
+  /** A client whose server answers each request with the given content. */
+  function answering(content: string) {
+    const asked: Array<{ model: string; messages: Array<{ role: string; content: string }> }> = []
+    const c = new OllamaClient(cfg, silent)
+    let listed = 0
+    ;(c as unknown as { ollama: unknown }).ollama = {
+      ps: async () => {
+        listed++
+        return { models: [] }
+      },
+      chat: async (request: (typeof asked)[number]) => {
+        asked.push(request)
+        return { message: { role: 'assistant', content } }
+      },
+    }
+    return { c, asked, listed: () => listed }
+  }
+
+  it('is known by its name', () => {
+    expect(isCloudModel('gemma4:31b-cloud')).toBe(true)
+    expect(isCloudModel('beam:cloud')).toBe(true)
+    expect(isCloudModel('gemma4:31b')).toBe(false)
+    expect(isCloudModel('cloudy:7b')).toBe(false)
+  })
+
+  it('is told the schema in the system prompt, and its fence is taken off the answer', async () => {
+    const { c, asked, listed } = answering('```json\n{"facts": ["a moat"]}\n```')
+    const reply = await c.chat(
+      [
+        { role: 'system', content: 'You remember things.' },
+        { role: 'user', content: 'The talk.' },
+      ],
+      { model: 'gemma4:31b-cloud', shared: true, format: schema }
+    )
+    expect(JSON.parse(reply.message.content)).toEqual({ facts: ['a moat'] })
+    expect(asked[0].messages[0].content).toContain('You remember things.')
+    expect(asked[0].messages[0].content).toContain(JSON.stringify(schema))
+    expect(asked[0].messages[1].content).toBe('The talk.')
+    expect(listed()).toBe(0)
+  })
+
+  it('a local model is asked as before', async () => {
+    const { c, asked } = answering('{"facts": []}')
+    const messages = [{ role: 'system', content: 'You remember things.' }]
+    await c.chat(messages, { model: 'big:31b', shared: true, format: schema })
+    expect(asked[0].messages).toEqual(messages)
+  })
+
+  it('answers are cut down to their JSON, and left alone when there is none', () => {
+    expect(jsonContent('{"a": 1}')).toBe('{"a": 1}')
+    expect(jsonContent('```\n{"a": 1}\n```')).toBe('{"a": 1}')
+    expect(jsonContent('Here it is: {"a": {"b": 2}} as asked.')).toBe('{"a": {"b": 2}}')
+    expect(jsonContent('No JSON here.')).toBe('No JSON here.')
+  })
+
+  it('a prompt without a system message gets one', () => {
+    const messages = withFormatNote([{ role: 'user', content: 'Hi' }], 'json')
+    expect(messages.map((m) => m.role)).toEqual(['system', 'user'])
+    expect(messages[0].content).toContain('valid JSON')
   })
 })
 
